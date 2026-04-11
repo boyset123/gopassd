@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd gopassweb && npm run build:web",
+  "installCommand": "cd gopassweb && npm install",
+  "outputDirectory": "gopassweb/dist",
+  "framework": null
+}

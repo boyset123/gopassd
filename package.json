@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "expo-device": "^8.0.10",
+    "expo-linear-gradient": "^15.0.7",
+    "firebase": "^12.7.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "eslint": "^9.39.2",
+    "eslint-config-expo": "^10.0.0",
+    "typescript": "~5.9.2"
+  }
+}

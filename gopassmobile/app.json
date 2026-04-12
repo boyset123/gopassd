@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "GoPass Dorsu",
-    "slug": "GoPass Dorsu",
+    "slug": "gopass-dorsu",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/gopass.jpg",
@@ -48,7 +48,10 @@
       "reactCompiler": true
     },
     "extra": {
-      "router": {}
+      "router": {},
+      "eas": {
+        "projectId": "45b22258-62df-480f-920e-0f99e321ff8e"
+      }
     }
   }
 }

@@ -17,7 +17,6 @@
         "foregroundImage": "./assets/images/gopass.jpg"
       },
       "package": "com.anonymous.gopassmobile",
-      "googleServicesFile": "./google-services.json",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },

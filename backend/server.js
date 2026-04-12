@@ -10,14 +10,33 @@ const travelOrderRoutes = require('./routes/travelOrderRoutes');
 const recordsRoutes = require('./routes/recordsRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const admin = require('firebase-admin');
-const serviceAccount = require('./serviceAccountKey.json');
+const fs = require('fs');
 const http = require('http');
 const { Server } = require('socket.io');
 const cron = require('node-cron');
 const User = require('./models/User');
 
+function loadServiceAccount() {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (raw && String(raw).trim()) {
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      console.error('FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON:', e.message);
+      throw e;
+    }
+  }
+  const keyPath = path.join(__dirname, 'serviceAccountKey.json');
+  if (fs.existsSync(keyPath)) {
+    return JSON.parse(fs.readFileSync(keyPath, 'utf8'));
+  }
+  throw new Error(
+    'Firebase admin: set FIREBASE_SERVICE_ACCOUNT_JSON in the environment, or add serviceAccountKey.json for local dev.'
+  );
+}
+
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(loadServiceAccount())
 });
 
 const app = express();

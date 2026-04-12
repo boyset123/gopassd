@@ -1,0 +1,10 @@
+# Optional: in Render → New → Blueprint, connect this repo and apply.
+# Then set environment variables in the Render dashboard (see Render service → Environment).
+services:
+  - type: web
+    name: gopassdorsu-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /

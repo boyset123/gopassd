@@ -10,6 +10,13 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { API_URL } from '../../config/api';
 
+function resolveProfilePictureUri(pathOrUrl: string, apiUrl: string): string {
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  const origin = apiUrl.replace(/\/api\/?$/, '');
+  const path = pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
+  return `${origin}${path}`;
+}
+
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
 
@@ -313,7 +320,7 @@ export default function ProfileScreen() {
               <View style={styles.profilePictureContainer}>
                 {user?.profilePicture ? (
                   <Image
-                    source={{ uri: `${API_URL.replace('/api', '')}${user.profilePicture}` }}
+                    source={{ uri: resolveProfilePictureUri(user.profilePicture, API_URL) }}
                     style={styles.profilePicture}
                   />
                 ) : (

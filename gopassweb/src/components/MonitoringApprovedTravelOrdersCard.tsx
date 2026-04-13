@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, Image } from 'react-native';
 import { API_BASE_URL } from '../config/api';
+import { profilePictureUri } from '../utils/profilePictureUri';
 import { FEATURE_CTC_ENABLED } from '../config/featureFlags';
 
 interface Employee {
@@ -93,9 +94,11 @@ export default function MonitoringApprovedTravelOrdersCard(props: MonitoringAppr
               <View style={[(styles as any).monitoringColEmployee, colFit, { flexDirection: 'row', alignItems: 'center' }]}>
                 <Image
                   source={{
-                    uri: item.employee?.profilePicture
-                      ? `${API_BASE_URL}${item.employee.profilePicture}`
-                      : 'https://via.placeholder.com/48',
+                    uri: profilePictureUri(
+                      item.employee?.profilePicture,
+                      API_BASE_URL,
+                      'https://via.placeholder.com/48'
+                    ),
                   }}
                   style={{ width: 32, height: 32, borderRadius: 16, marginRight: 10, backgroundColor: '#f1f5f9' }}
                 />

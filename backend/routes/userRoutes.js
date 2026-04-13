@@ -3,29 +3,14 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { verifyRecaptchaResponse } = require('../utils/recaptcha');
+const { isConfigured, uploadProfileImage } = require('../lib/cloudinaryProfile');
 
-// --- Multer Setup for File Uploads ---
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadPath = path.join(__dirname, '..', 'uploads');
-    // Create uploads directory if it doesn't exist
-    if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
-    }
-    cb(null, uploadPath);
-  },
-  filename: function (req, file, cb) {
-    cb(null, `${req.user.userId}-${Date.now()}${path.extname(file.originalname)}`);
-  }
-});
-
-const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 1024 * 1024 * 5 }, // 5MB limit
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1024 * 1024 * 5 },
   fileFilter: function (req, file, cb) {
     const filetypes = /jpeg|jpg|png/;
     const mimetype = filetypes.test(file.mimetype);
@@ -33,9 +18,19 @@ const upload = multer({
     if (mimetype && extname) {
       return cb(null, true);
     }
-    cb('Error: File upload only supports the following filetypes - ' + filetypes);
-  }
+    cb(new Error('File upload only supports the following filetypes - ' + filetypes));
+  },
 });
+
+function requireCloudinaryProfileUpload(req, res, next) {
+  if (!isConfigured()) {
+    return res.status(503).json({
+      message:
+        'Profile picture upload is not configured. Set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.',
+    });
+  }
+  next();
+}
 
 // User login
 router.post('/login', async (req, res) => {
@@ -112,46 +107,51 @@ router.get('/me', auth, async (req, res) => {
   }
 });
 
-// Upload profile picture
-router.post('/me/profile-picture', auth, upload.single('profilePicture'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'No file uploaded.' });
-    }
-
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Construct the URL path for the image
-    user.profilePicture = `/uploads/${req.file.filename}`;
-    const filePath = user.profilePicture;
-    await user.save();
-
-    res.json({
-      message: 'Profile picture uploaded successfully',
-      filePath: filePath,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        campus: user.campus,
-        role: user.role,
-        faculty: user.faculty,
-        createdAt: user.createdAt,
-        profilePicture: user.profilePicture,
-        passSlipMinutes: user.passSlipMinutes
+// Upload profile picture (stored on Cloudinary; DB holds secure_url)
+router.post(
+  '/me/profile-picture',
+  auth,
+  requireCloudinaryProfileUpload,
+  upload.single('profilePicture'),
+  async (req, res) => {
+    try {
+      if (!req.file?.buffer) {
+        return res.status(400).json({ message: 'No file uploaded.' });
       }
-    });
-  } catch (error) {
-    console.error('Profile picture upload error:', error);
-    res.status(500).json({ message: 'Server error during file upload' });
+
+      const user = await User.findById(req.user.userId);
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      const result = await uploadProfileImage(req.file.buffer, String(req.user.userId));
+      user.profilePicture = result.secure_url;
+      await user.save();
+
+      res.json({
+        message: 'Profile picture uploaded successfully',
+        filePath: user.profilePicture,
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          campus: user.campus,
+          role: user.role,
+          faculty: user.faculty,
+          createdAt: user.createdAt,
+          profilePicture: user.profilePicture,
+          passSlipMinutes: user.passSlipMinutes,
+        },
+      });
+    } catch (error) {
+      console.error('Profile picture upload error:', error);
+      res.status(500).json({ message: 'Server error during file upload' });
+    }
+  },
+  (error, req, res, next) => {
+    res.status(400).json({ message: error.message || 'Upload failed' });
   }
-}, (error, req, res, next) => {
-  // This is an error handling middleware for multer
-  res.status(400).json({ message: error.message });
-});
+);
 
 // Update user's name
 router.put('/me/name', auth, async (req, res) => {

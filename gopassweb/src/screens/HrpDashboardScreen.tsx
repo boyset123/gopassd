@@ -21,6 +21,7 @@ import TravelOrderFormWeb from '../components/TravelOrderFormWeb';
 import MonitoringApprovedTravelOrdersCard, { ApprovedTravelOrder } from '../components/MonitoringApprovedTravelOrdersCard';
 import HrpReportsAnalytics from '../components/HrpReportsAnalytics';
 import { styles } from './HrpDashboardScreen.styles';
+import { profilePictureUri } from '../utils/profilePictureUri';
 
 // --- Type Definitions ---
 interface Employee {
@@ -646,7 +647,9 @@ const HrpDashboardScreen = () => {
       onHoverOut={() => setHoveredRow(null)}
     >
       <Image 
-        source={{ uri: item.employee?.profilePicture ? `${API_BASE_URL}${item.employee.profilePicture}` : 'https://via.placeholder.com/150' }} 
+        source={{
+          uri: profilePictureUri(item.employee?.profilePicture, API_BASE_URL, 'https://via.placeholder.com/150'),
+        }} 
         style={styles.profilePicture} 
       />
       <View style={styles.itemHeaderText}>

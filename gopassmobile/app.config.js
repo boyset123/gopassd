@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * EAS Build: file env `GOOGLE_SERVICES_JSON` (Preview) → path on the builder.
+ * EAS Build: file env `GOOGLE_SERVICES_JSON` (Development) → path on the builder.
  * Local: optional ./google-services.json (gitignored).
  * @see https://docs.expo.dev/eas/environment-variables/faq/
  */
@@ -15,7 +15,7 @@ function assertFirebaseAndroidGoogleServices(resolvedPath) {
     parsed = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
   } catch {
     throw new Error(
-      `[app.config] "${resolvedPath}" is not valid JSON. Re-upload GOOGLE_SERVICES_JSON on EAS (Preview) with Firebase → Project settings → Your apps → Android → google-services.json.`
+      `[app.config] "${resolvedPath}" is not valid JSON. Re-upload GOOGLE_SERVICES_JSON on EAS (Development) with Firebase → Project settings → Your apps → Android → google-services.json.`
     );
   }
   if (typeof parsed !== 'object' || parsed === null) {
@@ -24,7 +24,7 @@ function assertFirebaseAndroidGoogleServices(resolvedPath) {
   if (parsed.type === 'service_account') {
     throw new Error(
       '[app.config] GOOGLE_SERVICES_JSON points to a Service Account key (admin SDK), not an Android client file. ' +
-        'On expo.dev delete this variable, then add a new one: type FILE, name GOOGLE_SERVICES_JSON, environment Preview, ' +
+        'On expo.dev delete this variable, then add a new one: type FILE, name GOOGLE_SERVICES_JSON, environment Development, ' +
         'value = file downloaded from Firebase → Project settings → Your apps → Android app (package com.anonymous.gopassmobile) → google-services.json. ' +
         'That file must contain "project_info", not "private_key".'
     );
@@ -49,7 +49,7 @@ module.exports = ({ config }) => {
   if (fromEnvRaw && fromEnvRaw.startsWith('{')) {
     throw new Error(
       '[app.config] GOOGLE_SERVICES_JSON must be an Expo variable of type FILE (upload the file). ' +
-        'Do not paste JSON into a string/sensitive variable. expo.dev → Environment variables → remove wrong entry → Add → FILE → Preview.'
+        'Do not paste JSON into a string/sensitive variable. expo.dev → Environment variables → remove wrong entry → Add → FILE → Development.'
     );
   }
 

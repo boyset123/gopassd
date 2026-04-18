@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, Pressable, Platform, ImageBackground, Alert, ActivityIndicator, Image, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, TextInput, Pressable, Platform, ImageBackground, ActivityIndicator, Image, ScrollView } from 'react-native';
 import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 import { LinearGradient } from 'expo-linear-gradient';
 import axios, { AxiosError } from 'axios';
@@ -10,6 +10,7 @@ const image = require('../../assets/dorsubg3.jpg');
 import { API_URL } from '../config/api';
 import { RECAPTCHA_SITE_KEY } from '../config/recaptcha';
 import LoginRecaptcha from '../components/LoginRecaptcha';
+import { getWebInitialRouteForRole, isWebAllowedRole } from '../config/webAuth';
 
 // Theme: #fece00 (yellow), darker blue, #ffffff (white) - match HrpDashboardScreen
 const theme = {
@@ -64,20 +65,19 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         ...(recaptchaToken ? { recaptchaToken } : {}),
       });
 
-      await AsyncStorage.setItem('userToken', response.data.token);
-      await AsyncStorage.setItem('userRole', response.data.user.role);
-
       const userRole = response.data.user.role;
 
-      if (userRole === 'Human Resource Personnel') {
-        navigation.replace('HrpDashboard');
-      } else if (userRole === 'Security Personnel') {
-        navigation.replace('SecurityDashboard');
-      } else if (userRole === 'admin' || userRole.includes('Staff') || userRole.includes('Head') || userRole.includes('Dean')) {
-        navigation.replace('Admin');
-      } else {
-        Alert.alert('Login Failed', 'You do not have permission to access this application.');
+      if (!isWebAllowedRole(userRole)) {
+        setError('Only administrators and HR personnel can sign in to the web application.');
+        setRecaptchaToken(null);
+        setCaptchaResetKey((k) => k + 1);
+        return;
       }
+
+      await AsyncStorage.setItem('userToken', response.data.token);
+      await AsyncStorage.setItem('userRole', userRole);
+
+      navigation.replace(getWebInitialRouteForRole(userRole));
       
     } catch (error: any) {
       console.error('Login error:', error);

@@ -10,6 +10,7 @@ import { API_URL } from '../config/api';
 // --- Type Definitions ---
 type RootStackParamList = {
   Login: undefined;
+  Admin: undefined;
   HrpDashboard: undefined;
   SecurityDashboard: undefined;
   Profile: undefined;
@@ -86,7 +87,14 @@ const ProfileScreen = () => {
             <Text style={[styles.logo, isCompact && styles.logoTextCompact]}>GoPass DOrSU</Text>
           </View>
           <View style={[styles.nav, isNarrow && styles.navMobile]}>
-            <Pressable style={[styles.navItem, isNarrow && styles.navItemMobile]} onPress={() => navigation.navigate(userRole === 'Human Resource Personnel' ? 'HrpDashboard' : 'SecurityDashboard')}>
+            <Pressable
+              style={[styles.navItem, isNarrow && styles.navItemMobile]}
+              onPress={() =>
+                navigation.navigate(
+                  userRole === 'Human Resource Personnel' ? 'HrpDashboard' : userRole === 'admin' ? 'Admin' : 'Login'
+                )
+              }
+            >
               <Text style={styles.navText}>Dashboard</Text>
             </Pressable>
             <Pressable style={[styles.navItem, styles.activeNavItem, isNarrow && styles.navItemMobile]}>

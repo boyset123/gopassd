@@ -24,7 +24,7 @@ const AdminScreen: React.FC<Props> = ({ navigation }) => {
   const [activeNav, setActiveNav] = useState('Dashboard');
 
   const handleLogout = async () => {
-    await AsyncStorage.removeItem('userToken');
+    await AsyncStorage.multiRemove(['userToken', 'userRole']);
     navigation.replace('Login');
   };
 

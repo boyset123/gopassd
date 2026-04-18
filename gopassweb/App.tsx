@@ -11,6 +11,7 @@ import HrpDashboardScreen from './src/screens/HrpDashboardScreen';
 import SecurityDashboardScreen from './src/screens/SecurityDashboardScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import { SocketProvider } from './src/config/SocketContext';
+import { getWebInitialRouteForRole, isWebAllowedRole } from './src/config/webAuth';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 const Stack = createStackNavigator();
@@ -37,7 +38,12 @@ const App = () => {
         const token = await AsyncStorage.getItem('userToken');
         const role = await AsyncStorage.getItem('userRole');
         if (token && role) {
-          setUserRole(role);
+          if (isWebAllowedRole(role)) {
+            setUserRole(role);
+          } else {
+            await AsyncStorage.multiRemove(['userToken', 'userRole']);
+            setUserRole(null);
+          }
         }
       } catch (e) {
         console.error('Failed to load token.', e);
@@ -62,7 +68,7 @@ const App = () => {
     <SocketProvider>
       <NavigationContainer>
         <Stack.Navigator 
-        initialRouteName={userRole ? (userRole === 'Human Resource Personnel' ? 'HrpDashboard' : userRole === 'Security Personnel' ? 'SecurityDashboard' : 'Admin') : 'Login'}
+        initialRouteName={userRole ? getWebInitialRouteForRole(userRole) : 'Login'}
         screenOptions={{ headerShown: false }}
       >
         <Stack.Screen name="Login" component={LoginScreen} />

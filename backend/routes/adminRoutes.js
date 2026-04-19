@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { verifyRecaptchaResponse } = require('../utils/recaptcha');
 
 // Middleware to check if user is admin
 const auth = async (req, res, next) => {
@@ -30,15 +29,7 @@ const auth = async (req, res, next) => {
 // Admin login (same as user login but checks for admin role)
 router.post('/login', async (req, res) => {
   try {
-    const { email, password, recaptchaToken } = req.body;
-
-    const captcha = await verifyRecaptchaResponse(
-      recaptchaToken,
-      req.ip || req.connection?.remoteAddress
-    );
-    if (!captcha.ok) {
-      return res.status(400).json({ message: captcha.message || 'CAPTCHA verification failed.' });
-    }
+    const { email, password } = req.body;
 
     // Check if user exists and is admin
     const user = await User.findOne({ email, role: 'admin' });

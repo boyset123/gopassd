@@ -7,8 +7,6 @@ import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 const image = require('../assets/images/dorsu_bg.jpg');
 import { API_URL } from '../config/api';
-import { RECAPTCHA_SITE_KEY } from '../config/recaptcha';
-import LoginRecaptcha from '../components/LoginRecaptcha';
 
 // Theme aligned with `gopassweb/src/screens/LoginScreen.tsx`
 const theme = {
@@ -26,17 +24,11 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
-  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const router = useRouter();
 
   const handleLogin = async () => {
     if (!email || !password) {
       setError('Please enter both email and password.');
-      return;
-    }
-    if (RECAPTCHA_SITE_KEY && !recaptchaToken) {
-      setError('Please complete the CAPTCHA verification.');
       return;
     }
     setError('');
@@ -45,7 +37,6 @@ export default function LoginScreen() {
       const response = await axios.post(`${API_URL}/users/login`, {
         email,
         password,
-        ...(recaptchaToken ? { recaptchaToken } : {}),
       });
       const { token, user } = response.data;
       await AsyncStorage.setItem('userToken', token);
@@ -72,8 +63,6 @@ export default function LoginScreen() {
         }
       }
       setError(errorMessage);
-      setRecaptchaToken(null);
-      setCaptchaResetKey((k) => k + 1);
     } finally {
       setIsLoading(false);
     }
@@ -188,14 +177,6 @@ export default function LoginScreen() {
                   </Pressable>
                 </View>
               </View>
-
-              {RECAPTCHA_SITE_KEY ? (
-                <LoginRecaptcha
-                  key={captchaResetKey}
-                  siteKey={RECAPTCHA_SITE_KEY}
-                  onVerify={setRecaptchaToken}
-                />
-              ) : null}
 
               <Pressable
                 style={({ pressed }) => [styles.primaryButton, (pressed || isLoading) && styles.primaryButtonPressed]}

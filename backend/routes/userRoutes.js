@@ -5,7 +5,6 @@ const multer = require('multer');
 const path = require('path');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
-const { verifyRecaptchaResponse } = require('../utils/recaptcha');
 const { isConfigured, uploadProfileImage } = require('../lib/cloudinaryProfile');
 
 const upload = multer({
@@ -35,15 +34,7 @@ function requireCloudinaryProfileUpload(req, res, next) {
 // User login
 router.post('/login', async (req, res) => {
   try {
-    const { email, password, recaptchaToken } = req.body;
-
-    const captcha = await verifyRecaptchaResponse(
-      recaptchaToken,
-      req.ip || req.connection?.remoteAddress
-    );
-    if (!captcha.ok) {
-      return res.status(400).json({ message: captcha.message || 'CAPTCHA verification failed.' });
-    }
+    const { email, password } = req.body;
 
     // Check if user exists
     const user = await User.findOne({ email });

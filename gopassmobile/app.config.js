@@ -37,12 +37,26 @@ function assertFirebaseAndroidGoogleServices(resolvedPath) {
   }
 }
 
+/**
+ * Google Maps (react-native-maps): standalone / dev-client builds need native API keys or the map shows
+ * "API key not found". Set one or both env vars, then rebuild the native app (not just reload JS).
+ * @see https://docs.expo.dev/versions/latest/sdk/map-view/#deploy-app-with-google-maps
+ *
+ * - GOOGLE_MAPS_ANDROID_API_KEY — Android (Maps SDK for Android)
+ * - GOOGLE_MAPS_IOS_API_KEY — iOS (Maps SDK for iOS), if you use Google as the map provider on iOS
+ * - GOOGLE_MAPS_API_KEY — optional fallback for both when the platform-specific vars are unset
+ */
 /** @param {{ config: import('expo/config').ExpoConfig }} ctx */
 module.exports = ({ config }) => {
   const android = config.android;
-  if (!android) {
-    return config;
-  }
+  const ios = config.ios;
+
+  const androidMapsKey =
+    process.env.GOOGLE_MAPS_ANDROID_API_KEY?.trim() ||
+    process.env.GOOGLE_MAPS_API_KEY?.trim();
+  const iosMapsKey =
+    process.env.GOOGLE_MAPS_IOS_API_KEY?.trim() ||
+    process.env.GOOGLE_MAPS_API_KEY?.trim();
 
   const fromEnvRaw = process.env.GOOGLE_SERVICES_JSON?.trim();
   // EAS FILE vars are a filesystem path. A string that starts with "{" is almost always a mis-set plain-text var.
@@ -63,17 +77,55 @@ module.exports = ({ config }) => {
       : undefined;
 
   if (googleServicesFile) {
+    if (!android) {
+      throw new Error('[app.config] GOOGLE_SERVICES_JSON is set but expo config has no android block.');
+    }
     const resolved = path.isAbsolute(googleServicesFile)
       ? googleServicesFile
       : path.join(__dirname, googleServicesFile);
     assertFirebaseAndroidGoogleServices(resolved);
   }
 
+  const nextAndroid =
+    android &&
+    (() => {
+      const base = {
+        ...android,
+        ...(googleServicesFile ? { googleServicesFile } : {}),
+      };
+      if (!androidMapsKey) {
+        return base;
+      }
+      return {
+        ...base,
+        config: {
+          ...(android.config || {}),
+          googleMaps: {
+            ...(android.config?.googleMaps || {}),
+            apiKey: androidMapsKey,
+          },
+        },
+      };
+    })();
+
+  const nextIos =
+    ios &&
+    (() => {
+      if (!iosMapsKey) {
+        return ios;
+      }
+      return {
+        ...ios,
+        config: {
+          ...(ios.config || {}),
+          googleMapsApiKey: iosMapsKey,
+        },
+      };
+    })();
+
   return {
     ...config,
-    android: {
-      ...android,
-      ...(googleServicesFile ? { googleServicesFile } : {}),
-    },
+    ...(nextAndroid ? { android: nextAndroid } : {}),
+    ...(nextIos ? { ios: nextIos } : {}),
   };
 };

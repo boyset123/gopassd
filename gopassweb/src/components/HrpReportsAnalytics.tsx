@@ -36,15 +36,7 @@ export type HrpReportsAnalyticsProps = {
   records: RecordLike[];
 };
 
-const campuses = [
-  'All Campuses',
-  'Main Campus',
-  'Baganga Campus',
-  'Banaybanay Campus',
-  'Cateel Campus',
-  'San Isidro Campus',
-  'Tarragona Campus',
-];
+const normalizeText = (value?: string) => (value || '').trim().toLowerCase();
 
 type Filters = {
   campus: string;
@@ -83,6 +75,14 @@ const formatCsvDate = (dateString?: string) => {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD
 };
 
+// Keep dates as plain text in Excel CSV import/open.
+// This avoids "#######" rendering in narrow columns caused by Excel date formatting.
+const formatExcelCsvDateText = (dateString?: string) => {
+  const value = formatCsvDate(dateString);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `'${value}`;
+  return value;
+};
+
 const getRecordTypeLabel = (r: RecordLike) => ('destination' in r && r.destination ? 'Pass Slip' : 'Travel Order');
 
 const escapeCsv = (value: string) => {
@@ -99,9 +99,11 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
 
   const [filtersDraft, setFiltersDraft] = useState<Filters>(defaultFilters);
   const [filtersApplied, setFiltersApplied] = useState<Filters>(defaultFilters);
+  const [filterActionMessage, setFilterActionMessage] = useState<string>('');
 
   const { width } = useWindowDimensions();
   const isNarrow = width < 900;
+  const isVeryNarrow = width < 640;
 
   // IMPORTANT:
   // `select`/`input[type="date"]` are DOM elements on web.
@@ -141,6 +143,16 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
     return arr;
   }, [records]);
 
+  const campusOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of records) {
+      const campusValue = (r.employee?.campus || '').trim();
+      if (campusValue) set.add(campusValue);
+    }
+    const arr = Array.from(set.values()).sort((a, b) => a.localeCompare(b));
+    return arr;
+  }, [records]);
+
   const officeOptions = useMemo(() => {
     const set = new Set<string>();
     for (const r of records) {
@@ -162,10 +174,11 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
       const recordType = getRecordTypeLabel(r);
       void recordType;
 
-      if (campus !== 'All Campuses' && r.employee?.campus !== campus) return false;
+      const campusValue = (r.employee?.campus || '').trim();
+      if (campus !== 'All Campuses' && normalizeText(campusValue) !== normalizeText(campus)) return false;
 
       const officeValue = (r.employee?.faculty || r.employee?.department || '').trim();
-      if (office !== 'All Faculties' && officeValue !== office) return false;
+      if (office !== 'All Faculties' && normalizeText(officeValue) !== normalizeText(office)) return false;
 
       const rid = r.employee?._id;
       if (userId !== 'All Users' && rid !== userId) return false;
@@ -234,6 +247,22 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
   const maxCampus = useMemo(() => Math.max(1, ...topByCampus.map((x) => x[1])), [topByCampus]);
   const maxOffice = useMemo(() => Math.max(1, ...topByOffice.map((x) => x[1])), [topByOffice]);
   const maxUser = useMemo(() => Math.max(1, ...topByUser.map((x) => x.count)), [topByUser]);
+  const activeFilterChips = useMemo(() => {
+    const chips: string[] = [];
+    if (filtersApplied.campus !== 'All Campuses') chips.push(`Campus: ${filtersApplied.campus}`);
+    if (filtersApplied.office !== 'All Faculties') chips.push(`Faculty: ${filtersApplied.office}`);
+    if (filtersApplied.userId !== 'All Users') {
+      const selectedUser = userOptions.find((u) => u.userId === filtersApplied.userId);
+      chips.push(`User: ${selectedUser?.label || filtersApplied.userId}`);
+    }
+    if (filtersApplied.fromDate || filtersApplied.toDate) {
+      const from = filtersApplied.fromDate || 'Any';
+      const to = filtersApplied.toDate || 'Any';
+      chips.push(`Date: ${from} to ${to}`);
+    }
+    return chips;
+  }, [filtersApplied, userOptions]);
+  const generatedAtLabel = useMemo(() => new Date().toLocaleString(), [filtersApplied]);
 
   let tableInnerContent: any = null;
   let tableInnerContentError: string | null = null;
@@ -350,7 +379,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
       const arrivalStatus = r.arrivalStatus || '—';
 
       return [
-        escapeCsv(formatCsvDate(r.date)),
+        escapeCsv(formatExcelCsvDateText(r.date)),
         escapeCsv(type),
         escapeCsv(employee),
         escapeCsv(campus),
@@ -375,10 +404,14 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
     window.URL.revokeObjectURL(url);
   };
 
-  const applyFilters = () => setFiltersApplied(filtersDraft);
+  const applyFilters = () => {
+    setFiltersApplied(filtersDraft);
+    setFilterActionMessage('Report generated using selected filters.');
+  };
   const resetFilters = () => {
     setFiltersDraft(defaultFilters);
     setFiltersApplied(defaultFilters);
+    setFilterActionMessage('Filters reset to default.');
   };
 
   if (!authChecked) {
@@ -400,33 +433,39 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
   try {
     return (
       <View style={styles.container}>
+      <View style={styles.pageShell}>
       <View style={[styles.headerRow, isNarrow && styles.headerRowNarrow]}>
         <View style={styles.headerLeft}>
           <Text style={styles.title}>Reports & Analytics</Text>
           <Text style={styles.subtitle}>Generate detailed HR reports by user, faculty, campus, and date range.</Text>
         </View>
         <View style={[styles.headerActions, isNarrow && styles.headerActionsNarrow]}>
-          <Pressable onPress={downloadCsv} style={styles.primaryBtn} accessibilityRole="button">
-            <View style={styles.primaryBtnIcon}>
-              <FontAwesome name="download" size={14} color="#fff" />
+          <View style={styles.headerPill}>
+            <Text style={styles.headerPillText}>{appliedFilteredRecords.length} records</Text>
+          </View>
+          <Pressable onPress={downloadCsv} style={[styles.primaryBtn, styles.exportBtn]} accessibilityRole="button">
+            <View style={[styles.primaryBtnIcon, styles.exportBtnIcon]}>
+              <FontAwesome name="download" size={14} color="#011a6b" />
             </View>
-            <Text style={styles.primaryBtnText}>Export CSV</Text>
+            <Text style={[styles.primaryBtnText, styles.exportBtnText]}>Export CSV</Text>
           </Pressable>
         </View>
       </View>
 
       <View style={styles.filtersCard}>
         <Text style={styles.filtersTitle}>Report Filters</Text>
+        <Text style={styles.filtersSubtitle}>Set filters below, then click Generate Report to refresh analytics and the detailed table.</Text>
 
         <View style={[styles.filtersGrid, isNarrow && styles.filtersGridNarrow]}>
-          <View style={[styles.filterGroup, isNarrow && styles.filterGroupNarrow]}>
+          <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
             <Text style={styles.filterLabel}>Campus</Text>
             <select
               value={filtersDraft.campus}
               onChange={(e) => setFiltersDraft((p) => ({ ...p, campus: e.target.value }))}
               style={selectStyle}
             >
-              {campuses.map((c) => (
+              <option value="All Campuses">All Campuses</option>
+              {campusOptions.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
@@ -434,7 +473,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
             </select>
           </View>
 
-          <View style={[styles.filterGroup, isNarrow && styles.filterGroupNarrow]}>
+          <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
             <Text style={styles.filterLabel}>Faculty</Text>
             <select
               value={filtersDraft.office}
@@ -450,7 +489,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
             </select>
           </View>
 
-          <View style={[styles.filterGroup, isNarrow && styles.filterGroupNarrow]}>
+          <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
             <Text style={styles.filterLabel}>User</Text>
             <select
               value={filtersDraft.userId}
@@ -466,7 +505,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
             </select>
           </View>
 
-          <View style={[styles.filterGroup, isNarrow && styles.filterGroupNarrow]}>
+          <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
             <Text style={styles.filterLabel}>Date Range</Text>
             <View style={styles.dateRow}>
               <input
@@ -486,17 +525,42 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
           </View>
         </View>
 
-        <View style={[styles.filterActions, isNarrow && styles.filterActionsNarrow]}>
-          <Pressable style={styles.primaryBtn} onPress={applyFilters}>
+        <View style={[styles.filterActions, isNarrow && styles.filterActionsNarrow, isVeryNarrow && styles.filterActionsVeryNarrow]}>
+          <Pressable style={[styles.primaryBtn, isVeryNarrow && styles.primaryBtnBlock]} onPress={applyFilters}>
             <View style={styles.primaryBtnIcon}>
               <FontAwesome name="cogs" size={14} color="#fff" />
             </View>
             <Text style={styles.primaryBtnText}>Generate Report</Text>
           </Pressable>
 
-          <Pressable style={styles.secondaryBtn} onPress={resetFilters}>
+          <Pressable style={[styles.secondaryBtn, isVeryNarrow && styles.secondaryBtnBlock]} onPress={resetFilters}>
             <Text style={styles.secondaryBtnText}>Reset</Text>
           </Pressable>
+        </View>
+        <View style={styles.appliedFiltersRow}>
+          <Text style={styles.appliedFiltersLabel}>Active filters:</Text>
+          {activeFilterChips.length ? (
+            <View style={styles.filterChipWrap}>
+              {activeFilterChips.map((chip) => (
+                <View key={chip} style={styles.filterChip}>
+                  <Text style={styles.filterChipText}>{chip}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.appliedFiltersNone}>None (showing all records)</Text>
+          )}
+        </View>
+        {!!filterActionMessage && <Text style={styles.filterActionMessage}>{filterActionMessage}</Text>}
+      </View>
+
+      <View style={styles.snapshotCard}>
+        <View>
+          <Text style={styles.snapshotTitle}>Report Snapshot</Text>
+          <Text style={styles.snapshotMeta}>Generated: {generatedAtLabel}</Text>
+        </View>
+        <View style={styles.snapshotCountPill}>
+          <Text style={styles.snapshotCountPillText}>{appliedFilteredRecords.length} result{appliedFilteredRecords.length === 1 ? '' : 's'}</Text>
         </View>
       </View>
 
@@ -629,6 +693,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
         )}
       </View>
       </View>
+      </View>
     );
   } catch (err) {
     // Prevent blank screen if something crashes during render.
@@ -649,6 +714,13 @@ const styles = StyleSheet.create({
   container: {
     // Let the parent `ScrollView` control height; avoid `flex: 1` inside scroll content.
     width: '100%',
+    backgroundColor: '#f8fafc',
+  },
+  pageShell: {
+    borderRadius: 18,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.08)',
     backgroundColor: '#f8fafc',
   },
   centered: {
@@ -696,11 +768,49 @@ const styles = StyleSheet.create({
   headerActions: {
     minWidth: 180,
     alignItems: 'flex-end',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 8 as any,
   },
   headerActionsNarrow: {
     minWidth: 0,
     marginTop: 10,
     alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+  },
+  headerPill: {
+    backgroundColor: 'rgba(255,255,255,0.20)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    marginRight: 8,
+    marginBottom: 6,
+  },
+  headerPillText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  exportBtn: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.25)',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 8px 18px rgba(1,26,107,0.18)',
+      },
+    }),
+  },
+  exportBtnIcon: {
+    backgroundColor: 'rgba(1,26,107,0.10)',
+    borderRadius: 999,
+  },
+  exportBtnText: {
+    color: '#011a6b',
+    fontWeight: '900',
   },
   filtersCard: {
     backgroundColor: '#fff',
@@ -724,6 +834,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     color: '#011a6b',
+    marginBottom: 6,
+  },
+  filtersSubtitle: {
+    fontSize: 12,
+    color: 'rgba(1,26,107,0.65)',
+    fontWeight: '600',
     marginBottom: 14,
   },
   filtersGrid: {
@@ -738,6 +854,13 @@ const styles = StyleSheet.create({
     minWidth: 220,
     marginRight: 12,
     marginBottom: 10,
+  },
+  filterGroupCard: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.12)',
+    padding: 10,
   },
   filterGroupNarrow: {
     minWidth: '100%' as any,
@@ -797,11 +920,108 @@ const styles = StyleSheet.create({
   filterActions: {
     flexDirection: 'row',
     justifyContent: 'flex-start',
-    marginTop: 6,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(1,26,107,0.10)',
   },
   filterActionsNarrow: {
     justifyContent: 'flex-start',
     flexWrap: 'wrap',
+  },
+  filterActionsVeryNarrow: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
+  primaryBtnBlock: {
+    justifyContent: 'center',
+  },
+  appliedFiltersRow: {
+    marginTop: 10,
+  },
+  appliedFiltersLabel: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: 'rgba(1,26,107,0.70)',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+    letterSpacing: 0.2,
+  },
+  appliedFiltersNone: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(1,26,107,0.62)',
+  },
+  filterChipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  filterChip: {
+    marginRight: 8,
+    marginBottom: 8,
+    backgroundColor: 'rgba(1,26,107,0.08)',
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.16)',
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#011a6b',
+  },
+  filterActionMessage: {
+    marginTop: 10,
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(1,26,107,0.72)',
+  },
+  secondaryBtnBlock: {
+    marginLeft: 0,
+    marginTop: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  snapshotCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.14)',
+    padding: 14,
+    marginBottom: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 8px 20px rgba(1,26,107,0.06)',
+      },
+    }),
+  },
+  snapshotTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#011a6b',
+    marginBottom: 4,
+  },
+  snapshotMeta: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(1,26,107,0.66)',
+  },
+  snapshotCountPill: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(1,26,107,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.16)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  snapshotCountPillText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#011a6b',
   },
   primaryBtn: {
     flexDirection: 'row',

@@ -63,6 +63,7 @@ export default function ProfileScreen() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isLogoutConfirmModalVisible, setLogoutConfirmModalVisible] = useState(false);
 
   const fetchUserData = useCallback(async () => {
     try {
@@ -140,9 +141,22 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleLogout = async () => {
+  const performLogout = async () => {
     await AsyncStorage.removeItem('userToken');
     router.replace('/');
+  };
+
+  const handleLogout = () => {
+    setLogoutConfirmModalVisible(true);
+  };
+
+  const cancelLogout = () => {
+    setLogoutConfirmModalVisible(false);
+  };
+
+  const confirmLogout = () => {
+    setLogoutConfirmModalVisible(false);
+    void performLogout();
   };
 
   const handleChoosePhoto = async () => {
@@ -307,6 +321,31 @@ export default function ProfileScreen() {
               </Pressable>
               <Pressable style={[styles.modalButton, styles.saveButton]} onPress={handleChangePassword} disabled={isUpdating}>
                 {isUpdating ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Save</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Logout Confirmation Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={isLogoutConfirmModalVisible}
+        onRequestClose={cancelLogout}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Confirm Logout</Text>
+            <Text style={styles.logoutConfirmText}>
+              Are you sure you want to log out? You will need to sign in again to continue.
+            </Text>
+            <View style={styles.modalButtonContainer}>
+              <Pressable style={[styles.modalButton, styles.logoutStayButton]} onPress={cancelLogout}>
+                <Text style={styles.modalButtonText}>Stay Logged In</Text>
+              </Pressable>
+              <Pressable style={[styles.modalButton, styles.logoutConfirmButton]} onPress={confirmLogout}>
+                <Text style={styles.modalButtonText}>Logout</Text>
               </Pressable>
             </View>
           </View>
@@ -682,6 +721,19 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     backgroundColor: theme.primary,
+  },
+  logoutConfirmText: {
+    fontSize: 15,
+    color: theme.textMuted,
+    textAlign: 'center',
+    marginBottom: 6,
+    lineHeight: 21,
+  },
+  logoutConfirmButton: {
+    backgroundColor: '#b42318',
+  },
+  logoutStayButton: {
+    backgroundColor: '#6b7280',
   },
   modalButtonText: {
     color: '#fff',

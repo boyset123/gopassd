@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, SafeAreaView, Platform, Image, TextInput } from 'react-native';
 import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 import axios from 'axios';
@@ -17,9 +17,11 @@ import { API_URL, API_BASE_URL } from '../config/api';
 import { FEATURE_CTC_ENABLED } from '../config/featureFlags';
 import { useSocket } from '../config/SocketContext';
 import { getTravelOrderPrintHtml } from '../utils/travelOrderPrintHtml';
+import { getPassSlipPrintHtml } from '../utils/passSlipPrintHtml';
 import TravelOrderFormWeb from '../components/TravelOrderFormWeb';
 import MonitoringApprovedTravelOrdersCard, { ApprovedTravelOrder } from '../components/MonitoringApprovedTravelOrdersCard';
 import HrpReportsAnalytics from '../components/HrpReportsAnalytics';
+import PassSlipTrackerScreen from './PassSlipTrackerScreen';
 import { styles } from './HrpDashboardScreen.styles';
 import { profilePictureUri } from '../utils/profilePictureUri';
 
@@ -96,6 +98,7 @@ type MonitoringPassSlip = PassSlip & { type: 'slip' };
 type MonitoringItem = MonitoringPassSlip;
 
 type ItemType = 'slip' | 'order';
+type DashboardView = 'dashboard' | 'records' | 'reports' | 'monitoring' | 'passSlipTracker';
 
 type RootStackParamList = {
   Login: undefined;
@@ -123,6 +126,73 @@ const formatDateLong = (dateString?: string) => {
     month: 'long',
     day: 'numeric',
     year: 'numeric',
+  });
+};
+
+const printHtmlInHiddenFrame = async (html: string): Promise<void> => {
+  await new Promise<void>((resolve, reject) => {
+    try {
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(iframe);
+
+      const frameWin = iframe.contentWindow;
+      if (!frameWin) {
+        document.body.removeChild(iframe);
+        reject(new Error('Print frame not available.'));
+        return;
+      }
+
+      const cleanup = () => {
+        try {
+          document.body.removeChild(iframe);
+        } catch {
+          // no-op
+        }
+      };
+
+      const waitForFrameImages = async (frameWin: Window, timeoutMs = 3000): Promise<void> => {
+        const startedAt = Date.now();
+        await new Promise<void>((imagesReadyResolve) => {
+          const check = () => {
+            const imgs = Array.from(frameWin.document.images || []);
+            const done = imgs.every((img) => img.complete);
+            if (done || Date.now() - startedAt >= timeoutMs) {
+              imagesReadyResolve();
+              return;
+            }
+            setTimeout(check, 80);
+          };
+          check();
+        });
+      };
+
+      const startPrint = async () => {
+        try {
+          await waitForFrameImages(frameWin);
+          frameWin.focus();
+          frameWin.print();
+          cleanup();
+          resolve();
+        } catch (err) {
+          cleanup();
+          reject(err instanceof Error ? err : new Error('Failed to print frame.'));
+        }
+      };
+
+      frameWin.document.open();
+      frameWin.document.write(html);
+      frameWin.document.close();
+      void startPrint();
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error('Failed to initialize print frame.'));
+    }
   });
 };
 
@@ -234,14 +304,18 @@ const HrpDashboardScreen = () => {
   const [campusFilter, setCampusFilter] = useState('All Campuses');
   const [facultyFilter, setFacultyFilter] = useState('All Faculties');
   const [fileTypeFilter, setFileTypeFilter] = useState('All');
+  const [recordsSearchQuery, setRecordsSearchQuery] = useState('');
+  const [recordsPageSize, setRecordsPageSize] = useState(25);
+  const [recordsCurrentPage, setRecordsCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const navigation = useNavigation<HrpDashboardNavigationProp>();
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<PassSlip | TravelOrder | MonitoringItem | null>(null);
   const [selectedItemType, setSelectedItemType] = useState<ItemType | null>(null);
-  const [activeView, setActiveView] = useState('dashboard');
+  const [activeView, setActiveView] = useState<DashboardView>('dashboard');
   const [monitoringSubView, setMonitoringSubView] = useState<'slip' | 'order'>('slip');
+  const [isMonitoringExpanded, setIsMonitoringExpanded] = useState(true);
   const [name, setName] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -261,10 +335,12 @@ const HrpDashboardScreen = () => {
   const [mapData, setMapData] = useState<{ lat: number; lon: number; polyline: Array<[number, number]> | null, startLat: number | null, startLon: number | null, startName: string | null, destName: string | null } | null>(null);
   const socket = useSocket();
   const [activeTab, setActiveTab] = useState<'slips' | 'orders'>('slips');
+  const [approvedPassSlips, setApprovedPassSlips] = useState<PassSlip[]>([]);
   const [presidentName, setPresidentName] = useState('');
   const [hrSignatureForPresident, setHrSignatureForPresident] = useState<string | null>(null);
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [rejectComment, setRejectComment] = useState('');
+  const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
   const [isCtcModalVisible, setIsCtcModalVisible] = useState(false);
   const [selectedCtcOrder, setSelectedCtcOrder] = useState<ApprovedTravelOrder | null>(null);
   /** Set when Travel Complete is pressed so the certificate date reflects that moment */
@@ -275,6 +351,17 @@ const HrpDashboardScreen = () => {
   /** Result after mark-complete API (replaces browser alert on web) */
   const [markCompleteFeedback, setMarkCompleteFeedback] = useState<{ variant: 'success' | 'error'; message: string } | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  const trackerPassSlips = useMemo<PassSlip[]>(() => {
+    const recordsPassSlips = records.filter((item): item is PassSlip => 'destination' in item);
+    const merged = [...approvedPassSlips, ...recordsPassSlips];
+    const byId = new Map<string, PassSlip>();
+    for (const slip of merged) {
+      if (!slip?._id) continue;
+      byId.set(String(slip._id), slip);
+    }
+    return Array.from(byId.values());
+  }, [approvedPassSlips, records]);
 
   const dismissMobileSidebar = useCallback(() => {
     if (isNarrow) setMobileSidebarOpen(false);
@@ -311,12 +398,13 @@ const HrpDashboardScreen = () => {
       const token = await AsyncStorage.getItem('userToken');
       const headers = { 'x-auth-token': token };
 
-      const [slipsResponse, ordersResponse, presidentApprovedOrdersResponse, verifiedSlipsResponse, approvedOrdersResponse] = await Promise.all([
+      const [slipsResponse, ordersResponse, presidentApprovedOrdersResponse, verifiedSlipsResponse, approvedOrdersResponse, approvedPassSlipsResponse] = await Promise.all([
         axios.get<PassSlip[]>(`${API_URL}/pass-slips/recommended`, { headers }),
         axios.get<TravelOrder[]>(`${API_URL}/travel-orders/recommended`, { headers }),
         axios.get<TravelOrder[]>(`${API_URL}/travel-orders/hr-approved`, { headers }), // Fetches President Approved orders
         axios.get<PassSlip[]>(`${API_URL}/pass-slips/verified-hr`, { headers }),
         axios.get<ApprovedTravelOrder[]>(`${API_URL}/travel-orders/approved`, { headers }),
+        axios.get<PassSlip[]>(`${API_URL}/pass-slips/hr-approved`, { headers }),
       ]);
 
       const allSlips = slipsResponse.data;
@@ -333,6 +421,7 @@ const HrpDashboardScreen = () => {
       setMonitoringApprovedTravelOrders(
         (approvedOrdersResponse.data || []).filter((o) => o.status === 'Approved')
       );
+      setApprovedPassSlips(approvedPassSlipsResponse.data || []);
 
       const recordsResponse = await axios.get(`${API_URL}/records`, { headers });
       setRecords(recordsResponse.data);
@@ -379,6 +468,7 @@ const HrpDashboardScreen = () => {
 
   useEffect(() => {
     let tempRecords = records;
+    const searchTerm = recordsSearchQuery.trim().toLowerCase();
 
     if (campusFilter && campusFilter !== 'All Campuses') {
       tempRecords = tempRecords.filter(r => r.employee.campus === campusFilter);
@@ -389,9 +479,42 @@ const HrpDashboardScreen = () => {
     if (fileTypeFilter !== 'All') {
       tempRecords = tempRecords.filter(r => ('destination' in r ? 'Pass Slip' : 'Travel Order') === fileTypeFilter);
     }
+    if (searchTerm) {
+      tempRecords = tempRecords.filter((r) => {
+        const typeLabel = 'destination' in r ? 'pass slip' : 'travel order';
+        const searchable = [
+          r.employee?.name || '',
+          r.employee?.campus || '',
+          r.employee?.faculty || '',
+          r.arrivalStatus || '',
+          r.purpose || '',
+          typeLabel,
+          'destination' in r ? r.destination || '' : '',
+          'trackingNo' in r ? r.trackingNo || '' : '',
+          'travelOrderNo' in r ? r.travelOrderNo || '' : '',
+        ]
+          .join(' ')
+          .toLowerCase();
+        return searchable.includes(searchTerm);
+      });
+    }
 
     setFilteredRecords(tempRecords);
-  }, [campusFilter, facultyFilter, fileTypeFilter, records]);
+    setRecordsCurrentPage(1);
+  }, [campusFilter, facultyFilter, fileTypeFilter, recordsSearchQuery, records]);
+
+  const totalRecordPages = Math.max(1, Math.ceil(filteredRecords.length / recordsPageSize));
+  const safeRecordsCurrentPage = Math.min(recordsCurrentPage, totalRecordPages);
+  const paginatedRecords = useMemo(() => {
+    const start = (safeRecordsCurrentPage - 1) * recordsPageSize;
+    return filteredRecords.slice(start, start + recordsPageSize);
+  }, [filteredRecords, safeRecordsCurrentPage, recordsPageSize]);
+
+  useEffect(() => {
+    if (recordsCurrentPage !== safeRecordsCurrentPage) {
+      setRecordsCurrentPage(safeRecordsCurrentPage);
+    }
+  }, [recordsCurrentPage, safeRecordsCurrentPage]);
 
   useEffect(() => {
     const fetchPresident = async () => {
@@ -496,14 +619,23 @@ const HrpDashboardScreen = () => {
     }
   };
 
-  const handleLogout = async () => {
+  const doLogout = async () => {
     dismissMobileSidebar();
     await AsyncStorage.multiRemove(['userToken', 'userRole']);
     navigation.replace('Login');
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handleLogout = () => {
+    setLogoutConfirmVisible(true);
+  };
+
+  const cancelLogout = () => {
+    setLogoutConfirmVisible(false);
+  };
+
+  const confirmLogout = () => {
+    setLogoutConfirmVisible(false);
+    void doLogout();
   };
 
   /** Print travel order in a new window with full-detail HTML (matches slips display) */
@@ -521,6 +653,26 @@ const HrpDashboardScreen = () => {
       win.print();
       win.close();
     }, 350);
+  };
+
+  /** Print pass slip in a dedicated A4 layout with 4 copies (2x2 grid). */
+  const handlePrintPassSlip = (item: PassSlip) => {
+    void (async () => {
+      try {
+        const html = getPassSlipPrintHtml(item);
+        await printHtmlInHiddenFrame(html);
+      } catch (error) {
+        try {
+          // Fallback print flow without logo if image resolution fails.
+          const html = getPassSlipPrintHtml(item);
+          await printHtmlInHiddenFrame(html);
+          console.error('Pass slip print fallback used:', error);
+        } catch (fallbackError) {
+          console.error('Pass slip printing failed:', fallbackError);
+          Alert.alert('Print Error', 'Unable to open print dialog. Please allow printing/popups and try again.');
+        }
+      }
+    })();
   };
 
   const openReviewModal = (item: PassSlip | TravelOrder | MonitoringItem, type: ItemType) => {
@@ -660,6 +812,18 @@ const HrpDashboardScreen = () => {
     </Pressable>
   );
 
+  const getNavItemStyle = (view: DashboardView) => ({ pressed }: { pressed: boolean }) => [
+    styles.navItem,
+    activeView === view && styles.activeNavItem,
+    pressed && styles.navItemPressed,
+  ];
+
+  const getSubNavItemStyle = (isActive: boolean) => ({ pressed }: { pressed: boolean }) => [
+    styles.subNavItem,
+    isActive && styles.subNavItemActive,
+    pressed && styles.subNavItemPressed,
+  ];
+
   return (
     <SafeAreaView style={styles.container}>
       {isNarrow && mobileSidebarOpen ? (
@@ -684,66 +848,76 @@ const HrpDashboardScreen = () => {
             <Text style={styles.logo}>GoPass DOrSU</Text>
           </View>
           <View style={styles.nav}>
+            <Text style={styles.navSectionLabel}>Main Menu</Text>
             <Pressable
-              style={[styles.navItem, activeView === 'dashboard' && styles.activeNavItem]}
+              style={getNavItemStyle('dashboard')}
               onPress={() => {
                 setActiveView('dashboard');
                 dismissMobileSidebar();
               }}
             >
               <View style={styles.navIcon}>
-                <FontAwesome name="th-large" size={20} color={activeView === 'dashboard' ? '#fff' : 'rgba(255,255,255,0.75)'} />
+                <FontAwesome name="th-large" size={20} color={activeView === 'dashboard' ? '#011a6b' : 'rgba(255,255,255,0.75)'} />
               </View>
               <Text style={[styles.navText, activeView === 'dashboard' && styles.activeNavText]}>Dashboard</Text>
             </Pressable>
             <Pressable
-              style={[styles.navItem, activeView === 'records' && styles.activeNavItem]}
+              style={getNavItemStyle('records')}
               onPress={() => {
                 setActiveView('records');
                 dismissMobileSidebar();
               }}
             >
               <View style={styles.navIcon}>
-                <FontAwesome name="folder-open-o" size={20} color={activeView === 'records' ? '#fff' : 'rgba(255,255,255,0.75)'} />
+                <FontAwesome name="folder-open-o" size={20} color={activeView === 'records' ? '#011a6b' : 'rgba(255,255,255,0.75)'} />
               </View>
               <Text style={[styles.navText, activeView === 'records' && styles.activeNavText]}>Records</Text>
             </Pressable>
             <Pressable
-              style={[styles.navItem, activeView === 'reports' && styles.activeNavItem]}
+              style={getNavItemStyle('reports')}
               onPress={() => {
                 setActiveView('reports');
                 dismissMobileSidebar();
               }}
             >
               <View style={styles.navIcon}>
-                <FontAwesome name="bar-chart" size={20} color={activeView === 'reports' ? '#fff' : 'rgba(255,255,255,0.75)'} />
+                <FontAwesome name="bar-chart" size={20} color={activeView === 'reports' ? '#011a6b' : 'rgba(255,255,255,0.75)'} />
               </View>
               <Text style={[styles.navText, activeView === 'reports' && styles.activeNavText]}>Reports</Text>
             </Pressable>
             <Pressable
-              style={[styles.navItem, activeView === 'monitoring' && styles.activeNavItem]}
+              style={getNavItemStyle('monitoring')}
               onPress={() => {
                 setActiveView('monitoring');
+                setIsMonitoringExpanded(true);
                 // default sub-view
                 if (!monitoringSubView) setMonitoringSubView('slip');
               }}
             >
               <View style={styles.navIcon}>
-                <FontAwesome name="map-marker" size={20} color={activeView === 'monitoring' ? '#fff' : 'rgba(255,255,255,0.75)'} />
+                <FontAwesome name="map-marker" size={20} color={activeView === 'monitoring' ? '#011a6b' : 'rgba(255,255,255,0.75)'} />
               </View>
               <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Text style={[styles.navText, activeView === 'monitoring' && styles.activeNavText]}>Monitoring</Text>
-                <FontAwesome
-                  name={activeView === 'monitoring' ? 'chevron-down' : 'chevron-right'}
-                  size={14}
-                  color={activeView === 'monitoring' ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.55)'}
-                />
+                <Pressable
+                  onPress={(event) => {
+                    event?.stopPropagation?.();
+                    setIsMonitoringExpanded((prev) => !prev);
+                  }}
+                  hitSlop={8}
+                >
+                  <FontAwesome
+                    name={isMonitoringExpanded ? 'chevron-down' : 'chevron-right'}
+                    size={14}
+                    color={activeView === 'monitoring' ? '#011a6b' : 'rgba(255,255,255,0.55)'}
+                  />
+                </Pressable>
               </View>
             </Pressable>
-            {activeView === 'monitoring' && (
+            {activeView === 'monitoring' && isMonitoringExpanded && (
               <View style={styles.subNav}>
                 <Pressable
-                  style={[styles.subNavItem, monitoringSubView === 'slip' && styles.subNavItemActive]}
+                  style={getSubNavItemStyle(monitoringSubView === 'slip')}
                   onPress={() => {
                     setActiveView('monitoring');
                     setMonitoringSubView('slip');
@@ -756,7 +930,7 @@ const HrpDashboardScreen = () => {
                   </View>
                 </Pressable>
                 <Pressable
-                  style={[styles.subNavItem, monitoringSubView === 'order' && styles.subNavItemActive]}
+                  style={getSubNavItemStyle(monitoringSubView === 'order')}
                   onPress={() => {
                     setActiveView('monitoring');
                     setMonitoringSubView('order');
@@ -770,10 +944,22 @@ const HrpDashboardScreen = () => {
                 </Pressable>
               </View>
             )}
+            <Pressable
+              style={getNavItemStyle('passSlipTracker')}
+              onPress={() => {
+                setActiveView('passSlipTracker');
+                dismissMobileSidebar();
+              }}
+            >
+              <View style={styles.navIcon}>
+                <FontAwesome name="table" size={20} color={activeView === 'passSlipTracker' ? '#011a6b' : 'rgba(255,255,255,0.75)'} />
+              </View>
+              <Text style={[styles.navText, activeView === 'passSlipTracker' && styles.activeNavText]}>Pass Slip Tracker</Text>
+            </Pressable>
           </View>
           <View style={styles.sidebarBottom}>
             <Pressable
-              style={styles.profileSidebarButton}
+              style={({ pressed }) => [styles.profileSidebarButton, pressed && styles.profileSidebarButtonPressed]}
               onPress={() => {
                 setProfileModalVisible(true);
                 dismissMobileSidebar();
@@ -786,7 +972,7 @@ const HrpDashboardScreen = () => {
                 <Text style={styles.navText} numberOfLines={1}>{name || 'Profile'}</Text>
               </View>
             </Pressable>
-            <Pressable style={styles.logoutButton} onPress={handleLogout}>
+            <Pressable style={({ pressed }) => [styles.logoutButton, pressed && styles.logoutButtonPressed]} onPress={handleLogout}>
               <View style={styles.navIcon}>
                 <FontAwesome name="sign-out" size={20} color="rgba(255,255,255,0.9)" />
               </View>
@@ -816,6 +1002,7 @@ const HrpDashboardScreen = () => {
               {activeView === 'records' && 'Records'}
               {activeView === 'reports' && 'Reports & Analytics'}
               {activeView === 'monitoring' && 'Monitoring'}
+              {activeView === 'passSlipTracker' && 'Pass Slip Tracker'}
             </Text>
           </View>
         </View>
@@ -891,6 +1078,16 @@ const HrpDashboardScreen = () => {
                 </View>
                 <View style={styles.recordsFiltersCard}>
                   <Text style={styles.recordsFiltersLabel}>Filters</Text>
+                  <View style={(styles as any).recordsSearchContainer}>
+                    <FontAwesome name="search" size={14} color="#64748b" style={(styles as any).recordsSearchIcon} />
+                    <TextInput
+                      style={(styles as any).recordsSearchInput}
+                      placeholder="Search employee, destination, purpose, campus, faculty, status, tracking no..."
+                      placeholderTextColor="#94a3b8"
+                      value={recordsSearchQuery}
+                      onChangeText={setRecordsSearchQuery}
+                    />
+                  </View>
                   <View style={styles.recordsFiltersRow}>
                     <View style={styles.recordsFilterGroup}>
                       <Text style={styles.recordsFilterLabel}>Campus</Text>
@@ -912,10 +1109,25 @@ const HrpDashboardScreen = () => {
                         <option value="Travel Order">Travel Order</option>
                       </select>
                     </View>
+                    <View style={styles.recordsFilterGroup}>
+                      <Text style={styles.recordsFilterLabel}>Rows per page</Text>
+                      <select
+                        value={String(recordsPageSize)}
+                        onChange={e => setRecordsPageSize(Number(e.target.value))}
+                        style={webStyles.recordsFilterSelect as any}
+                      >
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                      </select>
+                    </View>
                     <Pressable style={styles.recordsClearButton} onPress={() => {
                       setCampusFilter('All Campuses');
                       setFacultyFilter('All Faculties');
                       setFileTypeFilter('All');
+                      setRecordsSearchQuery('');
+                      setRecordsPageSize(25);
+                      setRecordsCurrentPage(1);
                     }}>
                       <Text style={styles.recordsClearButtonText}>Clear</Text>
                     </Pressable>
@@ -924,6 +1136,12 @@ const HrpDashboardScreen = () => {
                 <View style={styles.recordsTableCard}>
                   {filteredRecords.length > 0 ? (
                     <View>
+                      <View style={(styles as any).recordsTableMeta}>
+                        <Text style={(styles as any).recordsTableMetaText}>
+                          Showing {Math.min((safeRecordsCurrentPage - 1) * recordsPageSize + 1, filteredRecords.length)}-
+                          {Math.min(safeRecordsCurrentPage * recordsPageSize, filteredRecords.length)} of {filteredRecords.length}
+                        </Text>
+                      </View>
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={(styles as any).recordsTableHorizontalScroll}>
                         <View style={[(styles as any).recordsTableInner, styles.recordsTableHeader]}>
                           <Text style={[styles.recordsTableHeaderCell, styles.recordsColEmployee]}>Employee</Text>
@@ -936,7 +1154,7 @@ const HrpDashboardScreen = () => {
                         </View>
                       </ScrollView>
 
-                      {filteredRecords.map((item, index) => (
+                      {paginatedRecords.map((item, index) => (
                         <ScrollView
                           key={item._id}
                           horizontal
@@ -973,10 +1191,7 @@ const HrpDashboardScreen = () => {
                               </Pressable>
                               <Pressable style={styles.recordsPrintBtn} onPress={() => {
                                 if ('destination' in item) {
-                                  setSelectedItem(item);
-                                  setSelectedItemType('slip');
-                                  setIsModalVisible(true);
-                                  setTimeout(() => handlePrint(), 500);
+                                  void handlePrintPassSlip(item as PassSlip);
                                 } else {
                                   handlePrintTravelOrder(item as TravelOrder);
                                 }
@@ -987,6 +1202,25 @@ const HrpDashboardScreen = () => {
                           </View>
                         </ScrollView>
                       ))}
+                      <View style={(styles as any).recordsPaginationRow}>
+                        <Pressable
+                          style={[(styles as any).recordsPaginationButton, safeRecordsCurrentPage === 1 && (styles as any).recordsPaginationButtonDisabled]}
+                          onPress={() => setRecordsCurrentPage((prev) => Math.max(1, prev - 1))}
+                          disabled={safeRecordsCurrentPage === 1}
+                        >
+                          <Text style={[(styles as any).recordsPaginationButtonText, safeRecordsCurrentPage === 1 && (styles as any).recordsPaginationButtonTextDisabled]}>Prev</Text>
+                        </Pressable>
+                        <Text style={(styles as any).recordsPaginationText}>
+                          Page {safeRecordsCurrentPage} of {totalRecordPages}
+                        </Text>
+                        <Pressable
+                          style={[(styles as any).recordsPaginationButton, safeRecordsCurrentPage === totalRecordPages && (styles as any).recordsPaginationButtonDisabled]}
+                          onPress={() => setRecordsCurrentPage((prev) => Math.min(totalRecordPages, prev + 1))}
+                          disabled={safeRecordsCurrentPage === totalRecordPages}
+                        >
+                          <Text style={[(styles as any).recordsPaginationButtonText, safeRecordsCurrentPage === totalRecordPages && (styles as any).recordsPaginationButtonTextDisabled]}>Next</Text>
+                        </Pressable>
+                      </View>
                     </View>
                   ) : (
                     <View style={styles.recordsEmpty}>
@@ -1077,6 +1311,8 @@ const HrpDashboardScreen = () => {
                 )}
               </View>
             )}
+
+            {activeView === 'passSlipTracker' && <PassSlipTrackerScreen passSlips={trackerPassSlips} />}
             </ScrollView>
 
         {/* Profile Modal */}
@@ -1545,6 +1781,31 @@ const HrpDashboardScreen = () => {
                   onPress={() => setMarkCompleteFeedback(null)}
                 >
                   <Text style={styles.markCompleteModalPrimaryButtonText}>OK</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Logout confirmation modal */}
+        <Modal
+          animationType="fade"
+          transparent
+          visible={logoutConfirmVisible}
+          onRequestClose={cancelLogout}
+        >
+          <View style={styles.rejectModalOverlay}>
+            <View style={styles.rejectModalContent}>
+              <Text style={styles.rejectModalTitle}>Confirm logout</Text>
+              <Text style={styles.rejectModalSubtitle}>
+                Are you sure you want to logout? You will need to sign in again to continue.
+              </Text>
+              <View style={styles.rejectModalButtons}>
+                <Pressable style={[styles.rejectModalButton, styles.rejectModalCancel]} onPress={cancelLogout}>
+                  <Text style={styles.rejectModalCancelText}>Stay logged in</Text>
+                </Pressable>
+                <Pressable style={[styles.rejectModalButton, (styles as any).logoutModalConfirmButton]} onPress={confirmLogout}>
+                  <Text style={(styles as any).logoutModalConfirmText}>Logout</Text>
                 </Pressable>
               </View>
             </View>

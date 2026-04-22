@@ -3,7 +3,7 @@ import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, Platform, Ale
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import polyline from '@mapbox/polyline';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
@@ -17,6 +17,8 @@ import { API_URL } from '../../config/api';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
+const OFFICE_START_HOUR = 8;
+const OFFICE_END_HOUR = 17;
 
 const theme = {
   primary: '#011a6b',
@@ -78,7 +80,6 @@ const CreatePassSlipScreen = () => {
   const [immediateHeadId, setImmediateHeadId] = useState<string | null>(null);
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
   const sigCanvas = useRef<SignatureViewRef>(null);
-  const mapViewRef = useRef<MapView>(null);
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [isMapVisible, setIsMapVisible] = useState(false);
@@ -86,6 +87,7 @@ const CreatePassSlipScreen = () => {
   const [currentUserLocation, setCurrentUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<Array<{ latitude: number; longitude: number }>>([]);
   const [routePolyline, setRoutePolyline] = useState<string | null>(null);
+  const [shouldFitRoute, setShouldFitRoute] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isSuggestionsVisible, setSuggestionsVisible] = useState(false);
   const [mapRegion, setMapRegion] = useState({
@@ -94,6 +96,9 @@ const CreatePassSlipScreen = () => {
     latitudeDelta: 0.0922,
     longitudeDelta: 0.0421,
   });
+  const now = new Date();
+  const currentHour = now.getHours();
+  const isWithinOfficeHours = currentHour >= OFFICE_START_HOUR && currentHour < OFFICE_END_HOUR;
 
   const onChangeDate = (event: any, selectedDate?: Date) => {
     setShowDatePicker(false);
@@ -299,9 +304,11 @@ const CreatePassSlipScreen = () => {
         setLocationError('Permission to access location was denied');
         return;
       }
-      // Get current location to center the map initially
+      // Prefer last known fix (fast); then request a position (needs location services / GPS or network)
       try {
-        let currentLocation = await Location.getCurrentPositionAsync({});
+        let currentLocation =
+          (await Location.getLastKnownPositionAsync({ maxAge: 60_000 })) ??
+          (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
         const { latitude, longitude } = currentLocation.coords;
         setMapRegion({
           latitude,
@@ -311,8 +318,12 @@ const CreatePassSlipScreen = () => {
         });
         setCurrentUserLocation({ latitude, longitude });
       } catch (error) {
-        console.error('Failed to get current location for map centering:', error);
-        // Keep default region if it fails
+        setLocationError(
+          'Could not detect your current position. Enable device location or use the map as usual; the map shows a default area.',
+        );
+        if (__DEV__) {
+          console.warn('Map centering: no current location', error);
+        }
       }
     })();
   }, []);
@@ -356,7 +367,7 @@ const CreatePassSlipScreen = () => {
     console.log('currentUserLocation:', currentUserLocation);
 
     try {
-      const url = `http://router.project-osrm.org/route/v1/driving/${currentUserLocation.longitude},${currentUserLocation.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=polyline`;
+      const url = `http://router.project-osrm.org/route/v1/driving/${currentUserLocation.longitude},${currentUserLocation.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=polyline&alternatives=true&steps=false`;
       console.log('Fetching route from URL:', url);
 
       const response = await fetch(url);
@@ -364,24 +375,15 @@ const CreatePassSlipScreen = () => {
       console.log('OSRM response:', JSON.stringify(json, null, 2));
 
       if (json.routes && json.routes.length > 0) {
-        const geometry = json.routes[0].geometry;
+        const shortestRoute = [...json.routes].sort(
+          (a: { distance: number }, b: { distance: number }) => a.distance - b.distance
+        )[0];
+        const geometry = shortestRoute.geometry;
         setRoutePolyline(geometry);
         const decoded = polyline.decode(geometry);
         const coords = decoded.map(point => ({ latitude: point[0], longitude: point[1] }));
         console.log('Decoded coordinates count:', coords.length);
         setRouteCoordinates(coords);
-        // Fit map to the new route
-        if (mapViewRef.current) {
-          mapViewRef.current.fitToCoordinates(coords, {
-            edgePadding: {
-              top: 50,
-              right: 50,
-              bottom: 50,
-              left: 50,
-            },
-            animated: true,
-          });
-        }
       } else {
         console.log('No routes found in OSRM response.');
         setRouteCoordinates([]);
@@ -393,8 +395,8 @@ const CreatePassSlipScreen = () => {
     }
   };
 
-  const handleMapPress = async (e: any) => {
-    const destinationCoord = e.nativeEvent.coordinate;
+  const handleMapPress = async (destinationCoord: { latitude: number; longitude: number }) => {
+    setShouldFitRoute(true);
     setSelectedLocation(destinationCoord);
     setRouteCoordinates([]); // Clear previous route
     getRoute(destinationCoord);
@@ -417,19 +419,24 @@ const CreatePassSlipScreen = () => {
     }
   };
 
-  const handlePoiClick = (e: any) => {
-    const poi = e.nativeEvent;
-    setDestination(poi.name);
-    setSelectedLocation(poi.coordinate);
-    setRouteCoordinates([]); // Clear previous route
-    getRoute(poi.coordinate);
-  };
-
   const handleConfirmDestination = () => {
     if (selectedLocation) {
       setLocation(selectedLocation);
     }
     setIsMapVisible(false);
+  };
+
+  const openMapCenteredOnUser = () => {
+    if (currentUserLocation) {
+      setMapRegion({
+        latitude: currentUserLocation.latitude,
+        longitude: currentUserLocation.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      });
+    }
+    setShouldFitRoute(false);
+    setIsMapVisible(true);
   };
 
   const handleClearSignature = () => {
@@ -452,6 +459,11 @@ const CreatePassSlipScreen = () => {
 
     if (startOfDay(date).getTime() < todayStart.getTime()) {
       Alert.alert('Invalid Date', 'Please select today or a future date.');
+      return;
+    }
+
+    if (!isWithinOfficeHours) {
+      Alert.alert('Office Hours Only', 'Pass slip submission is allowed only during office hours (8:00 AM to 5:00 PM).');
       return;
     }
 
@@ -498,6 +510,81 @@ const CreatePassSlipScreen = () => {
     }
   };
 
+  const leafletState = JSON.stringify({
+    center: { latitude: mapRegion.latitude, longitude: mapRegion.longitude },
+    currentUserLocation,
+    selectedLocation,
+    routeCoordinates,
+    shouldFitRoute,
+  });
+
+  const leafletHtml = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+      html, body, #map { height: 100%; margin: 0; padding: 0; }
+      .leaflet-control-attribution { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+      const state = ${leafletState};
+      const map = L.map('map').setView([state.center.latitude, state.center.longitude], 14);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      const points = [];
+      if (state.currentUserLocation) {
+        const userLatLng = [state.currentUserLocation.latitude, state.currentUserLocation.longitude];
+        L.circleMarker(userLatLng, {
+          radius: 8,
+          color: '#ffffff',
+          weight: 2,
+          fillColor: '#1d4ed8',
+          fillOpacity: 1
+        }).addTo(map).bindPopup('Your Location');
+        points.push(userLatLng);
+      }
+      if (state.selectedLocation) {
+        const destLatLng = [state.selectedLocation.latitude, state.selectedLocation.longitude];
+        L.circleMarker(destLatLng, {
+          radius: 9,
+          color: '#ffffff',
+          weight: 2,
+          fillColor: '#dc3545',
+          fillOpacity: 1
+        }).addTo(map).bindPopup('Selected Destination');
+        points.push(destLatLng);
+      }
+      if (state.routeCoordinates && state.routeCoordinates.length > 0) {
+        const route = state.routeCoordinates.map(p => [p.latitude, p.longitude]);
+        L.polyline(route, { color: '#dc3545', weight: 4 }).addTo(map);
+        points.push(...route);
+      }
+      if (state.shouldFitRoute && points.length > 1) {
+        map.fitBounds(points, { padding: [30, 30] });
+      }
+
+      map.on('click', function (e) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'map-press',
+          latitude: e.latlng.lat,
+          longitude: e.latlng.lng
+        }));
+      });
+    </script>
+  </body>
+</html>
+  `;
+
   return (
     <>
       {/* Map Modal - Select Destination */}
@@ -518,25 +605,23 @@ const CreatePassSlipScreen = () => {
                 </Pressable>
             </View>
             <View style={styles.mapWrapper}>
-                <MapView
-                    ref={mapViewRef}
-                    style={styles.map}
-                    region={mapRegion}
-                    onPress={handleMapPress}
-                    onPoiClick={handlePoiClick}
-                    showsUserLocation
-                    mapType="hybrid"
-                >
-                    {currentUserLocation && <Marker coordinate={currentUserLocation} title="Your Location" pinColor="blue" />}
-                    {selectedLocation && <Marker coordinate={selectedLocation} title="Selected Destination" />}
-                    {routeCoordinates.length > 0 && (
-                      <Polyline
-                        coordinates={routeCoordinates}
-                        strokeWidth={4}
-                        strokeColor={theme.accent}
-                      />
-                    )}
-                </MapView>
+                <WebView
+                  style={styles.map}
+                  originWhitelist={['*']}
+                  source={{ html: leafletHtml }}
+                  onMessage={(event) => {
+                    try {
+                      const data = JSON.parse(event.nativeEvent.data);
+                      if (data?.type === 'map-press' && typeof data.latitude === 'number' && typeof data.longitude === 'number') {
+                        handleMapPress({ latitude: data.latitude, longitude: data.longitude });
+                      }
+                    } catch (error) {
+                      if (__DEV__) {
+                        console.warn('Leaflet map message parse failed', error);
+                      }
+                    }
+                  }}
+                />
                 {!selectedLocation && (
                     <View style={styles.mapHintOverlay} pointerEvents="none">
                         <Text style={styles.mapHintText}>Tap on map to set destination</Text>
@@ -570,6 +655,14 @@ const CreatePassSlipScreen = () => {
         <View style={styles.previewOverlay}>
           <View style={styles.previewContent}>
             <ScrollView>
+              {!isWithinOfficeHours && (
+                <View style={styles.officeHoursWarningBox}>
+                  <Text style={styles.officeHoursWarningTitle}>Office hours only</Text>
+                  <Text style={styles.officeHoursWarningText}>
+                    Submission is disabled. You can submit pass slips only from 8:00 AM to 5:00 PM.
+                  </Text>
+                </View>
+              )}
               <View style={styles.docHeader}>
                 <View>
                   <View style={styles.blueLine} />
@@ -643,7 +736,15 @@ const CreatePassSlipScreen = () => {
               <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setIsPreviewVisible(false)} disabled={isSubmitting}>
                 <Text style={styles.buttonText}>Close</Text>
               </Pressable>
-              <Pressable style={[styles.modalButton, styles.submitButton]} onPress={handleSubmit} disabled={isSubmitting}>
+              <Pressable
+                style={[
+                  styles.modalButton,
+                  styles.submitButton,
+                  (!isWithinOfficeHours || isSubmitting) && styles.submitButtonDisabled,
+                ]}
+                onPress={handleSubmit}
+                disabled={isSubmitting || !isWithinOfficeHours}
+              >
                 {isSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Submit</Text>}
               </Pressable>
             </View>
@@ -784,7 +885,7 @@ const CreatePassSlipScreen = () => {
                 placeholderTextColor={theme.textMuted}
               />
               <Pressable
-                onPress={() => setIsMapVisible(true)}
+                onPress={openMapCenteredOnUser}
                 style={({ pressed }) => [styles.mapSelectButton, pressed && styles.mapSelectButtonPressed]}
                 accessibilityLabel="Pick destination on map"
               >
@@ -806,6 +907,7 @@ const CreatePassSlipScreen = () => {
                         setLocation(newLocation);
                         setSuggestions([]);
                         setSuggestionsVisible(false);
+                        setShouldFitRoute(true);
                         if (currentUserLocation) {
                           getRoute(newLocation);
                         }
@@ -1658,6 +1760,29 @@ const styles = StyleSheet.create({
     color: theme.danger,
     marginTop: 6,
     fontSize: 14,
+  },
+  officeHoursWarningBox: {
+    backgroundColor: '#fff4e5',
+    borderWidth: 1,
+    borderColor: '#f0b429',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 14,
+  },
+  officeHoursWarningTitle: {
+    color: '#8a4b00',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  officeHoursWarningText: {
+    color: '#8a4b00',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  submitButtonDisabled: {
+    backgroundColor: theme.textMuted,
+    opacity: 0.75,
   },
   locationCoordsText: {
     fontSize: 14,

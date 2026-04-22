@@ -6,7 +6,8 @@ const colors = {
   primaryDark: '#010d40',
   sidebar: '#011a6b',
   sidebarHover: 'rgba(255,255,255,0.06)',
-  sidebarActive: 'rgba(254,206,0,0.25)',
+  sidebarActive: '#ffffff',
+  sidebarPanel: 'rgba(255,255,255,0.05)',
   accent: '#fece00',
   surface: '#ffffff',
   background: '#ffffff',
@@ -114,6 +115,7 @@ export const styles = StyleSheet.create({
     sidebarInner: {
       flex: 1,
       paddingHorizontal: 14,
+      paddingBottom: 10,
       // Prevent sidebar from scrolling; main area handles page scroll.
       ...Platform.select({ web: { overflow: 'hidden' as any } }),
     },
@@ -141,6 +143,15 @@ export const styles = StyleSheet.create({
       paddingTop: 20,
       paddingBottom: 20,
     },
+    navSectionLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: 'rgba(255,255,255,0.62)',
+      textTransform: 'uppercase',
+      letterSpacing: 0.8,
+      paddingHorizontal: 12,
+      marginBottom: 10,
+    },
     navItem: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -148,10 +159,16 @@ export const styles = StyleSheet.create({
       paddingHorizontal: 14,
       borderRadius: 12,
       marginBottom: 4,
+      borderWidth: 1,
+      borderColor: 'transparent',
       ...Platform.select({ web: { transition: 'background-color 0.15s ease' } }),
+    },
+    navItemPressed: {
+      backgroundColor: colors.sidebarHover,
     },
     activeNavItem: {
       backgroundColor: colors.sidebarActive,
+      borderColor: 'transparent',
     },
     subNav: {
       marginLeft: 36, // aligns under icon+gap
@@ -160,6 +177,10 @@ export const styles = StyleSheet.create({
       borderLeftWidth: 1,
       borderLeftColor: 'rgba(255,255,255,0.16)',
       paddingLeft: 12,
+      paddingTop: 4,
+      paddingBottom: 4,
+      borderRadius: 10,
+      backgroundColor: 'rgba(255,255,255,0.03)',
     },
     subNavItem: {
       paddingVertical: 10,
@@ -167,10 +188,16 @@ export const styles = StyleSheet.create({
       borderRadius: 12,
       marginBottom: 4,
       backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: 'transparent',
       ...Platform.select({ web: { cursor: 'pointer', transition: 'background-color 0.15s ease' } }),
+    },
+    subNavItemPressed: {
+      backgroundColor: 'rgba(255,255,255,0.08)',
     },
     subNavItemActive: {
       backgroundColor: 'rgba(255,255,255,0.12)',
+      borderColor: 'rgba(255,255,255,0.2)',
     },
     subNavRow: {
       flexDirection: 'row',
@@ -246,7 +273,7 @@ export const styles = StyleSheet.create({
     },
     activeNavText: {
       fontWeight: '600',
-      color: '#fff',
+      color: colors.primary,
     },
     sidebarBottom: {
       marginTop: 'auto',
@@ -254,6 +281,9 @@ export const styles = StyleSheet.create({
       borderTopWidth: 1,
       borderTopColor: 'rgba(255,255,255,0.1)',
       paddingBottom: 20,
+      backgroundColor: colors.sidebarPanel,
+      borderRadius: 14,
+      paddingHorizontal: 6,
     },
     mainContent: {
       flex: 1,
@@ -378,8 +408,13 @@ export const styles = StyleSheet.create({
       paddingHorizontal: 14,
       marginBottom: 10,
       borderRadius: 10,
-      backgroundColor: 'rgba(255,255,255,0.06)',
+      backgroundColor: 'rgba(255,255,255,0.08)',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.08)',
       ...Platform.select({ web: { cursor: 'pointer', transition: 'background-color 0.15s ease' } }),
+    },
+    profileSidebarButtonPressed: {
+      backgroundColor: 'rgba(255,255,255,0.14)',
     },
     profileSidebarButtonTextWrap: {
       flex: 1,
@@ -391,8 +426,13 @@ export const styles = StyleSheet.create({
       paddingVertical: 14,
       paddingHorizontal: 14,
       borderRadius: 10,
-      backgroundColor: 'rgba(255,255,255,0.08)',
+      backgroundColor: 'rgba(255,255,255,0.12)',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.1)',
       ...Platform.select({ web: { cursor: 'pointer' } }),
+    },
+    logoutButtonPressed: {
+      backgroundColor: 'rgba(255,255,255,0.18)',
     },
     profileModalView: {
       width: 440,
@@ -682,6 +722,13 @@ export const styles = StyleSheet.create({
       color: '#fff',
       fontWeight: '600',
     },
+    logoutModalConfirmButton: {
+      backgroundColor: '#b42318',
+    },
+    logoutModalConfirmText: {
+      color: '#fff',
+      fontWeight: '700',
+    },
     reviewButton: {
       backgroundColor: colors.primary,
     },
@@ -746,6 +793,31 @@ export const styles = StyleSheet.create({
       letterSpacing: 0.5,
       marginBottom: 12,
     },
+    recordsSearchContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: '#cbd5e1',
+      borderRadius: 10,
+      backgroundColor: '#fff',
+      paddingHorizontal: 12,
+      marginBottom: 14,
+      minHeight: 44,
+    },
+    recordsSearchIcon: {
+      marginRight: 8,
+    },
+    recordsSearchInput: {
+      flex: 1,
+      color: colors.primary,
+      fontSize: 14,
+      paddingVertical: 10,
+      ...Platform.select({
+        web: {
+          outlineStyle: 'none' as any,
+        },
+      }),
+    },
     recordsFiltersRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -786,6 +858,16 @@ export const styles = StyleSheet.create({
           boxShadow: '0 18px 45px rgba(1,26,107,0.10)',
         },
       }),
+    },
+    recordsTableMeta: {
+      paddingHorizontal: 14,
+      paddingTop: 12,
+      paddingBottom: 6,
+    },
+    recordsTableMetaText: {
+      fontSize: 12,
+      color: '#64748b',
+      fontWeight: '500',
     },
     recordsTableHorizontalScroll: {
       flexGrow: 0,
@@ -918,6 +1000,223 @@ export const styles = StyleSheet.create({
       fontSize: 14,
       color: colors.textMuted,
       marginTop: 8,
+    },
+    recordsPaginationRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    recordsPaginationButton: {
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: '#fff',
+      ...Platform.select({
+        web: {
+          cursor: 'pointer',
+        },
+      }),
+    },
+    recordsPaginationButtonDisabled: {
+      backgroundColor: '#f8fafc',
+      borderColor: '#e2e8f0',
+    },
+    recordsPaginationButtonText: {
+      color: colors.primary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    recordsPaginationButtonTextDisabled: {
+      color: '#94a3b8',
+    },
+    recordsPaginationText: {
+      color: colors.textMuted,
+      fontSize: 13,
+      fontWeight: '600',
+      marginHorizontal: 4,
+    },
+    // Pass Slip Tracker
+    passSlipTrackerWrapper: {
+      width: '100%',
+    },
+    passSlipTrackerHeader: {
+      marginBottom: 16,
+      backgroundColor: '#fff',
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: 12,
+      ...Platform.select({
+        web: {
+          boxShadow: '0 12px 24px rgba(1,26,107,0.08)',
+        },
+      }),
+    },
+    passSlipTrackerTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    passSlipTrackerSubtitle: {
+      marginTop: 4,
+      color: colors.textMuted,
+      fontSize: 13,
+    },
+    passSlipTrackerHeaderActions: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 10,
+      flexWrap: 'wrap',
+    },
+    passSlipTrackerSelectWrap: {
+      minWidth: 240,
+    },
+    passSlipTrackerSelectLabel: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: '#64748b',
+      marginBottom: 4,
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
+    },
+    passSlipTrackerAddRowButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      paddingVertical: 11,
+      paddingHorizontal: 16,
+      ...Platform.select({
+        web: {
+          cursor: 'pointer',
+        },
+      }),
+    },
+    passSlipTrackerAddRowButtonText: {
+      color: '#fff',
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    passSlipTrackerHistoryChip: {
+      backgroundColor: '#f8fafc',
+      borderWidth: 1,
+      borderColor: '#cbd5e1',
+      borderRadius: 10,
+      paddingVertical: 11,
+      paddingHorizontal: 14,
+    },
+    passSlipTrackerHistoryChipText: {
+      color: '#334155',
+      fontWeight: '600',
+      fontSize: 12,
+    },
+    passSlipTrackerTableCard: {
+      backgroundColor: '#fff',
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      overflow: 'hidden',
+      ...Platform.select({
+        web: {
+          boxShadow: '0 18px 45px rgba(1,26,107,0.10)',
+        },
+      }),
+    },
+    passSlipTrackerTableInner: {
+      minWidth: 1220,
+    },
+    passSlipTrackerTableHeader: {
+      flexDirection: 'row',
+      borderBottomWidth: 3,
+      borderBottomColor: colors.accent,
+      backgroundColor: 'rgba(1,26,107,0.06)',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      alignItems: 'center',
+    },
+    passSlipTrackerHeaderCell: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.primary,
+      textAlign: 'center',
+      paddingRight: 10,
+    },
+    passSlipTrackerTableRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(1,26,107,0.14)',
+      paddingHorizontal: 12,
+      minHeight: 58,
+    },
+    passSlipTrackerTableRowAlt: {
+      backgroundColor: 'rgba(1,26,107,0.03)',
+    },
+    passSlipTrackerCell: {
+      paddingRight: 10,
+      justifyContent: 'center',
+      minHeight: 58,
+    },
+    passSlipTrackerColEmployee: {
+      width: 240,
+      flexGrow: 0,
+      flexShrink: 0,
+    },
+    passSlipTrackerColDay: {
+      width: 130,
+      flexGrow: 0,
+      flexShrink: 0,
+    },
+    passSlipTrackerColTotal: {
+      width: 110,
+      flexGrow: 0,
+      flexShrink: 0,
+      alignItems: 'center',
+    },
+    passSlipTrackerColBalance: {
+      width: 190,
+      flexGrow: 0,
+      flexShrink: 0,
+      alignItems: 'center',
+    },
+    passSlipTrackerInput: {
+      borderWidth: 1,
+      borderColor: '#cbd5e1',
+      borderRadius: 8,
+      backgroundColor: '#fff',
+      color: colors.primary,
+      minHeight: 38,
+      paddingHorizontal: 10,
+      fontSize: 13,
+      ...Platform.select({
+        web: {
+          outlineStyle: 'none' as any,
+        },
+      }),
+    },
+    passSlipTrackerInputCenter: {
+      textAlign: 'center',
+    },
+    passSlipTrackerInputReadOnly: {
+      backgroundColor: '#f8fafc',
+      color: '#64748b',
+    },
+    passSlipTrackerComputedValue: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.primary,
+      textAlign: 'center',
+    },
+    passSlipTrackerComputedValueOver: {
+      color: '#dc2626',
     },
     buttonText: {
       color: '#ffffff',

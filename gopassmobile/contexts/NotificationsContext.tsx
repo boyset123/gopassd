@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, AppStateStatus } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import axios from 'axios';
 import { useSocket } from '../config/SocketContext';
 import { API_URL } from '../config/api';
@@ -47,6 +48,53 @@ function withReadTrue(n: Notification): Notification {
   };
 }
 
+type PassSlipAlertState = {
+  shortSent: boolean;
+  overSent: boolean;
+  shortScheduleId?: string;
+  overScheduleId?: string;
+};
+
+type PassSlipAlertsMap = Record<string, PassSlipAlertState>;
+
+type UserPassSlip = {
+  _id: string;
+  status?: string;
+  departureTime?: string;
+  estimatedTimeBack?: string;
+};
+
+const PASS_SLIP_ALERTS_STORAGE_KEY = 'passSlipAlertState:v1';
+
+function parseTimeOnBaseDate(timeStr: string | undefined, baseDate: Date): Date | null {
+  if (!timeStr) return null;
+  const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!match) return null;
+
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const ampm = match[3].toUpperCase();
+
+  if (ampm === 'PM' && hours < 12) hours += 12;
+  if (ampm === 'AM' && hours === 12) hours = 0;
+
+  const date = new Date(baseDate);
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+}
+
+function getPassSlipEndTime(slip: UserPassSlip): Date | null {
+  if (!slip.departureTime || !slip.estimatedTimeBack) return null;
+  const departureDate = new Date(slip.departureTime);
+  if (Number.isNaN(departureDate.getTime())) return null;
+  const endTime = parseTimeOnBaseDate(slip.estimatedTimeBack, departureDate);
+  if (!endTime) return null;
+  if (endTime.getTime() < departureDate.getTime()) {
+    endTime.setDate(endTime.getDate() + 1);
+  }
+  return endTime;
+}
+
 type NotificationsContextValue = {
   notifications: Notification[];
   fetchNotifications: () => Promise<void>;
@@ -72,6 +120,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const appState = useRef<AppStateStatus>(AppState.currentState);
   const initialFetchDone = useRef(false);
   const previousNewestId = useRef<string | null>(null);
+  const alertSyncRunningRef = useRef(false);
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -120,6 +169,113 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     if (__DEV__) console.log('[Notifications] playNotificationSound() called');
     playNotificationSound();
   }, []);
+
+  const syncPassSlipAlerts = useCallback(async () => {
+    if (alertSyncRunningRef.current) return;
+    alertSyncRunningRef.current = true;
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return;
+
+      const perms = await Notifications.getPermissionsAsync();
+      if (perms.status !== 'granted') {
+        await Notifications.requestPermissionsAsync();
+      }
+
+      const { data } = await axios.get<UserPassSlip[]>(`${API_URL}/pass-slips/my-slips`, {
+        headers: { 'x-auth-token': token },
+      });
+
+      const allSlips = Array.isArray(data) ? data : [];
+      const activeVerified = allSlips.filter((s) => s.status === 'Verified');
+      const now = Date.now();
+
+      const rawState = await AsyncStorage.getItem(PASS_SLIP_ALERTS_STORAGE_KEY);
+      const state: PassSlipAlertsMap = rawState ? JSON.parse(rawState) : {};
+      const nextState: PassSlipAlertsMap = {};
+
+      for (const slip of activeVerified) {
+        if (!slip._id) continue;
+        const slipId = String(slip._id);
+        const prev = state[slipId] || { shortSent: false, overSent: false };
+        const endTime = getPassSlipEndTime(slip);
+
+        if (!endTime) {
+          nextState[slipId] = prev;
+          continue;
+        }
+
+        const shortAtMs = endTime.getTime() - 5 * 60 * 1000;
+        const overAtMs = endTime.getTime();
+        const next: PassSlipAlertState = { ...prev };
+
+        if (!next.shortSent && now >= shortAtMs) {
+          addNotification({
+            _id: `time-short-${slipId}`,
+            message: 'Your time is running short. Please head back and scan for arrival on time.',
+            read: false,
+            createdAt: new Date().toISOString(),
+          });
+          next.shortSent = true;
+          if (next.shortScheduleId) {
+            await Notifications.cancelScheduledNotificationAsync(next.shortScheduleId);
+            delete next.shortScheduleId;
+          }
+        } else if (!next.shortSent && !next.shortScheduleId && shortAtMs > now) {
+          next.shortScheduleId = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: 'Pass Slip Reminder',
+              body: 'Your pass slip is almost out of time. Please head back.',
+              data: { type: 'pass-slip-time-short', slipId },
+            },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(shortAtMs) },
+          });
+        }
+
+        if (!next.overSent && now >= overAtMs) {
+          addNotification({
+            _id: `time-over-${slipId}`,
+            message: 'Warning: You are late. Please scan for arrival immediately.',
+            read: false,
+            createdAt: new Date().toISOString(),
+          });
+          next.overSent = true;
+          if (next.overScheduleId) {
+            await Notifications.cancelScheduledNotificationAsync(next.overScheduleId);
+            delete next.overScheduleId;
+          }
+        } else if (!next.overSent && !next.overScheduleId && overAtMs > now) {
+          next.overScheduleId = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: 'Pass Slip Late Alert',
+              body: 'Your pass slip time is over. Please return and scan immediately.',
+              data: { type: 'pass-slip-time-over', slipId },
+            },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(overAtMs) },
+          });
+        }
+
+        nextState[slipId] = next;
+      }
+
+      const activeIds = new Set(activeVerified.map((s) => String(s._id)));
+      for (const [slipId, old] of Object.entries(state)) {
+        if (activeIds.has(slipId)) continue;
+        if (old.shortScheduleId) {
+          await Notifications.cancelScheduledNotificationAsync(old.shortScheduleId);
+        }
+        if (old.overScheduleId) {
+          await Notifications.cancelScheduledNotificationAsync(old.overScheduleId);
+        }
+      }
+
+      await AsyncStorage.setItem(PASS_SLIP_ALERTS_STORAGE_KEY, JSON.stringify(nextState));
+    } catch (e) {
+      console.error('Failed to sync pass slip alerts', e);
+    } finally {
+      alertSyncRunningRef.current = false;
+    }
+  }, [addNotification]);
 
   const markAllRead = useCallback(async () => {
     try {
@@ -222,7 +378,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     if (currentUserId == null) return;
     void initializeNotificationSound();
     fetchNotifications();
-  }, [currentUserId, fetchNotifications]);
+    syncPassSlipAlerts();
+  }, [currentUserId, fetchNotifications, syncPassSlipAlerts]);
 
   // Single global socket listener: update list immediately and play sound (no dependency on which tab is mounted)
   useEffect(() => {
@@ -260,11 +417,21 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
       if (appState.current === 'background' && nextState === 'active' && currentUserId) {
         fetchNotifications();
+        syncPassSlipAlerts();
       }
       appState.current = nextState;
     });
     return () => sub.remove();
-  }, [currentUserId, fetchNotifications]);
+  }, [currentUserId, fetchNotifications, syncPassSlipAlerts]);
+
+  // Keep pass-slip deadline alerts updated app-wide, not only on the slips timer screen.
+  useEffect(() => {
+    if (currentUserId == null) return;
+    const interval = setInterval(() => {
+      syncPassSlipAlerts();
+    }, 30 * 1000);
+    return () => clearInterval(interval);
+  }, [currentUserId, syncPassSlipAlerts]);
 
   const value: NotificationsContextValue = {
     notifications,

@@ -2,6 +2,8 @@
  * Generates full HTML for printing a travel order (matches slips.tsx layout and styling).
  */
 
+import { DORSU_LOGO_DATA_URI } from './dorsuLogoDataUri';
+
 export interface TravelOrderPrintItem {
   _id: string;
   travelOrderNo?: string;
@@ -99,6 +101,7 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
       </div>`;
   }).join('');
   const presidentName = item.presidentApprovedBy?.name || presidentNameFallback || '—';
+  const logoSlot = `<img class="logo-img" src="${DORSU_LOGO_DATA_URI}" alt="DOrSU Logo" />`;
   return `
 <!DOCTYPE html>
 <html>
@@ -107,7 +110,7 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
   <title>Travel Order - ${item.travelOrderNo || item._id}</title>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: sans-serif; margin: 0; padding: 24px; background: #fff; color: #000; }
+    body { font-family: "Times New Roman", Times, serif; margin: 0; padding: 24px; background: #fff; color: #000; }
 
     /* A4-ish page container (mirrors TravelOrderFormWeb a4Page) */
     .a4-stack { width: 100%; display: flex; justify-content: center; }
@@ -127,11 +130,10 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
     .doc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 10px; }
     .university-name-container { flex: 1; min-width: 0; }
     .header-rule { height: 2px; width: 92%; background: #7f93ad; margin: 3px 0; }
-    .university-name { font-size: 12px; font-weight: 800; text-align: left; color: #8da2bf; line-height: 14px; letter-spacing: 0.25px; white-space: pre-line; }
+    .university-name { font-size: 12px; font-weight: 800; text-align: left; color: #8da2bf; line-height: 14px; letter-spacing: 0.25px; white-space: pre-line; font-family: Arial, sans-serif; }
     .university-motto { font-size: 7px; color: #6f7f95; font-style: italic; margin-top: 2px; }
 
-    /* In print window we don't have an easy asset URL; keep a logo box with same footprint */
-    .logo-box { width: 56px; height: 56px; border: 1px solid #d0d5dd; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #667085; font-size: 9px; flex-shrink: 0; }
+    .logo-img { width: 56px; height: 56px; object-fit: contain; flex-shrink: 0; display: block; }
 
     .doc-code-card { width: 110px; border: 1px solid #616a78; background: #fff; flex-shrink: 0; }
     .doc-code-topbar { background: #7c879a; padding: 2px 3px; border-bottom: 1px solid #616a78; }
@@ -151,6 +153,9 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
 
     /* Form rows (underline style like TravelOrderFormWeb) */
     .form-row { display: flex; flex-wrap: wrap; align-items: flex-start; margin-bottom: 6px; gap: 6px; }
+    .form-row-top { justify-content: space-between; align-items: center; }
+    .form-row-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+    .form-row-right { display: flex; align-items: center; gap: 6px; margin-left: auto; text-align: right; }
     .label { font-size: 11px; margin-right: 4px; }
     .label-right { font-size: 11px; margin-left: 10px; margin-right: 4px; }
     .value-u { font-size: 11px; font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; flex: 1; min-width: 120px; }
@@ -193,7 +198,7 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
           <div class="university-motto">"A University of excellence, innovation, and inclusion"</div>
           <div class="header-rule"></div>
         </div>
-        <div class="logo-box">LOGO</div>
+        ${logoSlot}
         <div class="doc-code-card">
           <div class="doc-code-topbar"><div class="doc-code-topbar-text">Document Code No.</div></div>
           <div class="doc-code-value-row"><div class="doc-code-value-text">FM-DOrSU-HRMO-01</div></div>
@@ -217,11 +222,15 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
       <div class="doc-title">TRAVEL ORDER FORM</div>
       <div class="revised-text">Revised 1996</div>
 
-      <div class="form-row">
-        <span class="label">Travel Order No.</span>
-        <span class="value-u">${formatTravelOrderNoDisplay(item.travelOrderNo, item.date)}</span>
-        <span class="label-right">Date</span>
-        <span class="value-u">${formatDate(item.date)}</span>
+      <div class="form-row form-row-top">
+        <div class="form-row-left">
+          <span class="label">Travel Order No.</span>
+          <span class="value-u">${formatTravelOrderNoDisplay(item.travelOrderNo, item.date)}</span>
+        </div>
+        <div class="form-row-right">
+          <span class="label-right">Date</span>
+          <span class="value-u">${formatDate(item.date)}</span>
+        </div>
       </div>
 
       <div class="form-row">

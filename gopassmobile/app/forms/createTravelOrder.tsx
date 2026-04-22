@@ -3,7 +3,7 @@ import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, Platform, Ale
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import polyline from '@mapbox/polyline';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -70,7 +70,6 @@ const campuses = [
 const CreateTravelOrderScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const mapViewRef = useRef<MapView>(null);
   const [user, setUser] = useState<User | null>(null);
   const [presidentName, setPresidentName] = useState('Roy G. Ponce, Ed.D.');
 
@@ -108,6 +107,7 @@ const CreateTravelOrderScreen = () => {
   const [currentUserLocation, setCurrentUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<Array<{ latitude: number; longitude: number }>>([]);
   const [routePolyline, setRoutePolyline] = useState<string | null>(null);
+  const [shouldFitRoute, setShouldFitRoute] = useState(false);
   const [mapRegion, setMapRegion] = useState({
     latitude: 7.0731, // Default to a central location in Mati
     longitude: 126.2167,
@@ -220,7 +220,9 @@ const CreateTravelOrderScreen = () => {
         return;
       }
       try {
-        let currentLocation = await Location.getCurrentPositionAsync({});
+        let currentLocation =
+          (await Location.getLastKnownPositionAsync({ maxAge: 60_000 })) ??
+          (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
         const { latitude, longitude } = currentLocation.coords;
         setCurrentUserLocation({ latitude, longitude });
         setMapRegion({
@@ -230,7 +232,12 @@ const CreateTravelOrderScreen = () => {
           longitudeDelta: 0.02,
         });
       } catch (error) {
-        console.error('Failed to get current location for map centering:', error);
+        setLocationError(
+          'Could not detect your current position. Enable device location or use the map as usual; the map shows a default area.',
+        );
+        if (__DEV__) {
+          console.warn('Map centering: no current location', error);
+        }
       }
     })();
   }, []);
@@ -303,22 +310,6 @@ const CreateTravelOrderScreen = () => {
       clearTimeout(handler);
     };
   }, [address, fetchSuggestions]);
-
-  // When map is visible, fit to show whole route or both origin + destination (not zoomed to user location only)
-  useEffect(() => {
-    if (!isMapVisible || !mapViewRef.current) return;
-    const fit = () => {
-      if (!mapViewRef.current) return;
-      const padding = { top: 60, right: 60, bottom: 60, left: 60 };
-      if (routeCoordinates.length > 0) {
-        mapViewRef.current.fitToCoordinates(routeCoordinates, { edgePadding: padding, animated: true });
-      } else if (selectedLocation && currentUserLocation) {
-        mapViewRef.current.fitToCoordinates([currentUserLocation, selectedLocation], { edgePadding: padding, animated: true });
-      }
-    };
-    const t = setTimeout(fit, 100);
-    return () => clearTimeout(t);
-  }, [isMapVisible, selectedLocation, currentUserLocation, routeCoordinates]);
 
   const handleAddParticipant = () => {
     setParticipants([...participants, '']);
@@ -400,24 +391,18 @@ const CreateTravelOrderScreen = () => {
     if (!currentUserLocation) return;
     try {
       const response = await fetch(
-        `http://router.project-osrm.org/route/v1/driving/${currentUserLocation.longitude},${currentUserLocation.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=polyline`
+        `http://router.project-osrm.org/route/v1/driving/${currentUserLocation.longitude},${currentUserLocation.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=polyline&alternatives=true&steps=false`
       );
       const json = await response.json();
       if (json.routes && json.routes.length > 0) {
-        const geometry = json.routes[0].geometry;
+        const shortestRoute = [...json.routes].sort(
+          (a: { distance: number }, b: { distance: number }) => a.distance - b.distance
+        )[0];
+        const geometry = shortestRoute.geometry;
         setRoutePolyline(geometry);
         const decoded = polyline.decode(geometry);
         const coords = decoded.map(point => ({ latitude: point[0], longitude: point[1] }));
         setRouteCoordinates(coords);
-        // Fit map to whole route when map is visible (so we show destination/route, not just user location)
-        if (isMapVisible && mapViewRef.current && coords.length > 0) {
-          setTimeout(() => {
-            mapViewRef.current?.fitToCoordinates(coords, {
-              edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
-              animated: true,
-            });
-          }, 150);
-        }
       } else {
         setRouteCoordinates([]);
         setRoutePolyline(null);
@@ -428,8 +413,8 @@ const CreateTravelOrderScreen = () => {
     }
   };
 
-  const handleMapPress = async (e: any) => {
-    const destinationCoord = e.nativeEvent.coordinate;
+  const handleMapPress = async (destinationCoord: { latitude: number; longitude: number }) => {
+    setShouldFitRoute(true);
     setSelectedLocation(destinationCoord);
     setRouteCoordinates([]); // Clear previous route
     getRoute(destinationCoord);
@@ -452,19 +437,24 @@ const CreateTravelOrderScreen = () => {
     }
   };
 
-  const handlePoiClick = (e: any) => {
-    const poi = e.nativeEvent;
-    setAddress(poi.name);
-    setSelectedLocation(poi.coordinate);
-    setRouteCoordinates([]); // Clear previous route
-    getRoute(poi.coordinate);
-  };
-
   const handleConfirmDestination = () => {
     if (selectedLocation) {
       setLocation(selectedLocation);
     }
     setIsMapVisible(false);
+  };
+
+  const openMapCenteredOnUser = () => {
+    if (currentUserLocation) {
+      setMapRegion({
+        latitude: currentUserLocation.latitude,
+        longitude: currentUserLocation.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      });
+    }
+    setShouldFitRoute(false);
+    setIsMapVisible(true);
   };
 
   // Keep the date part from base, apply only hours and minutes from timeValue (avoids time picker overwriting the chosen date)
@@ -536,6 +526,81 @@ const CreateTravelOrderScreen = () => {
       setIsSubmitting(false);
     }
   };
+
+  const leafletState = JSON.stringify({
+    center: { latitude: mapRegion.latitude, longitude: mapRegion.longitude },
+    currentUserLocation,
+    selectedLocation,
+    routeCoordinates,
+    shouldFitRoute,
+  });
+
+  const leafletHtml = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+      html, body, #map { height: 100%; margin: 0; padding: 0; }
+      .leaflet-control-attribution { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+      const state = ${leafletState};
+      const map = L.map('map').setView([state.center.latitude, state.center.longitude], 14);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      const points = [];
+      if (state.currentUserLocation) {
+        const userLatLng = [state.currentUserLocation.latitude, state.currentUserLocation.longitude];
+        L.circleMarker(userLatLng, {
+          radius: 8,
+          color: '#ffffff',
+          weight: 2,
+          fillColor: '#1d4ed8',
+          fillOpacity: 1
+        }).addTo(map).bindPopup('Your Location');
+        points.push(userLatLng);
+      }
+      if (state.selectedLocation) {
+        const destLatLng = [state.selectedLocation.latitude, state.selectedLocation.longitude];
+        L.circleMarker(destLatLng, {
+          radius: 9,
+          color: '#ffffff',
+          weight: 2,
+          fillColor: '#dc3545',
+          fillOpacity: 1
+        }).addTo(map).bindPopup('Selected Destination');
+        points.push(destLatLng);
+      }
+      if (state.routeCoordinates && state.routeCoordinates.length > 0) {
+        const route = state.routeCoordinates.map(p => [p.latitude, p.longitude]);
+        L.polyline(route, { color: '#dc3545', weight: 4 }).addTo(map);
+        points.push(...route);
+      }
+      if (state.shouldFitRoute && points.length > 1) {
+        map.fitBounds(points, { padding: [30, 30] });
+      }
+
+      map.on('click', function (e) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'map-press',
+          latitude: e.latlng.lat,
+          longitude: e.latlng.lng
+        }));
+      });
+    </script>
+  </body>
+</html>
+  `;
 
   return (
     <>
@@ -645,25 +710,23 @@ const CreateTravelOrderScreen = () => {
                 </Pressable>
             </View>
             <View style={styles.mapWrapper}>
-                <MapView
-                    ref={mapViewRef}
-                    style={styles.map}
-                    region={mapRegion}
-                    onPress={handleMapPress}
-                    onPoiClick={handlePoiClick}
-                    showsUserLocation
-                    mapType="hybrid"
-                >
-                    {currentUserLocation && <Marker coordinate={currentUserLocation} title="Your Location" pinColor="blue" />}
-                    {selectedLocation && <Marker coordinate={selectedLocation} title="Selected Destination" />}
-                    {routeCoordinates.length > 0 && (
-                      <Polyline
-                        coordinates={routeCoordinates}
-                        strokeWidth={4}
-                        strokeColor={theme.accent}
-                      />
-                    )}
-                </MapView>
+                <WebView
+                  style={styles.map}
+                  originWhitelist={['*']}
+                  source={{ html: leafletHtml }}
+                  onMessage={(event) => {
+                    try {
+                      const data = JSON.parse(event.nativeEvent.data);
+                      if (data?.type === 'map-press' && typeof data.latitude === 'number' && typeof data.longitude === 'number') {
+                        handleMapPress({ latitude: data.latitude, longitude: data.longitude });
+                      }
+                    } catch (error) {
+                      if (__DEV__) {
+                        console.warn('Leaflet map message parse failed', error);
+                      }
+                    }
+                  }}
+                />
                 {!selectedLocation && (
                     <View style={styles.mapHintOverlay} pointerEvents="none">
                         <Text style={styles.mapHintText}>Tap on map to set destination</Text>
@@ -808,7 +871,7 @@ const CreateTravelOrderScreen = () => {
                   placeholderTextColor={theme.placeholder}
                 />
                 <Pressable
-                  onPress={() => setIsMapVisible(true)}
+                  onPress={openMapCenteredOnUser}
                   style={({ pressed }) => [styles.mapSelectButton, pressed && styles.mapSelectButtonPressed]}
                   accessibilityLabel="Pick destination on map"
                 >
@@ -837,9 +900,10 @@ const CreateTravelOrderScreen = () => {
                             setSuggestions([]);
                             setSuggestionsVisible(false);
                             if (currentUserLocation) {
+                              setShouldFitRoute(true);
                               getRoute(newLocation);
                             }
-                            setIsMapVisible(true);
+                            openMapCenteredOnUser();
                           }}
                         >
                           <FontAwesome name="map-pin" size={14} color={theme.primary} style={styles.suggestionIcon} />

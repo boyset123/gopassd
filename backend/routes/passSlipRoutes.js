@@ -13,6 +13,13 @@ router.post('/', auth, async (req, res) => {
   try {
     const { date, timeOut, estimatedTimeBack, destination, purpose, signature, latitude, longitude, routePolyline } = req.body;
 
+    const now = new Date();
+    const currentHour = now.getHours();
+    // Office hours are 8:00 AM to 5:00 PM (requesting allowed up to 4:59:59 PM).
+    if (currentHour < 8 || currentHour >= 17) {
+      return res.status(400).json({ message: 'Pass slip requests are only allowed during office hours (8:00 AM to 5:00 PM).' });
+    }
+
     const user = await User.findById(req.user.userId);
     if (!user) {
       return res.status(404).json({ message: 'User not found.' });
@@ -279,7 +286,9 @@ router.put('/:id/status', [auth, authorize('Program Head', 'Faculty Dean', 'Pres
         } else if (status === 'Approved') {
           notificationMessage = `Your pass slip has been approved by ${approverName}.`;
         } else if (status === 'Rejected') {
-          notificationMessage = `Your pass slip has been rejected by ${approverName}.`;
+          notificationMessage = passSlip.rejectionReason
+            ? `Your pass slip has been rejected by ${approverName}: ${passSlip.rejectionReason}`
+            : `Your pass slip has been rejected by ${approverName}.`;
         }
 
         if (notificationMessage) {

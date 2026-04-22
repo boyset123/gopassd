@@ -47,6 +47,17 @@ const webSelectStyle = {
   color: '#334155',
   cursor: 'pointer',
 };
+const webExportButtonStyle = {
+  backgroundColor: '#011a6b',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 8,
+  padding: '10px 14px',
+  fontSize: 13,
+  fontWeight: '700',
+  cursor: 'pointer',
+  minWidth: 140,
+};
 
 const getMondayOfWeek = (date: Date): Date => {
   const value = new Date(date);
@@ -119,6 +130,7 @@ const blankSheetForCurrentWeek = (): WeeklyTrackerSheet => {
 const formatHours = (value: number): string => value.toFixed(2);
 
 const getTotalUsedHours = (row: TrackerRow): number => row.monday + row.tuesday + row.wednesday + row.thursday + row.friday;
+const csvEscape = (value: string): string => `"${value.replace(/"/g, '""')}"`;
 
 export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScreenProps) {
   const { width } = useWindowDimensions();
@@ -195,6 +207,53 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
   const historyCount = Math.max(0, weekSheets.length - 1);
   const isCurrentWeekSelected = selectedSheet?.weekKey === getWeekKey(new Date());
 
+  const exportSelectedWeekToCsv = () => {
+    if (typeof document === 'undefined' || !selectedSheet) return;
+    const headers = [
+      'Employee Name',
+      'Monday (hrs)',
+      'Tuesday (hrs)',
+      'Wednesday (hrs)',
+      'Thursday (hrs)',
+      'Friday (hrs)',
+      'Total Used',
+      'Remaining Balance (2 hrs)',
+    ];
+    const lines = [headers.map(csvEscape).join(',')];
+
+    for (const row of selectedSheet.rows) {
+      const totalUsed = getTotalUsedHours(row);
+      const remaining = WEEKLY_LIMIT_HOURS - totalUsed;
+      lines.push(
+        [
+          row.employeeName,
+          formatHours(row.monday),
+          formatHours(row.tuesday),
+          formatHours(row.wednesday),
+          formatHours(row.thursday),
+          formatHours(row.friday),
+          formatHours(totalUsed),
+          remaining < 0 ? `Over by ${formatHours(Math.abs(remaining))}` : formatHours(remaining),
+        ]
+          .map((cell) => csvEscape(cell))
+          .join(',')
+      );
+    }
+
+    const csvContent = lines.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const weekPart = selectedSheet.weekKey || 'week';
+    const fileName = `pass-slip-tracker-${weekPart}.csv`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <View style={styles.wrapper}>
       <View style={styles.headerCard}>
@@ -213,15 +272,20 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
       </View>
 
       <View style={styles.controlsRow}>
-        <Text style={styles.controlLabel}>Week</Text>
-        <select value={selectedWeekKey} onChange={(e) => setSelectedWeekKey(e.target.value)} style={webSelectStyle as any}>
-          {weekSheets.map((sheet) => (
-            <option key={sheet.weekKey} value={sheet.weekKey}>
-              {sheet.weekLabel}
-              {sheet.weekKey === getWeekKey(new Date()) ? ' (Current Week)' : ''}
-            </option>
-          ))}
-        </select>
+        <View style={styles.controlsLeft}>
+          <Text style={styles.controlLabel}>Week</Text>
+          <select value={selectedWeekKey} onChange={(e) => setSelectedWeekKey(e.target.value)} style={webSelectStyle as any}>
+            {weekSheets.map((sheet) => (
+              <option key={sheet.weekKey} value={sheet.weekKey}>
+                {sheet.weekLabel}
+                {sheet.weekKey === getWeekKey(new Date()) ? ' (Current Week)' : ''}
+              </option>
+            ))}
+          </select>
+        </View>
+        <button type="button" style={webExportButtonStyle as any} onClick={exportSelectedWeekToCsv} disabled={!selectedSheet}>
+          Export Week CSV
+        </button>
       </View>
 
       <View style={styles.tableCard}>
@@ -347,6 +411,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  controlsLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,

@@ -97,7 +97,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Forgot password: send reset link if account exists (always return generic success).
+// Forgot password: only registered emails can request a reset link.
 router.post('/forgot-password', async (req, res) => {
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
@@ -107,9 +107,7 @@ router.post('/forgot-password', async (req, res) => {
 
     const user = await User.findOne({ email });
     if (!user) {
-      return res.json({
-        message: 'If an account with that email exists, a password reset link has been sent.',
-      });
+      return res.status(404).json({ message: 'This email is not registered.' });
     }
 
     const plainToken = crypto.randomBytes(32).toString('hex');
@@ -150,9 +148,7 @@ router.post('/forgot-password', async (req, res) => {
       console.warn('Forgot password email skipped: EMAIL_USER / EMAIL_PASS not configured.');
     }
 
-    return res.json({
-      message: 'If an account with that email exists, a password reset link has been sent.',
-    });
+    return res.json({ message: 'Password reset link sent successfully.' });
   } catch (error) {
     console.error('Forgot password error:', error);
     return res.status(500).json({ message: 'Server error' });

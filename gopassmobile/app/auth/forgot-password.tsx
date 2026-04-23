@@ -20,13 +20,21 @@ const ForgotPasswordScreen = () => {
       await axios.post(`${API_URL}/users/forgot-password`, {
         email: email.trim().toLowerCase(),
       });
-      Alert.alert('Success', 'If an account with that email exists, a password reset link has been sent.');
+      Alert.alert('Success', 'A password reset link has been sent to your registered email.');
       router.back();
     } catch (error: any) {
-      const message =
-        error?.response?.data?.message ||
-        'Unable to process your request right now. Please try again.';
-      Alert.alert('Error', message);
+      const status = error?.response?.status;
+      if (status === 404) {
+        Alert.alert(
+          'Email Not Registered',
+          'This email is not registered in the system. Please check the address or contact the administrator.'
+        );
+      } else {
+        const message =
+          error?.response?.data?.message ||
+          'Unable to process your request right now. Please try again.';
+        Alert.alert('Error', message);
+      }
     } finally {
       setIsSubmitting(false);
     }

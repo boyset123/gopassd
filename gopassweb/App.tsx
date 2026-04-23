@@ -6,6 +6,7 @@ import { View, ActivityIndicator, StyleSheet, Platform, Text, TextInput, Pressab
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import LoginScreen from './src/screens/LoginScreen';
+import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import AdminScreen from './src/screens/AdminScreen';
 import HrpDashboardScreen from './src/screens/HrpDashboardScreen';
 import SecurityDashboardScreen from './src/screens/SecurityDashboardScreen';
@@ -72,6 +73,7 @@ const App = () => {
         screenOptions={{ headerShown: false }}
       >
         <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
         <Stack.Screen name="Admin" component={AdminScreen} />
         <Stack.Screen name="HrpDashboard" component={HrpDashboardScreen} />
         <Stack.Screen name="SecurityDashboard" component={SecurityDashboardScreen} />

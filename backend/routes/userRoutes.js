@@ -3,6 +3,8 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { isConfigured, uploadProfileImage } = require('../lib/cloudinaryProfile');
@@ -29,6 +31,27 @@ function requireCloudinaryProfileUpload(req, res, next) {
     });
   }
   next();
+}
+
+const mailTransporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+function getWebResetBaseUrl(req) {
+  const explicit =
+    process.env.WEB_RESET_URL_BASE ||
+    process.env.WEB_APP_URL ||
+    process.env.WEB_URL;
+
+  if (explicit && String(explicit).trim()) {
+    return String(explicit).replace(/\/$/, '');
+  }
+
+  return `${req.protocol}://${req.get('host')}`;
 }
 
 // User login
@@ -71,6 +94,171 @@ router.post('/login', async (req, res) => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Forgot password: send reset link if account exists (always return generic success).
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required.' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.json({
+        message: 'If an account with that email exists, a password reset link has been sent.',
+      });
+    }
+
+    const plainToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(plainToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    user.resetPasswordToken = tokenHash;
+    user.resetPasswordExpires = expiresAt;
+    await user.save();
+
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      const resetBaseUrl = getWebResetBaseUrl(req);
+      const resetUrl = `${resetBaseUrl}/api/users/reset-password/${plainToken}`;
+
+      await mailTransporter.sendMail({
+        from: `"GoPass DOrSU" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'Reset your GoPass DOrSU password',
+        text:
+          'You requested a password reset.\n\n' +
+          `Open this link to set a new password: ${resetUrl}\n\n` +
+          'This link expires in 1 hour. If you did not request this, ignore this email.',
+        html: `
+          <div style="font-family:Segoe UI,Arial,sans-serif;color:#111827;line-height:1.6">
+            <h2 style="margin:0 0 12px 0;">Reset your GoPass DOrSU password</h2>
+            <p style="margin:0 0 14px 0;">You requested a password reset.</p>
+            <p style="margin:0 0 18px 0;">
+              <a href="${resetUrl}" style="background:#011a6b;color:#ffffff;padding:10px 14px;border-radius:8px;text-decoration:none;display:inline-block;">
+                Set new password
+              </a>
+            </p>
+            <p style="margin:0 0 10px 0;">This link expires in 1 hour.</p>
+            <p style="margin:0;color:#6b7280;">If you did not request this, you can ignore this email.</p>
+          </div>
+        `,
+      });
+    } else {
+      console.warn('Forgot password email skipped: EMAIL_USER / EMAIL_PASS not configured.');
+    }
+
+    return res.json({
+      message: 'If an account with that email exists, a password reset link has been sent.',
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Reset password form served from backend so email link always resolves.
+router.get('/reset-password/:token', async (req, res) => {
+  const token = String(req.params?.token || '').trim();
+  if (!token) {
+    return res.status(400).type('text').send('Invalid or missing reset token.');
+  }
+
+  const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reset Password - GoPass DOrSU</title>
+    <style>
+      body { font-family: Segoe UI, Arial, sans-serif; background: #f3f4f6; margin: 0; padding: 24px; }
+      .card { max-width: 420px; margin: 40px auto; background: #fff; padding: 22px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+      h1 { font-size: 22px; margin: 0 0 10px 0; color: #011a6b; }
+      p { color: #4b5563; margin: 0 0 16px 0; }
+      input { width: 100%; box-sizing: border-box; padding: 12px; margin-bottom: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; }
+      button { width: 100%; padding: 12px; border: none; border-radius: 8px; background: #011a6b; color: #fff; font-weight: 600; cursor: pointer; }
+      #message { margin-top: 14px; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Set New Password</h1>
+      <p>Enter your new password below.</p>
+      <form id="resetForm">
+        <input id="password" type="password" placeholder="New password" minlength="6" required />
+        <input id="confirmPassword" type="password" placeholder="Confirm new password" minlength="6" required />
+        <button type="submit">Update Password</button>
+      </form>
+      <div id="message"></div>
+    </div>
+    <script>
+      const form = document.getElementById('resetForm');
+      const message = document.getElementById('message');
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const password = document.getElementById('password').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+        if (password !== confirmPassword) {
+          message.style.color = '#dc2626';
+          message.textContent = 'Passwords do not match.';
+          return;
+        }
+        try {
+          const res = await fetch('/api/users/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: '${token}', password })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || 'Failed to reset password.');
+          message.style.color = '#059669';
+          message.textContent = 'Password updated successfully. You can now sign in.';
+          form.reset();
+        } catch (err) {
+          message.style.color = '#dc2626';
+          message.textContent = err.message || 'Failed to reset password.';
+        }
+      });
+    </script>
+  </body>
+</html>`;
+
+  return res.type('html').send(html);
+});
+
+router.post('/reset-password', async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim();
+    const password = String(req.body?.password || '');
+
+    if (!token || !password) {
+      return res.status(400).json({ message: 'Token and new password are required.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const user = await User.findOne({
+      resetPasswordToken: tokenHash,
+      resetPasswordExpires: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired reset token.' });
+    }
+
+    user.password = password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+
+    return res.json({ message: 'Password reset successful.' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 

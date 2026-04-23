@@ -1,19 +1,35 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ImageBackground, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
+import axios from 'axios';
+import { API_URL } from '../../config/api';
 
 const ForgotPasswordScreen = () => {
   const [email, setEmail] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
-  const handlePasswordReset = () => {
+  const handlePasswordReset = async () => {
     if (!email) {
       Alert.alert('Error', 'Please enter your email address.');
       return;
     }
-    // TODO: Implement password reset logic
-    Alert.alert('Success', 'If an account with that email exists, a password reset link has been sent.');
-    router.back();
+
+    setIsSubmitting(true);
+    try {
+      await axios.post(`${API_URL}/users/forgot-password`, {
+        email: email.trim().toLowerCase(),
+      });
+      Alert.alert('Success', 'If an account with that email exists, a password reset link has been sent.');
+      router.back();
+    } catch (error: any) {
+      const message =
+        error?.response?.data?.message ||
+        'Unable to process your request right now. Please try again.';
+      Alert.alert('Error', message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -36,8 +52,12 @@ const ForgotPasswordScreen = () => {
               keyboardType="email-address"
               autoCapitalize="none"
             />
-            <Pressable style={styles.button} onPress={handlePasswordReset}>
-              <Text style={styles.buttonText}>Send Reset Link</Text>
+            <Pressable
+              style={[styles.button, isSubmitting && styles.buttonDisabled]}
+              onPress={handlePasswordReset}
+              disabled={isSubmitting}
+            >
+              <Text style={styles.buttonText}>{isSubmitting ? 'Sending...' : 'Send Reset Link'}</Text>
             </Pressable>
             <Pressable onPress={() => router.back()}>
               <Text style={styles.backButtonText}>Back to Login</Text>
@@ -108,6 +128,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 10,
     backgroundColor: '#FFC107',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
   },
   buttonText: {
     color: '#003366',

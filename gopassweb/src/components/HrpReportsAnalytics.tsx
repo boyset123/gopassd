@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, useWindowDimensions } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, useWindowDimensions, Animated, Easing } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FontAwesome } from '@expo/vector-icons';
+import Svg, { Circle, Path } from 'react-native-svg';
 
 type Employee = {
   _id?: string;
@@ -90,6 +91,67 @@ const escapeCsv = (value: string) => {
   const needsQuotes = /[",\n]/.test(v);
   const escaped = v.replace(/"/g, '""');
   return needsQuotes ? `"${escaped}"` : escaped;
+};
+
+/** Polar coords: 0° = top, clockwise (for SVG donut arcs). */
+const polar = (cx: number, cy: number, r: number, deg: number) => {
+  const rad = (deg * Math.PI) / 180 - Math.PI / 2;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+};
+
+const donutSlicePath = (cx: number, cy: number, rOuter: number, rInner: number, startDeg: number, endDeg: number) => {
+  const sweep = endDeg - startDeg;
+  const large = sweep > 180 ? 1 : 0;
+  const p1 = polar(cx, cy, rOuter, startDeg);
+  const p2 = polar(cx, cy, rOuter, endDeg);
+  const p3 = polar(cx, cy, rInner, endDeg);
+  const p4 = polar(cx, cy, rInner, startDeg);
+  return `M${p1.x} ${p1.y} A${rOuter} ${rOuter} 0 ${large} 1 ${p2.x} ${p2.y} L${p3.x} ${p3.y} A${rInner} ${rInner} 0 ${large} 0 ${p4.x} ${p4.y} Z`;
+};
+
+type DonutSeg = { value: number; color: string; label: string };
+
+const DonutChart = ({ size, segments }: { size: number; segments: DonutSeg[] }) => {
+  const cx = size / 2;
+  const cy = size / 2;
+  const rOuter = size * 0.38;
+  const rInner = size * 0.22;
+  const total = segments.reduce((s, x) => s + Math.max(0, x.value), 0);
+  const strokeW = rOuter - rInner;
+  const rMid = (rOuter + rInner) / 2;
+
+  if (total <= 0) {
+    return (
+      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <Circle cx={cx} cy={cy} r={rMid} fill="none" stroke="#e2e8f0" strokeWidth={strokeW} />
+      </Svg>
+    );
+  }
+
+  const positive = segments.filter((s) => s.value > 0);
+  let angle = 0;
+  const paths: React.ReactNode[] = [];
+
+  if (positive.length === 1) {
+    const s = positive[0];
+    paths.push(<Path key="full-a" d={donutSlicePath(cx, cy, rOuter, rInner, 0, 180)} fill={s.color} />);
+    paths.push(<Path key="full-b" d={donutSlicePath(cx, cy, rOuter, rInner, 180, 360)} fill={s.color} />);
+  } else {
+    for (const seg of segments) {
+      if (seg.value <= 0) continue;
+      const sweep = (seg.value / total) * 360;
+      const start = angle;
+      const end = start + (sweep >= 359.99 ? 359.99 : sweep);
+      paths.push(<Path key={seg.label} d={donutSlicePath(cx, cy, rOuter, rInner, start, end)} fill={seg.color} />);
+      angle += sweep;
+    }
+  }
+
+  return (
+    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      {paths}
+    </Svg>
+  );
 };
 
 const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
@@ -201,14 +263,33 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
 
     const onTime = appliedFilteredRecords.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('on time')).length;
     const overdue = appliedFilteredRecords.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('overdue')).length;
+    const arrivalOther = Math.max(0, total - onTime - overdue);
 
-    const byType = {
-      passSlips,
-      travelOrders,
-    };
-
-    return { total, ...byType, onTime, overdue };
+    return { total, passSlips, travelOrders, onTime, overdue, arrivalOther };
   }, [appliedFilteredRecords]);
+
+  const recordsByDay = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of appliedFilteredRecords) {
+      const key = formatCsvDate(r.date);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [appliedFilteredRecords]);
+
+  const maxDayCount = useMemo(() => Math.max(1, ...recordsByDay.map(([, c]) => c)), [recordsByDay]);
+  const graphAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    graphAnim.setValue(0);
+    Animated.timing(graphAnim, {
+      toValue: 1,
+      duration: 520,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [graphAnim, kpis.total, kpis.passSlips, kpis.travelOrders, kpis.onTime, kpis.overdue, kpis.arrivalOther, recordsByDay.length, maxDayCount]);
 
   const topByCampus = useMemo(() => {
     const map = new Map<string, number>();
@@ -564,44 +645,170 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
         </View>
       </View>
 
-      <View style={styles.kpiGrid}>
-        <View style={styles.kpiCard}>
-          <View style={styles.kpiIconWrap}>
-            <FontAwesome name="list-alt" size={14} color="#fff" />
-          </View>
-          <View style={styles.kpiText}>
-            <Text style={styles.kpiValue}>{kpis.total}</Text>
-            <Text style={styles.kpiLabel}>Total Records</Text>
-          </View>
-        </View>
-        <View style={styles.kpiCard}>
-          <View style={[styles.kpiIconWrap, styles.kpiIconWrapAccent]}>
-            <FontAwesome name="check-circle" size={14} color="#fff" />
-          </View>
-          <View style={styles.kpiText}>
-            <Text style={styles.kpiValue}>{kpis.passSlips}</Text>
-            <Text style={styles.kpiLabel}>Pass Slips</Text>
-          </View>
-        </View>
-        <View style={styles.kpiCard}>
-          <View style={[styles.kpiIconWrap, styles.kpiIconWrapAccent2]}>
-            <FontAwesome name="plane" size={14} color="#fff" />
-          </View>
-          <View style={styles.kpiText}>
-            <Text style={styles.kpiValue}>{kpis.travelOrders}</Text>
-            <Text style={styles.kpiLabel}>Travel Orders</Text>
-          </View>
-        </View>
-        <View style={styles.kpiCard}>
-          <View style={[styles.kpiIconWrap, styles.kpiIconWrapWarn]}>
-            <FontAwesome name="exclamation-triangle" size={14} color="#fff" />
-          </View>
-          <View style={styles.kpiText}>
-            <Text style={styles.kpiValue}>
-              {kpis.onTime}
-              <Text style={styles.kpiValueSmall}> on time</Text>
+      <View style={styles.summaryChartsCard}>
+        <View style={[styles.summaryChartsHeader, isNarrow && styles.summaryChartsHeaderNarrow]}>
+          <View style={styles.summaryChartsHeaderText}>
+            <Text style={styles.summaryChartsTitle}>Visual summary</Text>
+            <Text style={styles.summaryChartsSubtitle}>
+              Document mix, arrival outcomes, and daily volume for the filtered set.
             </Text>
-            <Text style={styles.kpiLabel}>{kpis.overdue} overdue</Text>
+          </View>
+          <View style={styles.summaryTotalPill}>
+            <Text style={styles.summaryTotalValue}>{kpis.total}</Text>
+            <Text style={styles.summaryTotalLabel}>records</Text>
+          </View>
+        </View>
+
+        <View style={[styles.summaryChartsRow, isVeryNarrow && styles.summaryChartsRowStacked]}>
+          <View style={[styles.summaryChartCol, isVeryNarrow && styles.summaryChartColStacked]}>
+            <Text style={styles.donutBlockTitle}>By document type</Text>
+            <View style={styles.summaryColBody}>
+              <Animated.View
+                style={{
+                  opacity: graphAnim,
+                  transform: [
+                    {
+                      scale: graphAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.92, 1],
+                      }),
+                    },
+                  ],
+                }}
+              >
+                <DonutChart
+                  size={100}
+                  segments={[
+                    { label: 'Pass Slip', value: kpis.passSlips, color: '#fece00' },
+                    { label: 'Travel Order', value: kpis.travelOrders, color: '#0284c7' },
+                  ]}
+                />
+              </Animated.View>
+              <View style={styles.donutLegendColumn}>
+                <View style={styles.legendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: '#fece00' }]} />
+                  <Text style={styles.legendText} numberOfLines={2}>
+                    Pass slips · {kpis.passSlips}
+                  </Text>
+                </View>
+                <View style={styles.legendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: '#0284c7' }]} />
+                  <Text style={styles.legendText} numberOfLines={2}>
+                    Travel orders · {kpis.travelOrders}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.summaryChartCol,
+              !isVeryNarrow && styles.summaryChartColDivider,
+              isVeryNarrow && styles.summaryChartColStacked,
+            ]}
+          >
+            <Text style={styles.donutBlockTitle}>By arrival status</Text>
+            <View style={styles.summaryColBody}>
+              <Animated.View
+                style={{
+                  opacity: graphAnim,
+                  transform: [
+                    {
+                      scale: graphAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.92, 1],
+                      }),
+                    },
+                  ],
+                }}
+              >
+                <DonutChart
+                  size={100}
+                  segments={[
+                    { label: 'On time', value: kpis.onTime, color: '#16a34a' },
+                    { label: 'Overdue', value: kpis.overdue, color: '#dc3545' },
+                    { label: 'Other / unset', value: kpis.arrivalOther, color: '#94a3b8' },
+                  ]}
+                />
+              </Animated.View>
+              <View style={styles.donutLegendColumn}>
+                <View style={styles.legendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: '#16a34a' }]} />
+                  <Text style={styles.legendText} numberOfLines={2}>
+                    On time · {kpis.onTime}
+                  </Text>
+                </View>
+                <View style={styles.legendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: '#dc3545' }]} />
+                  <Text style={styles.legendText} numberOfLines={2}>
+                    Overdue · {kpis.overdue}
+                  </Text>
+                </View>
+                <View style={styles.legendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: '#94a3b8' }]} />
+                  <Text style={styles.legendText} numberOfLines={2}>
+                    Other / unset · {kpis.arrivalOther}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.summaryChartCol,
+              !isVeryNarrow && styles.summaryChartColDivider,
+              isVeryNarrow && styles.summaryChartColStacked,
+            ]}
+          >
+            <Text style={styles.donutBlockTitle}>Records by day</Text>
+            {recordsByDay.length ? (
+              <View style={styles.trendColumnBody}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  nestedScrollEnabled
+                  style={styles.trendScroll}
+                  contentContainerStyle={styles.trendScrollContent}
+                >
+                  {recordsByDay.map(([date, count]) => {
+                    const pct = (count / maxDayCount) * 100;
+                    const animatedHeight = graphAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['0%', `${pct}%`],
+                    });
+                    return (
+                      <Animated.View
+                        key={date}
+                        style={[
+                          styles.trendCol,
+                          {
+                            opacity: graphAnim,
+                            transform: [
+                              {
+                                translateY: graphAnim.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [8, 0],
+                                }),
+                              },
+                            ],
+                          },
+                        ]}
+                      >
+                        <Text style={styles.trendCount}>{count}</Text>
+                        <View style={styles.trendBarTrack}>
+                          <Animated.View style={[styles.trendBarFill, { height: animatedHeight }]} />
+                        </View>
+                        <Text style={styles.trendDateLabel}>{date.slice(5)}</Text>
+                      </Animated.View>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            ) : (
+              <Text style={styles.trendEmptyInCol}>No dated records.</Text>
+            )}
           </View>
         </View>
       </View>
@@ -1058,75 +1265,186 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 13,
   },
-  kpiGrid: {
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    marginBottom: 18,
-    ...Platform.select({
-      web: {
-        overflowX: 'auto' as any,
-        paddingBottom: 6,
-      },
-    }),
-  },
-  kpiCard: {
+  summaryChartsCard: {
     backgroundColor: '#fff',
     borderRadius: 18,
     borderWidth: 1,
     borderColor: 'rgba(1,26,107,0.14)',
-    padding: 18,
-    flex: 1,
-    minWidth: 200,
-    marginRight: 12,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
+    padding: 16,
+    marginBottom: 18,
     ...Platform.select({
       web: {
         boxShadow: '0 10px 26px rgba(1,26,107,0.06)',
       },
     }),
   },
-  kpiIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    backgroundColor: '#011a6b',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-    marginBottom: 0,
+  summaryChartsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(1,26,107,0.10)',
   },
-  kpiIconWrapAccent: {
-    backgroundColor: '#fece00',
+  summaryChartsHeaderNarrow: {
+    flexDirection: 'column',
+    gap: 12 as any,
   },
-  kpiIconWrapAccent2: {
-    backgroundColor: '#0284c7',
-  },
-  kpiIconWrapWarn: {
-    backgroundColor: '#dc3545',
-  },
-  kpiText: {
+  summaryChartsHeaderText: {
     flex: 1,
+    paddingRight: 12,
   },
-  kpiValue: {
-    fontSize: 30,
+  summaryChartsTitle: {
+    fontSize: 15,
     fontWeight: '900',
     color: '#011a6b',
-    letterSpacing: -0.6,
-    marginBottom: 6,
+    marginBottom: 4,
   },
-  kpiValueSmall: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: 'rgba(1,26,107,0.65)',
-    letterSpacing: 0.2,
-  },
-  kpiLabel: {
+  summaryChartsSubtitle: {
     fontSize: 12,
     color: 'rgba(1,26,107,0.65)',
     fontWeight: '600',
+    lineHeight: 17,
+  },
+  summaryTotalPill: {
+    borderRadius: 14,
+    backgroundColor: 'rgba(1,26,107,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.14)',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    minWidth: 88,
+  },
+  summaryTotalValue: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#011a6b',
+    letterSpacing: -0.5,
+  },
+  summaryTotalLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: 'rgba(1,26,107,0.55)',
+    textTransform: 'uppercase',
+    marginTop: 2,
+  },
+  summaryChartsRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    width: '100%',
+  },
+  summaryChartsRowStacked: {
+    flexDirection: 'column',
+  },
+  summaryChartCol: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 8,
+  },
+  summaryChartColDivider: {
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(1,26,107,0.10)',
+  },
+  summaryChartColStacked: {
+    width: '100%' as any,
+    flex: 0 as any,
+    borderLeftWidth: 0,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(1,26,107,0.10)',
+    paddingTop: 14,
+    marginTop: 12,
+  },
+  summaryColBody: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    width: '100%',
+  },
+  donutBlockTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#011a6b',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  donutLegendColumn: {
+    alignSelf: 'stretch',
+    width: '100%',
+    marginTop: 10,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  legendSwatch: {
+    width: 10,
+    height: 10,
+    borderRadius: 3,
+    marginRight: 8,
+  },
+  legendText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  trendColumnBody: {
+    flex: 1,
+    minHeight: 132,
+    minWidth: 0,
+    width: '100%',
+    justifyContent: 'center',
+  },
+  trendScroll: {
+    flexGrow: 0,
+    width: '100%',
+    maxWidth: '100%',
+  },
+  trendScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingVertical: 4,
+    paddingRight: 8,
+  },
+  trendEmptyInCol: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(1,26,107,0.55)',
+    marginTop: 8,
+  },
+  trendCol: {
+    width: 40,
+    marginRight: 10,
+    alignItems: 'center',
+  },
+  trendCount: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#011a6b',
+    marginBottom: 4,
+  },
+  trendBarTrack: {
+    width: 28,
+    height: 100,
+    borderRadius: 8,
+    backgroundColor: 'rgba(1,26,107,0.10)',
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+  },
+  trendBarFill: {
+    width: '100%',
+    backgroundColor: '#011a6b',
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+  },
+  trendDateLabel: {
+    marginTop: 6,
+    fontSize: 9,
+    fontWeight: '800',
+    color: 'rgba(1,26,107,0.55)',
   },
   analyticsRow: {
     flexDirection: 'row',

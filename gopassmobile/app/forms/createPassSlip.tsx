@@ -502,9 +502,13 @@ const CreatePassSlipScreen = () => {
         { text: 'OK', onPress: () => router.back() },
       ]);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Pass slip submission error:', error);
-      Alert.alert('Submission Failed', 'Could not submit your pass slip. Please try again.');
+      const serverMessage =
+        error?.response?.data?.message ||
+        error?.message ||
+        'Could not submit your pass slip. Please try again.';
+      Alert.alert('Submission Failed', serverMessage);
     } finally {
       setIsSubmitting(false);
     }

@@ -13,10 +13,17 @@ router.post('/', auth, async (req, res) => {
   try {
     const { date, timeOut, estimatedTimeBack, destination, purpose, signature, latitude, longitude, routePolyline } = req.body;
 
+    // Enforce office hours in PH local time to avoid server-timezone mismatches.
     const now = new Date();
-    const currentHour = now.getHours();
+    const phHour = Number(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Manila',
+        hour: 'numeric',
+        hour12: false,
+      }).format(now)
+    );
     // Office hours are 8:00 AM to 5:00 PM (requesting allowed up to 4:59:59 PM).
-    if (currentHour < 8 || currentHour >= 17) {
+    if (Number.isNaN(phHour) || phHour < 8 || phHour >= 17) {
       return res.status(400).json({ message: 'Pass slip requests are only allowed during office hours (8:00 AM to 5:00 PM).' });
     }
 

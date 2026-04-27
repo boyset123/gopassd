@@ -100,10 +100,18 @@ app.get('/recaptcha-embed', (req, res) => {
 </html>`);
 });
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gopassdorsu')
-.then(() => console.log('Connected to MongoDB'))
-.catch(err => console.error('MongoDB connection error:', err));
+const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/gopassdorsu';
+
+// Helpful connection-state logs for diagnosing startup/network issues.
+mongoose.connection.on('connected', () => {
+  console.log('MongoDB connected');
+});
+mongoose.connection.on('error', (err) => {
+  console.error('MongoDB connection error:', err);
+});
+mongoose.connection.on('disconnected', () => {
+  console.warn('MongoDB disconnected');
+});
 
 // Middleware to attach io to each request
 app.use((req, res, next) => {
@@ -143,14 +151,27 @@ app.get('/', (req, res) => {
   res.send('GOPASS DORSU API is running...');
 });
 
-// Start server
+// Start server only after MongoDB is available.
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  // Create admin and president users if they don't exist
-  createAdminUser();
-  createPresidentUser();
-});
+
+async function startServer() {
+  try {
+    console.log(`Connecting to MongoDB: ${mongoUri}`);
+    await mongoose.connect(mongoUri);
+
+    server.listen(PORT, async () => {
+      console.log(`Server running on port ${PORT}`);
+      // Create admin and president users only when DB is reachable.
+      await createAdminUser();
+      await createPresidentUser();
+    });
+  } catch (err) {
+    console.error('Failed to start server: MongoDB is unreachable.', err);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 // Function to create admin user
 async function createAdminUser() {

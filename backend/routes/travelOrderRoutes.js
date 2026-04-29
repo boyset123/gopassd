@@ -478,6 +478,11 @@ router.delete('/:id', auth, async (req, res) => {
       return res.status(403).json({ message: 'User not authorized to delete this travel order.' });
     }
 
+    const deletableStatuses = ['Completed', 'Cancelled', 'Rejected'];
+    if (!deletableStatuses.includes(travelOrder.status)) {
+      return res.status(400).json({ message: 'Only completed, cancelled, or rejected travel orders can be deleted.' });
+    }
+
     await travelOrder.deleteOne();
 
     // --- Real-time Update via Socket.IO ---

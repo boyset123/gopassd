@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator, Modal, TouchableOpacity, Image, ImageBackground, ScrollView, Alert, TextInput, Animated as RNAnimated, Platform, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator, Modal, TouchableOpacity, Image, ImageBackground, ScrollView, Alert, TextInput, Animated as RNAnimated, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Print from 'expo-print';
@@ -124,7 +124,6 @@ const getStatusStyle = (status: string) => {
 };
 
 export default function SlipsScreen() {
-  const { width: windowWidth } = useWindowDimensions();
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -143,6 +142,7 @@ export default function SlipsScreen() {
     markNotificationRead,
     markAllRead,
     deleteNotification: deleteNotificationFromContext,
+    deleteAllNotifications,
   } = useNotifications();
   const [isNotificationsModalVisible, setNotificationsModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -689,7 +689,7 @@ export default function SlipsScreen() {
                 <Text style={styles.scanArrivalButtonText}>Scan for Arrival</Text>
               </Pressable>
             )}
-            {(item.status === 'Rejected' || item.status === 'Cancelled') && (
+            {isHistoryItem(item) && (
               <Pressable style={styles.deleteButtonSmall} onPress={() => handleDelete(item._id, item.type)}>
                 <FontAwesome name="trash-o" size={14} color="#fff" />
               </Pressable>
@@ -878,6 +878,7 @@ export default function SlipsScreen() {
               <ScrollView
                 horizontal
                 nestedScrollEnabled
+                directionalLockEnabled
                 showsHorizontalScrollIndicator
                 keyboardShouldPersistTaps="handled"
                 style={styles.modalContentHorizontalScroll}
@@ -888,9 +889,7 @@ export default function SlipsScreen() {
                   keyboardShouldPersistTaps="handled"
                   style={[
                     styles.modalContentBodyVerticalScroll,
-                    {
-                      minWidth: Math.max(windowWidth * 0.9 - 40, Math.min(windowWidth - 32, 420)),
-                    },
+                    { minWidth: '100%' },
                   ]}
                   contentContainerStyle={styles.modalContentBodyVerticalScrollContent}
                 >
@@ -964,14 +963,16 @@ export default function SlipsScreen() {
 
                 {selectedSubmission.type === 'Travel Order' && (
                   <>
-                  <TravelOrderForm
-                    order={selectedSubmission as any}
-                    presidentName={selectedSubmission.presidentApprovedBy?.name || presidentName}
-                    currentUserId={user?._id}
-                    approverSignature={selectedSubmission.approverSignature || null}
-                    onRedoApproverSignature={() => {}}
-                    onChooseSignature={() => {}}
-                  />
+                    <View style={styles.travelOrderFormWrapper}>
+                      <TravelOrderForm
+                        order={selectedSubmission as any}
+                        presidentName={selectedSubmission.presidentApprovedBy?.name || presidentName}
+                        currentUserId={user?._id}
+                        approverSignature={selectedSubmission.approverSignature || null}
+                        onRedoApproverSignature={() => {}}
+                        onChooseSignature={() => {}}
+                      />
+                    </View>
 
                 {selectedSubmission.status === 'Rejected' && (
                   <>
@@ -1028,6 +1029,7 @@ export default function SlipsScreen() {
         onClose={() => setNotificationsModalVisible(false)}
         notifications={notifications}
         onDeleteNotification={handleDeleteNotification}
+        onDeleteAllNotifications={deleteAllNotifications}
         onMarkNotificationRead={markNotificationRead}
         onMarkAllRead={markAllRead}
       />
@@ -1810,15 +1812,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: 12,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
     width: '90%',
-    maxHeight: '85%',
+    maxHeight: '94%',
     backgroundColor: theme.surface,
     borderRadius: 12,
     padding: 20,
-    alignItems: 'center',
+    alignItems: 'stretch',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
@@ -1826,6 +1829,7 @@ const styles = StyleSheet.create({
     elevation: 5,
     borderTopWidth: 4,
     borderTopColor: theme.accent,
+    minHeight: 0,
   },
   modalContentHorizontalScroll: {
     width: '100%',
@@ -1835,13 +1839,17 @@ const styles = StyleSheet.create({
   },
   modalContentHorizontalScrollContent: {
     flexGrow: 1,
-    alignItems: 'stretch',
   },
   modalContentBodyVerticalScroll: {
     flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
   },
   modalContentBodyVerticalScrollContent: {
-    paddingBottom: 8,
+    paddingBottom: 28,
+  },
+  travelOrderFormWrapper: {
+    minWidth: 420,
   },
   modalTitle: {
     fontSize: 20,

@@ -571,6 +571,23 @@ router.delete('/me/notifications/:notificationId', auth, async (req, res) => {
   }
 });
 
+// Delete all notifications
+router.delete('/me/notifications', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    user.notifications = [];
+    await user.save();
+    res.json({ message: 'All notifications deleted successfully.' });
+  } catch (error) {
+    console.error('Error deleting all notifications:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get all users with optional filters
 router.get('/', async (req, res) => {
   try {

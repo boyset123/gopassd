@@ -103,6 +103,7 @@ type NotificationsContextValue = {
   /** Marks a single notification read (server + local state). Client-only ids update local state only. */
   markNotificationRead: (id: string) => Promise<void>;
   deleteNotification: (id: string) => Promise<void>;
+  deleteAllNotifications: () => Promise<void>;
 };
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
@@ -354,6 +355,20 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     }
   }, []);
 
+  const deleteAllNotifications = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return;
+      await axios.delete(`${API_URL}/users/me/notifications`, {
+        headers: { 'x-auth-token': token },
+      });
+      setNotifications([]);
+    } catch (e) {
+      console.error('Failed to delete all notifications', e);
+      throw e;
+    }
+  }, []);
+
   // Load current user id once (so socket listener can run without waiting for a screen)
   useEffect(() => {
     let cancelled = false;
@@ -440,6 +455,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     markAllRead,
     markNotificationRead,
     deleteNotification,
+    deleteAllNotifications,
   };
 
   return (

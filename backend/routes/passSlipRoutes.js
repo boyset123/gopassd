@@ -360,6 +360,11 @@ router.delete('/:id', auth, async (req, res) => {
         }
     }
 
+    const deletableStatuses = ['Completed', 'Cancelled', 'Rejected'];
+    if (!deletableStatuses.includes(passSlip.status)) {
+      return res.status(400).json({ message: 'Only completed, cancelled, or rejected pass slips can be deleted.' });
+    }
+
     await passSlip.deleteOne();
 
     // --- Real-time Update via Socket.IO ---

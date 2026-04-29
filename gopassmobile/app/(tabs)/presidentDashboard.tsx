@@ -121,6 +121,7 @@ export default function PresidentDashboard() {
     markNotificationRead,
     markAllRead,
     deleteNotification: deleteNotificationFromContext,
+    deleteAllNotifications,
   } = useNotifications();
   const [isNotificationsModalVisible, setNotificationsModalVisible] = useState(false);
   const socket = useSocket();
@@ -548,6 +549,7 @@ export default function PresidentDashboard() {
         onClose={() => setNotificationsModalVisible(false)}
         notifications={notifications}
         onDeleteNotification={handleDeleteNotification}
+        onDeleteAllNotifications={deleteAllNotifications}
         onMarkNotificationRead={markNotificationRead}
         onMarkAllRead={markAllRead}
       />

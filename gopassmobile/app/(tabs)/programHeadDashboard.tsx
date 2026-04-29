@@ -107,6 +107,7 @@ export default function ProgramHeadDashboard() {
     markNotificationRead,
     markAllRead,
     deleteNotification: deleteNotificationFromContext,
+    deleteAllNotifications,
   } = useNotifications();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -599,6 +600,7 @@ export default function ProgramHeadDashboard() {
         onClose={() => setNotificationsModalVisible(false)}
         notifications={notifications}
         onDeleteNotification={handleDeleteNotification}
+        onDeleteAllNotifications={deleteAllNotifications}
         onMarkNotificationRead={markNotificationRead}
         onMarkAllRead={markAllRead}
       />

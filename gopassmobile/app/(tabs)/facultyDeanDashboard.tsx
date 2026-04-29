@@ -115,6 +115,7 @@ export default function FacultyDeanDashboard() {
     markNotificationRead,
     markAllRead,
     deleteNotification: deleteNotificationFromContext,
+    deleteAllNotifications,
   } = useNotifications();
   const [isNotificationsModalVisible, setNotificationsModalVisible] = useState(false);
   const [approverSignature, setApproverSignature] = useState<string | null>(null);
@@ -411,6 +412,7 @@ export default function FacultyDeanDashboard() {
         onClose={() => setNotificationsModalVisible(false)}
         notifications={notifications}
         onDeleteNotification={handleDeleteNotification}
+        onDeleteAllNotifications={deleteAllNotifications}
         onMarkNotificationRead={markNotificationRead}
         onMarkAllRead={markAllRead}
       />

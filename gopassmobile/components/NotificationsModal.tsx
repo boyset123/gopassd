@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   Modal,
+  Alert,
   TouchableOpacity,
   TextInput,
   ScrollView,
@@ -65,6 +66,7 @@ export interface NotificationsModalProps {
   onClose: () => void;
   notifications: Notification[];
   onDeleteNotification: (id: string) => void;
+  onDeleteAllNotifications?: () => void | Promise<void>;
   /** Called when the user taps a notification row (e.g. to expand). Use to mark as read on first interaction. */
   onMarkNotificationRead?: (id: string) => void;
   /** Marks every notification read (e.g. header “mark all” control). */
@@ -76,6 +78,7 @@ export function NotificationsModal({
   onClose,
   notifications,
   onDeleteNotification,
+  onDeleteAllNotifications,
   onMarkNotificationRead,
   onMarkAllRead,
 }: NotificationsModalProps) {
@@ -113,6 +116,24 @@ export function NotificationsModal({
 
   const listScrollHeight = Math.round(Dimensions.get('window').height * 0.48);
 
+  const handleDeleteAllPress = useCallback(() => {
+    if (!onDeleteAllNotifications) return;
+    Alert.alert(
+      'Delete all notifications',
+      'Are you sure you want to delete all notifications?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete All',
+          style: 'destructive',
+          onPress: () => {
+            void onDeleteAllNotifications();
+          },
+        },
+      ]
+    );
+  }, [onDeleteAllNotifications]);
+
   return (
     <Modal
       visible={visible}
@@ -140,6 +161,17 @@ export function NotificationsModal({
                   accessibilityRole="button"
                 >
                   <FontAwesome name="check-square-o" size={18} color={theme.primary} />
+                </TouchableOpacity>
+              ) : null}
+              {onDeleteAllNotifications != null && notifications.length > 0 ? (
+                <TouchableOpacity
+                  style={styles.deleteAllBtn}
+                  onPress={handleDeleteAllPress}
+                  activeOpacity={0.7}
+                  accessibilityLabel="Delete all notifications"
+                  accessibilityRole="button"
+                >
+                  <FontAwesome name="trash" size={16} color={theme.danger} />
                 </TouchableOpacity>
               ) : null}
               <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
@@ -364,6 +396,14 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     backgroundColor: 'rgba(1,26,107,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteAllBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(220,53,69,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },

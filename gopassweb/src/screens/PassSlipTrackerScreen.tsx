@@ -127,7 +127,14 @@ const blankSheetForCurrentWeek = (): WeeklyTrackerSheet => {
   };
 };
 
-const formatHours = (value: number): string => value.toFixed(2);
+const formatHoursAndMinutes = (value: number): string => {
+  const totalMinutes = Math.round(Math.max(0, value) * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+};
 
 const getTotalUsedHours = (row: TrackerRow): number => row.monday + row.tuesday + row.wednesday + row.thursday + row.friday;
 const csvEscape = (value: string): string => `"${value.replace(/"/g, '""')}"`;
@@ -211,13 +218,13 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
     if (typeof document === 'undefined' || !selectedSheet) return;
     const headers = [
       'Employee Name',
-      'Monday (hrs)',
-      'Tuesday (hrs)',
-      'Wednesday (hrs)',
-      'Thursday (hrs)',
-      'Friday (hrs)',
+      'Monday (h:m)',
+      'Tuesday (h:m)',
+      'Wednesday (h:m)',
+      'Thursday (h:m)',
+      'Friday (h:m)',
       'Total Used',
-      'Remaining Balance (2 hrs)',
+      'Remaining Balance (2h cap)',
     ];
     const lines = [headers.map(csvEscape).join(',')];
 
@@ -227,13 +234,13 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
       lines.push(
         [
           row.employeeName,
-          formatHours(row.monday),
-          formatHours(row.tuesday),
-          formatHours(row.wednesday),
-          formatHours(row.thursday),
-          formatHours(row.friday),
-          formatHours(totalUsed),
-          remaining < 0 ? `Over by ${formatHours(Math.abs(remaining))}` : formatHours(remaining),
+          formatHoursAndMinutes(row.monday),
+          formatHoursAndMinutes(row.tuesday),
+          formatHoursAndMinutes(row.wednesday),
+          formatHoursAndMinutes(row.thursday),
+          formatHoursAndMinutes(row.friday),
+          formatHoursAndMinutes(totalUsed),
+          remaining < 0 ? `Over by ${formatHoursAndMinutes(Math.abs(remaining))}` : formatHoursAndMinutes(remaining),
         ]
           .map((cell) => csvEscape(cell))
           .join(',')
@@ -299,13 +306,13 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
           <View style={[styles.tableInner, isCompactTable && styles.tableInnerCompact]}>
             <View style={styles.tableHeader}>
               <Text style={[styles.headerCell, styles.colEmployee, isCompactTable && styles.colEmployeeCompact]}>Employee Name</Text>
-              <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Monday (hrs)</Text>
-              <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Tuesday (hrs)</Text>
-              <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Wednesday (hrs)</Text>
-              <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Thursday (hrs)</Text>
-              <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Friday (hrs)</Text>
+              <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Monday (h:m)</Text>
+              <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Tuesday (h:m)</Text>
+              <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Wednesday (h:m)</Text>
+              <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Thursday (h:m)</Text>
+              <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Friday (h:m)</Text>
               <Text style={[styles.headerCell, styles.colTotal, isCompactTable && styles.colTotalCompact]}>Total Used</Text>
-              <Text style={[styles.headerCell, styles.colBalance, isCompactTable && styles.colBalanceCompact]}>Remaining Balance (2 hrs)</Text>
+              <Text style={[styles.headerCell, styles.colBalance, isCompactTable && styles.colBalanceCompact]}>Remaining Balance (2h cap)</Text>
             </View>
 
             {selectedSheet?.rows?.length ? (
@@ -319,26 +326,26 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
                       <Text style={styles.employeeText}>{row.employeeName}</Text>
                     </View>
                     <View style={[styles.colDay, styles.cell, isCompactTable && styles.colDayCompact]}>
-                      <Text style={styles.valueText}>{formatHours(row.monday)}</Text>
+                      <Text style={styles.valueText}>{formatHoursAndMinutes(row.monday)}</Text>
                     </View>
                     <View style={[styles.colDay, styles.cell, isCompactTable && styles.colDayCompact]}>
-                      <Text style={styles.valueText}>{formatHours(row.tuesday)}</Text>
+                      <Text style={styles.valueText}>{formatHoursAndMinutes(row.tuesday)}</Text>
                     </View>
                     <View style={[styles.colDay, styles.cell, isCompactTable && styles.colDayCompact]}>
-                      <Text style={styles.valueText}>{formatHours(row.wednesday)}</Text>
+                      <Text style={styles.valueText}>{formatHoursAndMinutes(row.wednesday)}</Text>
                     </View>
                     <View style={[styles.colDay, styles.cell, isCompactTable && styles.colDayCompact]}>
-                      <Text style={styles.valueText}>{formatHours(row.thursday)}</Text>
+                      <Text style={styles.valueText}>{formatHoursAndMinutes(row.thursday)}</Text>
                     </View>
                     <View style={[styles.colDay, styles.cell, isCompactTable && styles.colDayCompact]}>
-                      <Text style={styles.valueText}>{formatHours(row.friday)}</Text>
+                      <Text style={styles.valueText}>{formatHoursAndMinutes(row.friday)}</Text>
                     </View>
                     <View style={[styles.colTotal, styles.cell, isCompactTable && styles.colTotalCompact]}>
-                      <Text style={styles.valueTextStrong}>{formatHours(totalUsed)}</Text>
+                      <Text style={styles.valueTextStrong}>{formatHoursAndMinutes(totalUsed)}</Text>
                     </View>
                     <View style={[styles.colBalance, styles.cell, isCompactTable && styles.colBalanceCompact]}>
                       <Text style={[styles.valueTextStrong, isOver && styles.overLimitText]}>
-                        {isOver ? `Over by ${formatHours(Math.abs(remaining))}` : formatHours(remaining)}
+                        {isOver ? `Over by ${formatHoursAndMinutes(Math.abs(remaining))}` : formatHoursAndMinutes(remaining)}
                       </Text>
                     </View>
                   </View>

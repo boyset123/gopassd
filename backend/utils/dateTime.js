@@ -1,17 +1,37 @@
-function parseLocalDate(dateValue) {
+const MANILA_OFFSET_MINUTES = 8 * 60;
+
+function buildManilaDate(year, monthIndex, day, hours = 0, minutes = 0) {
+  const utcMs = Date.UTC(year, monthIndex, day, hours, minutes, 0, 0) - MANILA_OFFSET_MINUTES * 60 * 1000;
+  return new Date(utcMs);
+}
+
+function extractDateParts(dateValue) {
   if (!dateValue) return null;
-  const parsed = new Date(dateValue);
-  if (Number.isNaN(parsed.getTime())) return null;
 
   const match = String(dateValue).match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (match) {
-    const year = parseInt(match[1], 10);
-    const monthIndex = parseInt(match[2], 10) - 1;
-    const day = parseInt(match[3], 10);
-    return new Date(year, monthIndex, day, 0, 0, 0, 0);
+    return {
+      year: parseInt(match[1], 10),
+      monthIndex: parseInt(match[2], 10) - 1,
+      day: parseInt(match[3], 10),
+    };
   }
 
-  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0);
+  const parsed = new Date(dateValue);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  // Fallback for Date/ISO values while remaining timezone-stable.
+  return {
+    year: parsed.getUTCFullYear(),
+    monthIndex: parsed.getUTCMonth(),
+    day: parsed.getUTCDate(),
+  };
+}
+
+function parseLocalDate(dateValue) {
+  const parts = extractDateParts(dateValue);
+  if (!parts) return null;
+  return buildManilaDate(parts.year, parts.monthIndex, parts.day, 0, 0);
 }
 
 function parseMeridiemTimeToDate(timeStr, dateValue) {
@@ -24,11 +44,10 @@ function parseMeridiemTimeToDate(timeStr, dateValue) {
   if (ampm === 'PM' && hours < 12) hours += 12;
   if (ampm === 'AM' && hours === 12) hours = 0;
 
-  const baseDate = parseLocalDate(dateValue);
-  if (!baseDate) return null;
+  const parts = extractDateParts(dateValue);
+  if (!parts) return null;
 
-  baseDate.setHours(hours, minutes, 0, 0);
-  return baseDate;
+  return buildManilaDate(parts.year, parts.monthIndex, parts.day, hours, minutes);
 }
 
 function parseMeridiemTimeToMillisOfDay(timeStr) {

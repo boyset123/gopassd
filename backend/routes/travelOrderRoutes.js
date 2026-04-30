@@ -6,6 +6,7 @@ const authorize = require('../middleware/authorize');
 const User = require('../models/User');
 const TravelOrderCounter = require('../models/TravelOrderCounter');
 const QRCode = require('qrcode');
+const { parseLocalDate, parseMeridiemTimeToDate } = require('../utils/dateTime');
 const multer = require('multer');
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
@@ -638,22 +639,12 @@ router.put('/:id/verify', [auth, authorize('Security Personnel')], async (req, r
     }
 
     // Departure date/time restriction: cannot verify until scheduled departure date/time has been reached
-    const parseTimeToDate = (timeStr, date) => {
-      if (!timeStr || typeof timeStr !== 'string') return null;
-      const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-      if (!match) return null;
-      let hours = parseInt(match[1], 10);
-      const minutes = parseInt(match[2], 10);
-      const ampm = (match[3] || '').toUpperCase();
-      if (ampm === 'PM' && hours < 12) hours += 12;
-      if (ampm === 'AM' && hours === 12) hours = 0;
-      const newDate = new Date(date);
-      newDate.setHours(hours, minutes, 0, 0);
-      return newDate;
-    };
-    let departureMoment = new Date(travelOrder.departureDate);
+    let departureMoment = parseLocalDate(travelOrder.departureDate);
+    if (!departureMoment) {
+      return res.status(400).json({ message: 'Invalid departure date on travel order.' });
+    }
     if (travelOrder.timeOut) {
-      const withTime = parseTimeToDate(travelOrder.timeOut, travelOrder.departureDate);
+      const withTime = parseMeridiemTimeToDate(travelOrder.timeOut, travelOrder.departureDate);
       if (withTime) departureMoment = withTime;
       else departureMoment.setHours(0, 0, 0, 0);
     } else {

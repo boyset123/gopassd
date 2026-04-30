@@ -5,6 +5,7 @@ const auth = require('../middleware/auth'); // Assuming you have an auth middlew
 const authorize = require('../middleware/authorize');
 const QRCode = require('qrcode');
 const admin = require('firebase-admin');
+const { parseMeridiemTimeToDate, parseMeridiemTimeToMillisOfDay } = require('../utils/dateTime');
 
 // Create a new pass slip
 const User = require('../models/User');
@@ -51,24 +52,8 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ message: 'Approver could not be determined.' });
     }
 
-    const parseTimeToDate = (timeStr, date) => {
-        const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-        if (!match) return null;
-
-        let hours = parseInt(match[1], 10);
-        const minutes = parseInt(match[2], 10);
-        const ampm = match[3].toUpperCase();
-
-        if (ampm === 'PM' && hours < 12) hours += 12;
-        if (ampm === 'AM' && hours === 12) hours = 0;
-
-        const newDate = new Date(date);
-        newDate.setHours(hours, minutes, 0, 0);
-        return newDate;
-    };
-
-    const startTime = parseTimeToDate(timeOut, date);
-    const endTime = parseTimeToDate(estimatedTimeBack, date);
+    const startTime = parseMeridiemTimeToDate(timeOut, date);
+    const endTime = parseMeridiemTimeToDate(estimatedTimeBack, date);
 
     if (!startTime || !endTime || endTime < startTime) {
         return res.status(400).json({ message: 'Invalid time format or range.' });
@@ -207,24 +192,8 @@ router.put('/:id/status', [auth, authorize('Program Head', 'Faculty Dean', 'Pres
           return res.status(404).json({ message: 'Employee not found.' });
         }
 
-        const parseTimeToDate = (timeStr, date) => {
-            const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-            if (!match) return null;
-
-            let hours = parseInt(match[1], 10);
-            const minutes = parseInt(match[2], 10);
-            const ampm = match[3].toUpperCase();
-
-            if (ampm === 'PM' && hours < 12) hours += 12;
-            if (ampm === 'AM' && hours === 12) hours = 0;
-
-            const newDate = new Date(date);
-            newDate.setHours(hours, minutes, 0, 0);
-            return newDate;
-        };
-
-        const startTime = parseTimeToDate(passSlip.timeOut, passSlip.date);
-        const endTime = parseTimeToDate(passSlip.estimatedTimeBack, passSlip.date);
+        const startTime = parseMeridiemTimeToDate(passSlip.timeOut, passSlip.date);
+        const endTime = parseMeridiemTimeToDate(passSlip.estimatedTimeBack, passSlip.date);
 
         if (!startTime || !endTime || endTime < startTime) {
             return res.status(400).json({ message: 'Invalid time format or range on the pass slip.' });
@@ -512,19 +481,7 @@ router.put('/:id/verify', [auth, authorize('Security Personnel')], async (req, r
     }
 
     // Departure date/time restriction: cannot verify until scheduled departure time has been reached
-    const parseTimeToDate = (timeStr, date) => {
-      const match = (timeStr || '').match(/(\d+):(\d+)\s*(AM|PM)/i);
-      if (!match) return null;
-      let hours = parseInt(match[1], 10);
-      const minutes = parseInt(match[2], 10);
-      const ampm = (match[3] || '').toUpperCase();
-      if (ampm === 'PM' && hours < 12) hours += 12;
-      if (ampm === 'AM' && hours === 12) hours = 0;
-      const newDate = new Date(date);
-      newDate.setHours(hours, minutes, 0, 0);
-      return newDate;
-    };
-    const departureMoment = parseTimeToDate(passSlip.timeOut, passSlip.date);
+    const departureMoment = parseMeridiemTimeToDate(passSlip.timeOut, passSlip.date);
     if (!departureMoment) {
       return res.status(400).json({ message: 'Invalid departure time on pass slip.' });
     }
@@ -551,25 +508,17 @@ router.put('/:id/verify', [auth, authorize('Security Personnel')], async (req, r
           departureTime: { $gte: startOfDay, $lte: endOfDay }
         });
 
-        const parseTime = (timeStr) => {
-          const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-          if (!match) return null;
-
-          let hours = parseInt(match[1], 10);
-          const minutes = parseInt(match[2], 10);
-          const ampm = match[3].toUpperCase();
-
-          if (ampm === 'PM' && hours < 12) hours += 12;
-          if (ampm === 'AM' && hours === 12) hours = 0;
-
-          const date = new Date();
-          date.setHours(hours, minutes, 0, 0);
-          return date.getTime();
-        };
-
-        const requestedDuration = parseTime(passSlip.estimatedTimeBack) - parseTime(passSlip.timeOut);
+        const requestedStart = parseMeridiemTimeToMillisOfDay(passSlip.timeOut);
+        const requestedEnd = parseMeridiemTimeToMillisOfDay(passSlip.estimatedTimeBack);
+        if (requestedStart === null || requestedEnd === null || requestedEnd <= requestedStart) {
+          return res.status(400).json({ message: 'Invalid time format or range on the pass slip.' });
+        }
+        const requestedDuration = requestedEnd - requestedStart;
         const totalDurationToday = verifiedSlipsToday.reduce((acc, slip) => {
-          return acc + (parseTime(slip.estimatedTimeBack) - parseTime(slip.timeOut));
+          const start = parseMeridiemTimeToMillisOfDay(slip.timeOut);
+          const end = parseMeridiemTimeToMillisOfDay(slip.estimatedTimeBack);
+          if (start === null || end === null || end <= start) return acc;
+          return acc + (end - start);
         }, 0);
 
         if (totalDurationToday + requestedDuration > 2 * 60 * 60 * 1000) { // 2 hours in milliseconds

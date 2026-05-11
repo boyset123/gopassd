@@ -17,8 +17,6 @@ import { API_URL } from '../../config/api';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
-const OFFICE_START_HOUR = 8;
-const OFFICE_END_HOUR = 17;
 
 const theme = {
   primary: '#011a6b',
@@ -97,9 +95,6 @@ const CreatePassSlipScreen = () => {
     latitudeDelta: 0.0922,
     longitudeDelta: 0.0421,
   });
-  const now = new Date();
-  const currentHour = now.getHours();
-  const isWithinOfficeHours = currentHour >= OFFICE_START_HOUR && currentHour < OFFICE_END_HOUR;
 
   const onChangeDate = (event: any, selectedDate?: Date) => {
     setShowDatePicker(false);
@@ -469,11 +464,6 @@ const CreatePassSlipScreen = () => {
       return;
     }
 
-    if (!isWithinOfficeHours) {
-      Alert.alert('Office Hours Only', 'Pass slip submission is allowed only during office hours (8:00 AM to 5:00 PM).');
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
@@ -693,14 +683,6 @@ const CreatePassSlipScreen = () => {
         <View style={styles.previewOverlay}>
           <View style={styles.previewContent}>
             <ScrollView>
-              {!isWithinOfficeHours && (
-                <View style={styles.officeHoursWarningBox}>
-                  <Text style={styles.officeHoursWarningTitle}>Office hours only</Text>
-                  <Text style={styles.officeHoursWarningText}>
-                    Submission is disabled. You can submit pass slips only from 8:00 AM to 5:00 PM.
-                  </Text>
-                </View>
-              )}
               <View style={styles.docHeader}>
                 <View>
                   <View style={styles.blueLine} />
@@ -778,10 +760,10 @@ const CreatePassSlipScreen = () => {
                 style={[
                   styles.modalButton,
                   styles.submitButton,
-                  (!isWithinOfficeHours || isSubmitting) && styles.submitButtonDisabled,
+                  isSubmitting && styles.submitButtonDisabled,
                 ]}
                 onPress={handleSubmit}
-                disabled={isSubmitting || !isWithinOfficeHours}
+                disabled={isSubmitting}
               >
                 {isSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Submit</Text>}
               </Pressable>
@@ -1914,25 +1896,6 @@ const styles = StyleSheet.create({
     color: theme.danger,
     fontSize: 12,
     fontWeight: '700',
-  },
-  officeHoursWarningBox: {
-    backgroundColor: '#fff4e5',
-    borderWidth: 1,
-    borderColor: '#f0b429',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 14,
-  },
-  officeHoursWarningTitle: {
-    color: '#8a4b00',
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  officeHoursWarningText: {
-    color: '#8a4b00',
-    fontSize: 13,
-    lineHeight: 18,
   },
   submitButtonDisabled: {
     backgroundColor: theme.textMuted,

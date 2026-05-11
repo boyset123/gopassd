@@ -873,7 +873,7 @@ export const styles = StyleSheet.create({
       flexGrow: 0,
     },
     recordsTableInner: {
-      minWidth: 1080,
+      minWidth: 1240,
     },
     recordsTableHeader: {
       flexDirection: 'row',
@@ -892,6 +892,7 @@ export const styles = StyleSheet.create({
       textAlign: 'left',
     },
     recordsColEmployee: { width: 220, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
+    recordsColTracking: { width: 160, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
     recordsColType: { width: 140, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
     recordsColDate: { width: 150, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
     recordsColStatus: { width: 140, flexGrow: 0, flexShrink: 0, paddingRight: 14 },

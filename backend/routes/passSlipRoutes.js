@@ -36,20 +36,6 @@ router.post('/', auth, async (req, res) => {
   try {
     const { date, timeOut, estimatedTimeBack, destination, purpose, signature, latitude, longitude, routePolyline } = req.body;
 
-    // Enforce office hours in PH local time to avoid server-timezone mismatches.
-    const now = new Date();
-    const phHour = Number(
-      new Intl.DateTimeFormat('en-US', {
-        timeZone: 'Asia/Manila',
-        hour: 'numeric',
-        hour12: false,
-      }).format(now)
-    );
-    // Office hours are 8:00 AM to 5:00 PM (requesting allowed up to 4:59:59 PM).
-    if (Number.isNaN(phHour) || phHour < 8 || phHour >= 17) {
-      return res.status(400).json({ message: 'Pass slip requests are only allowed during office hours (8:00 AM to 5:00 PM).' });
-    }
-
     const user = await User.findById(req.user.userId);
     if (!user) {
       return res.status(404).json({ message: 'User not found.' });
@@ -266,6 +252,9 @@ router.put('/:id/status', [auth], async (req, res) => {
         return res.status(400).json({ message: 'HR can only approve pass slips that have been recommended by the Program Head.' });
       }
       if (status === 'Approved') {
+        if (typeof trackingNo !== 'string' || trackingNo.trim() === '') {
+          return res.status(400).json({ message: 'A tracking number is required to approve a pass slip.' });
+        }
         const user = await User.findById(passSlip.employee);
         if (!user) {
           return res.status(404).json({ message: 'Employee not found.' });
@@ -290,7 +279,7 @@ router.put('/:id/status', [auth], async (req, res) => {
         passSlip.status = 'Approved';
         passSlip.hrApprovedBy = req.user.userId;
         passSlip.hrApproverSignature = approverSignature;
-        passSlip.trackingNo = trackingNo; // Save the tracking number
+        passSlip.trackingNo = trackingNo.trim(); // Save the tracking number
         // Generate QR Code with full details for guard to scan and view without API
         const approvedByUser = await User.findById(passSlip.approvedBy).select('name').lean();
         const qrPayload = {

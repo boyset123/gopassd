@@ -1150,6 +1150,7 @@ const HrpDashboardScreen = () => {
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={(styles as any).recordsTableHorizontalScroll}>
                         <View style={[(styles as any).recordsTableInner, styles.recordsTableHeader]}>
                           <Text style={[styles.recordsTableHeaderCell, styles.recordsColEmployee]}>Employee</Text>
+                          <Text style={[styles.recordsTableHeaderCell, styles.recordsColTracking]}>Tracking No.</Text>
                           <Text style={[styles.recordsTableHeaderCell, styles.recordsColType]}>Type</Text>
                           <Text style={[styles.recordsTableHeaderCell, styles.recordsColDate]}>Date</Text>
                           <Text style={[styles.recordsTableHeaderCell, styles.recordsColStatus]}>Arrival</Text>
@@ -1169,6 +1170,11 @@ const HrpDashboardScreen = () => {
                           <View style={[(styles as any).recordsTableInner, styles.recordsTableRow, index % 2 === 1 && styles.recordsTableRowAlt]}>
                             <Text style={[styles.recordsTableCell, styles.recordsColEmployee]} numberOfLines={1}>
                               {item.employee?.name || 'N/A'}
+                            </Text>
+                            <Text style={[styles.recordsTableCell, styles.recordsColTracking]} numberOfLines={1}>
+                              {'destination' in item
+                                ? ((item as PassSlip).trackingNo || '—')
+                                : ((item as TravelOrder).travelOrderNo || '—')}
                             </Text>
                             <View style={[styles.recordsColType]}>
                               <View style={['destination' in item ? styles.recordsBadgeSlip : styles.recordsBadgeOrder]}>
@@ -1576,20 +1582,36 @@ const HrpDashboardScreen = () => {
                 <View style={styles.modalButtonContainer}>
                   {forReviewItems.includes(selectedItem) ? (
                     <>
-                      <Pressable
-                        style={[styles.button, styles.approveButton, styles.modalButton]}
-                        onPress={() => {
-                          const isTravelOrderRecommended = selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended';
-                          const statusToSend = isTravelOrderRecommended ? 'For President Approval' : 'Approved';
-                          handleUpdateStatus(selectedItemType!, selectedItem._id, statusToSend);
-                        }}
-                      >
-                        <Text style={styles.buttonText}>
-                          {selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended'
-                            ? 'Send to President'
-                            : 'Approve'}
-                        </Text>
-                      </Pressable>
+                      {(() => {
+                        const isTravelOrderRecommended = selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended';
+                        const statusToSend = isTravelOrderRecommended ? 'For President Approval' : 'Approved';
+                        const isPassSlipApproval = selectedItemType === 'slip' && statusToSend === 'Approved';
+                        const missingTrackingNo = isPassSlipApproval && trackingNoInput.trim() === '';
+                        return (
+                          <Pressable
+                            style={[
+                              styles.button,
+                              styles.approveButton,
+                              styles.modalButton,
+                              missingTrackingNo && { opacity: 0.5 },
+                            ]}
+                            disabled={missingTrackingNo}
+                            onPress={() => {
+                              if (missingTrackingNo) {
+                                Alert.alert('Tracking No. Required', 'Please assign a tracking number before approving this pass slip.');
+                                return;
+                              }
+                              handleUpdateStatus(selectedItemType!, selectedItem._id, statusToSend);
+                            }}
+                          >
+                            <Text style={styles.buttonText}>
+                              {selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended'
+                                ? 'Send to President'
+                                : 'Approve'}
+                            </Text>
+                          </Pressable>
+                        );
+                      })()}
                       <Pressable style={[styles.button, styles.rejectButton, styles.modalButton]} onPress={() => { setRejectComment(''); setRejectModalVisible(true); }}>
                         <Text style={styles.buttonText}>Reject</Text>
                       </Pressable>

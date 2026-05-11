@@ -6,6 +6,28 @@ const authorize = require('../middleware/authorize');
 const QRCode = require('qrcode');
 const admin = require('firebase-admin');
 const { parseMeridiemTimeToDate, parseMeridiemTimeToMillisOfDay } = require('../utils/dateTime');
+const { getEffectiveSigner, isUserOnTravel, toIdString } = require('../utils/oic');
+
+/**
+ * Build a Mongo `$in` list of approver IDs for which the calling user should see
+ * pending pass slips: the user themselves plus any on-travel approver whose
+ * effective signer currently resolves to them (via OIC primary or fallback).
+ */
+async function approverIdsVisibleToUser(userId) {
+  const ids = new Set([toIdString(userId)]);
+  const User = require('../models/User');
+  const delegators = await User.find({
+    $or: [{ oicPrimary: userId }, { oicFallback: userId }],
+  }).select('_id').lean();
+
+  for (const d of delegators) {
+    const resolution = await getEffectiveSigner(d._id);
+    if (resolution && toIdString(resolution.signerId) === toIdString(userId) && resolution.viaOic) {
+      ids.add(toIdString(d._id));
+    }
+  }
+  return Array.from(ids).filter(Boolean);
+}
 
 // Create a new pass slip
 const User = require('../models/User');
@@ -113,76 +135,133 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// Get all pending pass slips (for Program Head)
-router.get('/pending', [auth, authorize('Program Head')], async (req, res) => {
+// Annotates a pending slip with effective-signer info so clients can show OIC badges.
+async function annotateWithNextSigner(slips) {
+  return Promise.all(
+    slips.map(async (s) => {
+      const obj = s.toObject ? s.toObject() : s;
+      if (obj.approvedBy?._id) {
+        const resolution = await getEffectiveSigner(obj.approvedBy._id);
+        if (resolution) {
+          obj.nextSigner = {
+            originalId: resolution.originalId,
+            originalName: resolution.original?.name || null,
+            signerId: resolution.signerId,
+            signerName: resolution.signer?.name || null,
+            viaOic: resolution.viaOic,
+            noDelegateAvailable: !!resolution.noDelegateAvailable,
+          };
+        }
+      }
+      return obj;
+    })
+  );
+}
+
+// Get all pending pass slips (for Program Head and any user acting as their OIC)
+router.get('/pending', [auth], async (req, res) => {
   try {
-    const pendingSlips = await PassSlip.find({ approvedBy: req.user.userId, status: 'Pending' })
+    const approverIds = await approverIdsVisibleToUser(req.user.userId);
+    const pendingSlips = await PassSlip.find({ approvedBy: { $in: approverIds }, status: 'Pending' })
       .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name');
-    res.json(pendingSlips);
+      .populate('approvedBy', 'name role');
+    res.json(await annotateWithNextSigner(pendingSlips));
   } catch (error) {
     console.error('Error fetching pending pass slips:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Get all pending pass slips (for Faculty Dean)
-router.get('/dean-pending', [auth, authorize('Faculty Dean')], async (req, res) => {
+// Get all pending pass slips (for Faculty Dean and any user acting as their OIC)
+router.get('/dean-pending', [auth], async (req, res) => {
   try {
-    const pendingSlips = await PassSlip.find({ approvedBy: req.user.userId, status: 'Pending' })
+    const approverIds = await approverIdsVisibleToUser(req.user.userId);
+    const pendingSlips = await PassSlip.find({ approvedBy: { $in: approverIds }, status: 'Pending' })
       .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name');
-    res.json(pendingSlips);
+      .populate('approvedBy', 'name role');
+    res.json(await annotateWithNextSigner(pendingSlips));
   } catch (error) {
     console.error('Error fetching pending pass slips for dean:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Get all pending pass slips (for President)
-router.get('/president-pending', [auth, authorize('President')], async (req, res) => {
+// Get all pending pass slips (for President and any user acting as their OIC)
+router.get('/president-pending', [auth], async (req, res) => {
   try {
-    const pendingSlips = await PassSlip.find({ approvedBy: req.user.userId, status: 'Pending' })
+    const approverIds = await approverIdsVisibleToUser(req.user.userId);
+    const pendingSlips = await PassSlip.find({ approvedBy: { $in: approverIds }, status: 'Pending' })
       .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name');
-    res.json(pendingSlips);
+      .populate('approvedBy', 'name role');
+    res.json(await annotateWithNextSigner(pendingSlips));
   } catch (error) {
     console.error('Error fetching pending pass slips for president:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Update pass slip status (for Program Head and HR)
-router.put('/:id/status', [auth, authorize('Program Head', 'Faculty Dean', 'President', 'Human Resource Personnel')], async (req, res) => {
+// Update pass slip status (for first-line approvers, their OICs, and HR)
+router.put('/:id/status', [auth], async (req, res) => {
   try {
     const { status, approverSignature, trackingNo, rejectionReason } = req.body;
-    
-    // Program Heads can only approve (for HR review) or reject
-    // HR can approve (final approval), complete, or reject
-    if (['Program Head', 'Faculty Dean', 'President'].includes(req.user.role)) {
-      if (!['Recommended', 'Rejected'].includes(status)) {
-        return res.status(400).json({ message: 'Approvers can only recommend or reject pass slips.' });
-      }
-    } else if (req.user.role === 'Human Resource Personnel') {
-      if (!['Approved', 'Completed', 'Rejected'].includes(status)) {
-        return res.status(400).json({ message: 'HR can only approve, complete, or reject pass slips.' });
-      }
-    }
 
     const passSlip = await PassSlip.findById(req.params.id);
     if (!passSlip) {
       return res.status(404).json({ message: 'Pass slip not found.' });
     }
 
+    const isHr = req.user.role === 'Human Resource Personnel';
+
+    if (isHr) {
+      if (!['Approved', 'Completed', 'Rejected'].includes(status)) {
+        return res.status(400).json({ message: 'HR can only approve, complete, or reject pass slips.' });
+      }
+    } else {
+      if (!['Recommended', 'Rejected'].includes(status)) {
+        return res.status(400).json({ message: 'Approvers can only recommend or reject pass slips.' });
+      }
+    }
+
     // Validate status transitions
-    if (['Program Head', 'Faculty Dean', 'President'].includes(req.user.role) && status === 'Recommended') {
+    if (!isHr && status === 'Recommended') {
       if (passSlip.status !== 'Pending') {
         return res.status(400).json({ message: 'Approvers can only recommend pending pass slips.' });
       }
+      // The slip's `approvedBy` at create time is the originally intended approver.
+      const originalApproverId = passSlip.approvedBy;
+      if (!originalApproverId) {
+        return res.status(400).json({ message: 'This pass slip has no assigned approver.' });
+      }
+
+      // Resolve the effective signer (handles OIC delegation when approver is on travel).
+      const resolution = await getEffectiveSigner(originalApproverId);
+      if (!resolution) {
+        return res.status(404).json({ message: 'Approver not found.' });
+      }
+      const expectedSignerId = toIdString(resolution.signerId);
+      if (toIdString(req.user.userId) !== expectedSignerId) {
+        return res.status(403).json({
+          message: resolution.viaOic
+            ? 'Only the assigned OIC can sign while this approver is on travel.'
+            : 'You are not the approver for this pass slip.',
+        });
+      }
+
       passSlip.status = 'Recommended';
       passSlip.approvedBy = req.user.userId;
       passSlip.approverSignature = approverSignature;
-    } else if (req.user.role === 'Human Resource Personnel') {
+      passSlip.approvedBySignedAsOicFor = resolution.viaOic ? resolution.originalId : null;
+    } else if (!isHr && status === 'Rejected') {
+      // Only the assigned approver or their currently-acting OIC can reject.
+      if (passSlip.approvedBy) {
+        const resolution = await getEffectiveSigner(passSlip.approvedBy);
+        if (!resolution || toIdString(resolution.signerId) !== toIdString(req.user.userId)) {
+          return res.status(403).json({ message: 'You are not authorized to reject this pass slip.' });
+        }
+      }
+      passSlip.status = status;
+      if (rejectionReason != null) passSlip.rejectionReason = String(rejectionReason).trim() || undefined;
+    } else if (isHr) {
       if (status === 'Approved' && passSlip.status !== 'Recommended') {
         return res.status(400).json({ message: 'HR can only approve pass slips that have been recommended by the Program Head.' });
       }
@@ -237,9 +316,6 @@ router.put('/:id/status', [auth, authorize('Program Head', 'Faculty Dean', 'Pres
       } else {
         return res.status(400).json({ message: 'Invalid status update for HR.' });
       }
-    } else if (status === 'Rejected') {
-      passSlip.status = status;
-      if (rejectionReason != null) passSlip.rejectionReason = String(rejectionReason).trim() || undefined;
     }
 
     await passSlip.save();
@@ -300,7 +376,8 @@ router.get('/my-slips', auth, async (req, res) => {
   try {
     const userSlips = await PassSlip.find({ employee: req.user.userId })
       .populate('employee', 'name profilePicture role')
-      .populate('approvedBy', 'name')
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name')
       .sort({ createdAt: -1 })
       .lean();
@@ -403,8 +480,9 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
   try {
     const recommendedSlips = await PassSlip.find({ status: 'Recommended' })
       .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy signature approverSignature latitude longitude routePolyline');
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role')
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor signature approverSignature latitude longitude routePolyline');
     res.json(recommendedSlips);
   } catch (error) {
     console.error('Error fetching recommended pass slips:', error);
@@ -417,9 +495,10 @@ router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async 
   try {
     const hrApprovedSlips = await PassSlip.find({ status: 'Approved' })
       .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name')
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy hrApprovedBy signature approverSignature hrApproverSignature');
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature hrApproverSignature');
     res.json(hrApprovedSlips);
   } catch (error) {
     console.error('Error fetching HR approved pass slips:', error);
@@ -432,7 +511,8 @@ router.get('/completed', [auth, authorize('Security Personnel')], async (req, re
   try {
     const approvedSlips = await PassSlip.find({ status: 'Approved' })
       .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name');
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role');
     res.json(approvedSlips);
   } catch (error) {
     console.error('Error fetching approved pass slips for security:', error);
@@ -445,7 +525,8 @@ router.get('/verified', [auth, authorize('Security Personnel')], async (req, res
   try {
     const verifiedSlips = await PassSlip.find({ status: 'Verified' })
       .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name');
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role');
     res.json(verifiedSlips);
   } catch (error) {
     console.error('Error fetching verified pass slips:', error);
@@ -458,9 +539,10 @@ router.get('/verified-hr', [auth, authorize('Human Resource Personnel')], async 
   try {
     const verifiedSlips = await PassSlip.find({ status: { $in: ['Verified', 'Approved'] } })
       .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name')
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy hrApprovedBy signature approverSignature departureTime arrivalTime trackingNo');
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature departureTime arrivalTime trackingNo');
     res.json(verifiedSlips);
   } catch (error) {
     console.error('Error fetching verified pass slips for HR:', error);
@@ -546,7 +628,8 @@ router.get('/:id', [auth, authorize('Security Personnel')], async (req, res) => 
   try {
     const passSlip = await PassSlip.findById(req.params.id)
       .populate('employee', 'name email profilePicture role')
-      .populate('approvedBy', 'name')
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name');
 
     if (!passSlip) {
@@ -591,7 +674,8 @@ router.get('/returned', [auth, authorize('Human Resource Personnel')], async (re
   try {
     const returnedSlips = await PassSlip.find({ status: 'Returned' })
       .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name');
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role');
     res.json(returnedSlips);
   } catch (error) {
     console.error('Error fetching returned pass slips:', error);
@@ -604,7 +688,8 @@ router.get('/verified-hr', [auth, authorize('Human Resource Personnel')], async 
   try {
     const verifiedSlips = await PassSlip.find({ status: 'Verified' })
       .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name');
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role');
     res.json(verifiedSlips);
   } catch (error) {
     console.error('Error fetching verified pass slips for HR:', error);

@@ -18,7 +18,7 @@ const theme = {
 
 // These should match the lists in your RegistrationForm
 const campuses = ['All Campuses', 'Main Campus', 'Baganga Campus', 'Banaybanay Campus', 'Cateel Campus', 'San Isidro Campus', 'Tarragona Campus'];
-const roles = ['All Roles', 'Office Staff', 'Faculty Staff', 'Program Head', 'Human Resource Personnel', 'Office Records', 'Faculty Dean', 'Security Personnel', 'President'];
+const roles = ['All Roles', 'Office Staff', 'Faculty Staff', 'Program Head', 'Human Resource Personnel', 'Office Records', 'Faculty Dean', 'Security Personnel', 'President', 'Vice President'];
 const faculties = ['All Faculties', 'Faculty of Agriculture and Life Sciences', 'Faculty of Computing, Engineering, and Technology', 'Faculty of Criminal Justice Education', 'Faculty of Nursing and Allied Health Sciences', 'Faculty of Humanities, Social Science, and Communication', 'Faculty of Teacher Education', 'Faculty of Business Management'];
 
 interface User {

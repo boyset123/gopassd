@@ -58,11 +58,15 @@ interface Submission {
   date: string;
   status: string;
   employee: { name: string; role?: string; address?: string; employeeAddress?: string; };
-  approvedBy?: { name: string };
+  approvedBy?: { name: string; role?: string };
+  /** Populated when the first-line approver slot was signed by an OIC. */
+  approvedBySignedAsOicFor?: { _id: string; name?: string; role?: string } | null;
   /** President who signed (travel order); not the same as approvedBy (HR final approver). */
   presidentApprovedBy?: { name: string };
+  /** Populated when the President's slot was signed by an OIC. */
+  presidentSignedAsOicFor?: { _id: string; name?: string; role?: string } | null;
   recommendedBy?: { _id?: string; name: string; faculty?: string; campus?: string; }[];
-  recommenderSignatures?: { user?: string; signature?: string }[];
+  recommenderSignatures?: { user?: string | { _id?: string; name?: string }; signature?: string; signedAsOicFor?: { _id?: string; name?: string } | null }[];
   hrApprovedBy?: { name: string };
   purpose: string;
   additionalInfo?: string;
@@ -956,6 +960,9 @@ export default function SlipsScreen() {
                           <Text style={styles.docSignatureName}>{selectedSubmission.approvedBy?.name || 'N/A'}</Text>
                         </View>
                                                 <Text style={styles.docSignatureUnderline}>{user?.role === 'Program Head' ? 'Faculty Dean' : user?.role === 'Faculty Dean' ? 'President' : 'Immediate Head'}</Text>
+                        {selectedSubmission.approvedBySignedAsOicFor?.name && (
+                          <Text style={styles.docOicNote}>(OIC for {selectedSubmission.approvedBySignedAsOicFor.name})</Text>
+                        )}
                       </View>
                     </View>
                   </>
@@ -2057,6 +2064,13 @@ const styles = StyleSheet.create({
   disabledCreateButton: {
     backgroundColor: theme.textMuted,
     opacity: 0.8,
+  },
+  docOicNote: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: theme.textMuted,
+    textAlign: 'center',
+    marginTop: 2,
   },
   docSignatureUnderline: {
     borderTopWidth: 1,

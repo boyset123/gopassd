@@ -29,7 +29,8 @@ const roles = [
   'Office Records',
   'Faculty Dean',
   'Security Personnel',
-  'President'
+  'President',
+  'Vice President'
 ];
 
 const faculties = [

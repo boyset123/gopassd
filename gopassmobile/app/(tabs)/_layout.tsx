@@ -329,6 +329,9 @@ export default function TabLayout() {
   if (userRole === 'Faculty Dean') visibleTabNames.add('facultyDeanDashboard');
   if (userRole === 'Security Personnel') visibleTabNames.add('securityDashboard');
   if (userRole === 'President') visibleTabNames.add('presidentDashboard');
+  // Vice President is the President's default OIC; surface the President dashboard
+  // so they can act on items when the President is on travel.
+  if (userRole === 'Vice President') visibleTabNames.add('presidentDashboard');
 
   return (
     <CreateModalProvider>
@@ -377,7 +380,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="presidentDashboard"
         options={{
-          href: userRole === 'President' ? '/(tabs)/presidentDashboard' : null,
+          href: ['President', 'Vice President'].includes(userRole || '') ? '/(tabs)/presidentDashboard' : null,
           headerShown: false,
           title: 'Dashboard',
           tabBarIcon: ({ color, size }) => <FontAwesome size={size ?? 24} name="dashboard" color={color} />,

@@ -57,6 +57,16 @@ interface PassSlip {
   estimatedTimeBack: string;
   signature: string;
   approvedBy?: { name: string };
+  nextSigner?: NextSignerInfo;
+}
+
+interface NextSignerInfo {
+  originalId: string;
+  originalName?: string | null;
+  signerId: string;
+  signerName?: string | null;
+  viaOic: 'primary' | 'fallback' | null;
+  noDelegateAvailable?: boolean;
 }
 
 interface TravelOrder {
@@ -80,6 +90,7 @@ interface TravelOrder {
   recommenderSignatures?: { user: string, signature: string, date: string }[];
   recommendersWhoApproved?: string[];
   participants?: string[];
+  nextSigner?: NextSignerInfo;
 }
 
 type ItemType = 'slip' | 'order';
@@ -173,11 +184,15 @@ export default function ProgramHeadDashboard() {
 
       const currentUser = userResponse.data;
       
-      // Filter orders where the current user is one of the recommenders
+      // Show orders where:
+      // - the current user is a listed recommender (their direct turn), OR
+      // - the next expected recommender is on travel and the current user is acting as their OIC.
       const filteredOrders = (ordersResponse.data || []).filter(order => {
         if (!order) return false;
         const currentUserId = currentUser.id || currentUser._id;
-        return order.recommendedBy?.some(rec => (rec._id === currentUserId) || (rec.id === currentUserId));
+        if (order.recommendedBy?.some(rec => (rec._id === currentUserId) || (rec.id === currentUserId))) return true;
+        if (order.nextSigner?.signerId === currentUserId && order.nextSigner?.viaOic) return true;
+        return false;
       });
 
       setPendingSlips(slipsResponse.data);
@@ -368,6 +383,14 @@ export default function ProgramHeadDashboard() {
   const renderItem = (item: PassSlip | TravelOrder, type: ItemType) => (
     <Pressable key={item._id} style={styles.itemCard} onPress={() => handleOpenReview(item, type)}>
       <View style={[styles.itemCardTopBar, type === 'slip' ? styles.itemCardTopBarSlip : styles.itemCardTopBarOrder]} />
+      {item.nextSigner?.viaOic && item.nextSigner.signerId === (user?.id || user?._id) && (
+        <View style={styles.oicBadge}>
+          <FontAwesome name="user-secret" size={12} color="#fff" />
+          <Text style={styles.oicBadgeText}>
+            Acting as OIC for {item.nextSigner.originalName || 'original signatory'}
+          </Text>
+        </View>
+      )}
       <View style={styles.itemCardHeader}>
         <View style={[styles.itemIconWrap, type === 'slip' ? styles.itemIconWrapSlip : styles.itemIconWrapOrder]}>
           <FontAwesome name={type === 'slip' ? 'file-text-o' : 'plane'} size={18} color="#fff" />
@@ -511,6 +534,9 @@ export default function ProgramHeadDashboard() {
                           </View>
                         </View>
                         <Text style={styles.docSignatureUnderline}>Immediate Head</Text>
+                        {selectedItem?.nextSigner?.viaOic && selectedItem?.nextSigner?.originalName && (
+                          <Text style={styles.docOicNote}>(OIC for {selectedItem.nextSigner.originalName})</Text>
+                        )}
                       </View>
                     </View>
                   </>
@@ -830,6 +856,20 @@ const styles = StyleSheet.create({
   itemCardTopBar: {
     height: 4,
     width: '100%',
+  },
+  oicBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: theme.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  oicBadgeText: {
+    color: theme.primaryDark,
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
   itemCardTopBarSlip: {
     backgroundColor: theme.primary,
@@ -1204,6 +1244,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     textAlign: 'center',
+  },
+  docOicNote: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: theme.textMuted,
+    textAlign: 'center',
+    marginTop: 2,
+    width: '100%',
   },
   docSignatureUnderline: {
     borderTopWidth: 1,

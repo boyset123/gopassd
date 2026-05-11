@@ -11,6 +11,8 @@ export interface PassSlipPrintItem {
   estimatedTimeBack?: string;
   employee?: { name?: string; role?: string };
   approvedBy?: { name?: string };
+  /** Populated when the first-line approver slot was actually signed by an OIC standing in for this user. */
+  approvedBySignedAsOicFor?: { _id?: string; name?: string } | null;
   signature?: string;
   approverSignature?: string;
   arrivalStatus?: string;
@@ -117,6 +119,7 @@ const renderSlipCard = (item: PassSlipPrintItem, options?: PassSlipPrintOptions)
             ${item.approverSignature ? `<img src="${item.approverSignature}" class="sig-img" alt="" />` : '<div class="sig-empty"></div>'}
             <div class="sig-name">${escapeHtml(normalizeInline(item.approvedBy?.name) || 'N/A')}</div>
           </div>
+          ${item.approvedBySignedAsOicFor?.name ? `<div class="sig-oic-note">(OIC for ${escapeHtml(normalizeInline(item.approvedBySignedAsOicFor.name))})</div>` : ''}
           <div class="sig-role">${escapeHtml(approvedRoleLabel(employeeRole))}</div>
         </div>
       </div>
@@ -244,6 +247,7 @@ export function getPassSlipPrintHtml(item: PassSlipPrintItem, options?: PassSlip
       line-height: 1.1;
     }
     .sig-role { text-align: center; font-size: 9.6px; margin-top: 2px; color: #333; }
+    .sig-oic-note { text-align: center; font-size: 8.6px; font-style: italic; color: #555; margin-top: 1px; }
 
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

@@ -45,7 +45,8 @@ export default function LoginScreen() {
       // Role-based redirection
       if (user.role === 'Program Head') {
         router.replace('/(tabs)/programHeadDashboard');
-      } else if (user.role === 'President') {
+      } else if (user.role === 'President' || user.role === 'Vice President') {
+        // Vice Presidents act as the President's default OIC, so they share the dashboard.
         router.replace('/(tabs)/presidentDashboard');
       } else if (user.role === 'Security Personnel') {
         router.replace('/(tabs)/securityDashboard');

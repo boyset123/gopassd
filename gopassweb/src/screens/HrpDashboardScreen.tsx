@@ -47,6 +47,8 @@ interface PassSlip {
   purpose: string;
   status: string;
   approvedBy: Employee;
+  /** Populated when the first-line approver slot was signed by an OIC standing in for this user. */
+  approvedBySignedAsOicFor?: { _id: string; name?: string; role?: string } | null;
   hrApprovedBy?: Employee;
   signature?: string;
   approverSignature?: string;
@@ -78,6 +80,8 @@ interface TravelOrder {
   approvedBy?: Employee;
   hrApprovedBy?: Employee; // Added for type consistency, though travel orders use approvedBy for HR approval
   presidentApprovedBy?: Employee;
+  /** Populated when the President's slot was signed by an OIC standing in for them. */
+  presidentSignedAsOicFor?: { _id: string; name?: string; role?: string } | null;
   signature?: string;
   approverSignature?: string;
   presidentSignature?: string;
@@ -90,7 +94,7 @@ interface TravelOrder {
   arrivalStatus?: string;
   employeeAddress?: string;
   participants?: string[];
-  recommenderSignatures?: { user?: string; signature?: string }[];
+  recommenderSignatures?: { user?: string | { _id?: string; name?: string }; signature?: string; signedAsOicFor?: { _id?: string; name?: string } | null }[];
   recommendersWhoApproved?: string[];
 }
 
@@ -230,6 +234,7 @@ const buildTravelOrderWebView = (o: TravelOrder) => ({
   participants: o.participants,
   presidentSignature: o.presidentSignature,
   presidentApprovedBy: o.presidentApprovedBy ? { name: o.presidentApprovedBy.name } : undefined,
+  presidentSignedAsOicFor: o.presidentSignedAsOicFor || undefined,
   approvedBy: o.approvedBy ? { _id: o.approvedBy._id, name: o.approvedBy.name } : undefined,
   latitude: o.latitude,
   longitude: o.longitude,
@@ -1523,6 +1528,11 @@ const HrpDashboardScreen = () => {
                               {selectedItem.approverSignature && <Image source={{ uri: selectedItem.approverSignature }} style={styles.docSignatureImage} />}
                               <Text style={styles.docSignatureName}>{(selectedItem as PassSlip).approvedBy?.name}</Text>
                             </View>
+                            {(selectedItem as PassSlip).approvedBySignedAsOicFor?.name && (
+                              <Text style={styles.docOicNote}>
+                                (OIC for {(selectedItem as PassSlip).approvedBySignedAsOicFor?.name})
+                              </Text>
+                            )}
                             <Text style={styles.docSignatureUnderline}>{(selectedItem as PassSlip).employee?.role === 'Faculty Dean' ? 'President' : (selectedItem as PassSlip).employee?.role === 'Program Head' ? 'Faculty Dean' : 'Immediate Head'}</Text>
                           </View>
                         </View>

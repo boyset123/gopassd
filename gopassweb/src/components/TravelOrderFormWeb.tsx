@@ -18,6 +18,8 @@ interface Recommender {
   name: string;
 }
 
+type WebUserRef = string | { _id?: string; name?: string; role?: string } | null | undefined;
+
 /** Order shape for web HR viewing (extends mobile fields + API extras) */
 export interface TravelOrderWebOrder {
   _id: string;
@@ -32,12 +34,13 @@ export interface TravelOrderWebOrder {
   arrivalDate: string;
   additionalInfo: string;
   recommendedBy?: Recommender[];
-  recommenderSignatures?: { user?: string; signature?: string; date?: string }[];
+  recommenderSignatures?: { user?: WebUserRef; signature?: string; date?: string; signedAsOicFor?: WebUserRef }[];
   recommendersWhoApproved?: string[];
   approverSignature?: string;
   participants?: string[];
   presidentSignature?: string;
-  presidentApprovedBy?: { name?: string };
+  presidentApprovedBy?: { _id?: string; name?: string };
+  presidentSignedAsOicFor?: { _id?: string; name?: string } | null;
   approvedBy?: { _id?: string; name?: string };
   latitude?: number;
   longitude?: number;
@@ -208,17 +211,34 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
       ? order.recommendedBy
       : [{ _id: 'fallback', name: order.approvedBy?.name || 'Immediate Chief' }];
 
+  const findRecommenderSignatureEntry = (recommenderId: string, index: number) => {
+    if (!recommenderId && !order.recommenderSignatures?.length) return undefined;
+    return order.recommenderSignatures?.find((rs) => {
+      const oic = typeof rs.signedAsOicFor === 'object' && rs.signedAsOicFor ? rs.signedAsOicFor._id : rs.signedAsOicFor;
+      if (oic && recommenderId && String(oic) === recommenderId) return true;
+      const u = typeof rs.user === 'object' && rs.user ? rs.user._id : rs.user;
+      return !!u && !!recommenderId && String(u) === recommenderId;
+    }) || (index === 0 ? undefined : undefined);
+  };
+
   const renderRecommenderSignatures = () =>
     chiefList.map((recommender, index) => {
       const recommenderId = String(recommender._id || recommender.id || '');
+      const sigEntry = findRecommenderSignatureEntry(recommenderId, index);
 
       const existingSignature =
         order.recommendedBy && order.recommendedBy.length > 0
-          ? order.recommenderSignatures?.find((rs) => String(rs.user) === recommenderId)?.signature ||
-            (index === 0 ? order.approverSignature || null : null)
+          ? sigEntry?.signature || (index === 0 ? order.approverSignature || null : null)
           : index === 0
             ? order.approverSignature || null
             : null;
+
+      const oicSignedFor = sigEntry?.signedAsOicFor;
+      const oicSignedForName = typeof oicSignedFor === 'object' && oicSignedFor ? oicSignedFor.name : null;
+      const oicSigner = sigEntry?.user;
+      const oicSignerName = typeof oicSigner === 'object' && oicSigner ? oicSigner.name : null;
+      const isOicSigned = !!oicSignedForName;
+      const displayName = isOicSigned ? (oicSignerName || recommender.name || '—') : (recommender.name || '—');
 
       if (viewOnly) {
         return (
@@ -235,10 +255,13 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
                 </View>
               )}
               <View style={styles.signatureNameContainer}>
-                <Text style={styles.signatureName}>{recommender.name || '—'}</Text>
+                <Text style={styles.signatureName}>{displayName}</Text>
               </View>
             </View>
             <Text style={styles.signatureTitle}>Immediate Chief</Text>
+            {isOicSigned && (
+              <Text style={styles.oicNote}>(OIC for {oicSignedForName})</Text>
+            )}
           </View>
         );
       }
@@ -266,10 +289,10 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
                 </View>
               ) : (
                 <View style={styles.signatureButtonsContainer}>
-                  <Pressable style={styles.signatureButton} onPress={() => onChooseSignature('draw')}>
+                  <Pressable style={styles.signatureButton} onPress={() => onChooseSignature?.('draw')}>
                     <FontAwesome name="pencil" size={24} color="#003366" />
                   </Pressable>
-                  <Pressable style={styles.signatureButton} onPress={() => onChooseSignature('upload')}>
+                  <Pressable style={styles.signatureButton} onPress={() => onChooseSignature?.('upload')}>
                     <FontAwesome name="upload" size={24} color="#003366" />
                   </Pressable>
                 </View>
@@ -282,10 +305,13 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
               </View>
             )}
             <View style={styles.signatureNameContainer}>
-              <Text style={styles.signatureName}>{recommender.name}</Text>
+              <Text style={styles.signatureName}>{displayName}</Text>
             </View>
           </View>
           <Text style={styles.signatureTitle}>Immediate Chief</Text>
+          {isOicSigned && (
+            <Text style={styles.oicNote}>(OIC for {oicSignedForName})</Text>
+          )}
         </View>
       );
     });
@@ -412,6 +438,9 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
               </View>
             </View>
             <Text style={styles.signatureTitle}>President</Text>
+            {order.presidentSignedAsOicFor?.name && (
+              <Text style={styles.oicNote}>(OIC for {order.presidentSignedAsOicFor.name})</Text>
+            )}
           </View>
         </View>
       </View>
@@ -729,6 +758,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     textAlign: 'left',
+  },
+  oicNote: {
+    fontSize: 7,
+    fontStyle: 'italic',
+    color: '#444',
+    marginTop: 1,
   },
 });
 

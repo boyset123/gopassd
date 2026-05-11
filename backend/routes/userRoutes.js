@@ -8,6 +8,14 @@ const nodemailer = require('nodemailer');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { isConfigured, uploadProfileImage } = require('../lib/cloudinaryProfile');
+const {
+  isOicCapableRole,
+  isUserOnTravel,
+  getEffectiveSigner,
+  buildPrimaryCandidateFilter,
+  buildFallbackCandidateFilter,
+  getRankBelowRoles,
+} = require('../utils/oic');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -261,10 +269,14 @@ router.post('/reset-password', async (req, res) => {
 // Get current user
 router.get('/me', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select('-password');
+    const user = await User.findById(req.user.userId)
+      .select('-password')
+      .populate('oicPrimary', 'name role faculty')
+      .populate('oicFallback', 'name role faculty');
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
+    const onTravelStatus = await isUserOnTravel(user);
     res.json({
         id: user._id,
         name: user.name,
@@ -274,7 +286,14 @@ router.get('/me', auth, async (req, res) => {
         faculty: user.faculty,
         createdAt: user.createdAt,
         profilePicture: user.profilePicture,
-        passSlipMinutes: user.passSlipMinutes
+        passSlipMinutes: user.passSlipMinutes,
+        oicPrimary: user.oicPrimary || null,
+        oicFallback: user.oicFallback || null,
+        onTravelManual: !!user.onTravelManual,
+        onTravelManualUntil: user.onTravelManualUntil || null,
+        onTravel: !!onTravelStatus.onTravel,
+        onTravelReason: onTravelStatus.reason || null,
+        canAssignOic: isOicCapableRole(user.role)
     });
   } catch (error) {
     console.error('Get user error:', error);
@@ -495,6 +514,182 @@ router.get('/me/approver', auth, async (req, res) => {
 
   } catch (error) {
     console.error('Find Approver error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// List eligible OIC candidates for the signed-in user.
+// Query: ?slot=primary|fallback (defaults to primary)
+router.get('/me/oic-candidates', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!isOicCapableRole(user.role)) {
+      return res.status(403).json({ message: 'Your role cannot assign an OIC.' });
+    }
+
+    const slot = String(req.query.slot || 'primary').toLowerCase();
+    let filter;
+    if (slot === 'fallback') {
+      filter = buildFallbackCandidateFilter(user);
+    } else {
+      filter = buildPrimaryCandidateFilter(user);
+      if (!filter) {
+        return res.status(400).json({ message: 'No rank-below pool defined for your role.' });
+      }
+    }
+
+    const candidates = await User.find(filter)
+      .select('_id name role faculty campus profilePicture')
+      .sort({ name: 1 })
+      .lean();
+
+    res.json({
+      slot,
+      rankBelowRoles: slot === 'primary' ? getRankBelowRoles(user.role) : [],
+      candidates,
+    });
+  } catch (error) {
+    console.error('Get OIC candidates error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Update OIC assignments for the signed-in user.
+router.put('/me/oic', auth, async (req, res) => {
+  try {
+    const { oicPrimary, oicFallback } = req.body || {};
+
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!isOicCapableRole(user.role)) {
+      return res.status(403).json({ message: 'Your role cannot assign an OIC.' });
+    }
+
+    // Validate Primary OIC: must be in rank-below pool (faculty-scoped for Dean/Head)
+    if (oicPrimary === null || oicPrimary === '') {
+      user.oicPrimary = null;
+    } else if (oicPrimary !== undefined) {
+      const candidate = await User.findById(oicPrimary).select('_id role faculty').lean();
+      if (!candidate) {
+        return res.status(400).json({ message: 'Primary OIC user not found.' });
+      }
+      const allowedRoles = getRankBelowRoles(user.role);
+      if (!allowedRoles.includes(candidate.role)) {
+        return res.status(400).json({
+          message: `Primary OIC must be one of: ${allowedRoles.join(', ')}.`,
+        });
+      }
+      if (
+        (user.role === 'Faculty Dean' || user.role === 'Program Head') &&
+        user.faculty &&
+        candidate.faculty !== user.faculty
+      ) {
+        return res.status(400).json({ message: 'Primary OIC must belong to the same faculty.' });
+      }
+      if (candidate._id.toString() === user._id.toString()) {
+        return res.status(400).json({ message: 'You cannot assign yourself as OIC.' });
+      }
+      user.oicPrimary = candidate._id;
+    }
+
+    // Validate Fallback OIC: any user except admin/security/self.
+    if (oicFallback === null || oicFallback === '') {
+      user.oicFallback = null;
+    } else if (oicFallback !== undefined) {
+      const fallback = await User.findById(oicFallback).select('_id role').lean();
+      if (!fallback) {
+        return res.status(400).json({ message: 'Fallback OIC user not found.' });
+      }
+      if (fallback._id.toString() === user._id.toString()) {
+        return res.status(400).json({ message: 'You cannot assign yourself as OIC.' });
+      }
+      if (['admin', 'Security Personnel'].includes(fallback.role)) {
+        return res.status(400).json({ message: 'Fallback OIC role is not allowed.' });
+      }
+      user.oicFallback = fallback._id;
+    }
+
+    await user.save();
+
+    const refreshed = await User.findById(user._id)
+      .select('_id name role oicPrimary oicFallback')
+      .populate('oicPrimary', 'name role faculty')
+      .populate('oicFallback', 'name role faculty')
+      .lean();
+
+    res.json({
+      message: 'OIC assignments updated.',
+      oicPrimary: refreshed.oicPrimary || null,
+      oicFallback: refreshed.oicFallback || null,
+    });
+  } catch (error) {
+    console.error('Update OIC error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Toggle/set the user's manual on-travel status.
+router.put('/me/on-travel', auth, async (req, res) => {
+  try {
+    const { onTravelManual, onTravelManualUntil } = req.body || {};
+
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!isOicCapableRole(user.role)) {
+      return res.status(403).json({ message: 'Your role cannot toggle on-travel status.' });
+    }
+
+    user.onTravelManual = !!onTravelManual;
+    if (onTravelManualUntil === null || onTravelManualUntil === '') {
+      user.onTravelManualUntil = null;
+    } else if (onTravelManualUntil !== undefined) {
+      const parsed = new Date(onTravelManualUntil);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ message: 'Invalid onTravelManualUntil date.' });
+      }
+      user.onTravelManualUntil = parsed;
+    }
+    if (!user.onTravelManual) {
+      user.onTravelManualUntil = null;
+    }
+
+    await user.save();
+
+    const status = await isUserOnTravel(user);
+    res.json({
+      message: 'On-travel status updated.',
+      onTravelManual: !!user.onTravelManual,
+      onTravelManualUntil: user.onTravelManualUntil || null,
+      onTravel: !!status.onTravel,
+      onTravelReason: status.reason || null,
+    });
+  } catch (error) {
+    console.error('Update on-travel error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Resolve who currently signs on behalf of the given user (with OIC delegation).
+router.get('/:id/effective-signer', auth, async (req, res) => {
+  try {
+    const resolution = await getEffectiveSigner(req.params.id);
+    if (!resolution) return res.status(404).json({ message: 'User not found' });
+
+    res.json({
+      originalId: resolution.originalId,
+      original: resolution.original
+        ? { _id: resolution.original._id, name: resolution.original.name, role: resolution.original.role }
+        : null,
+      signerId: resolution.signerId,
+      signer: resolution.signer
+        ? { _id: resolution.signer._id, name: resolution.signer.name, role: resolution.signer.role }
+        : null,
+      viaOic: resolution.viaOic,
+      noDelegateAvailable: !!resolution.noDelegateAvailable,
+    });
+  } catch (error) {
+    console.error('Effective signer error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

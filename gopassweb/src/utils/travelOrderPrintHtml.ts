@@ -18,12 +18,35 @@ export interface TravelOrderPrintItem {
   additionalInfo?: string;
   participants?: string[];
   recommendedBy?: Array<{ _id?: string; name?: string }>;
-  recommenderSignatures?: Array<{ user?: string; signature?: string }>;
+  recommenderSignatures?: Array<{
+    user?: string | { _id?: string; name?: string };
+    signature?: string;
+    /** When set, this recommender slot was actually signed by an OIC standing in for this original user. */
+    signedAsOicFor?: { _id?: string; name?: string } | null;
+  }>;
   approverSignature?: string;
   approvedBy?: { _id?: string; name?: string };
-  presidentApprovedBy?: { name?: string };
+  presidentApprovedBy?: { _id?: string; name?: string };
   presidentSignature?: string;
+  /** When set, the president slot was actually signed by an OIC for this original user. */
+  presidentSignedAsOicFor?: { _id?: string; name?: string } | null;
 }
+
+const escapeHtml = (value: string | undefined | null) => {
+  const s = (value ?? '').toString();
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
+const recommenderUserId = (user: string | { _id?: string; name?: string } | undefined): string | null => {
+  if (!user) return null;
+  if (typeof user === 'string') return user;
+  return user._id ? String(user._id) : null;
+};
 
 const formatSalary = (salary: string | undefined) =>
   !salary ? '' : salary.replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -86,21 +109,39 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
     ...((item.participants || []).filter(Boolean)),
   ];
   const recommenderBlocks = recs.map((chief, index) => {
-    const sigEntry = item.recommenderSignatures?.find((s) => s.user && chief._id && String(s.user) === String(chief._id))
-      ?? item.recommenderSignatures?.[index];
+    const chiefId = chief._id ? String(chief._id) : '';
+    const sigEntry = item.recommenderSignatures?.find((s) => {
+      const oic = s.signedAsOicFor && typeof s.signedAsOicFor === 'object' ? s.signedAsOicFor._id : null;
+      if (oic && chiefId && String(oic) === chiefId) return true;
+      const sUid = recommenderUserId(s.user);
+      return !!sUid && !!chiefId && sUid === chiefId;
+    }) ?? item.recommenderSignatures?.[index];
     const sig = sigEntry?.signature ?? (index === 0 ? item.approverSignature : undefined);
-    const name = chief?.name ?? '';
+    const oicSignedForName = sigEntry?.signedAsOicFor && typeof sigEntry.signedAsOicFor === 'object'
+      ? sigEntry.signedAsOicFor.name
+      : null;
+    const oicSignerName = sigEntry?.user && typeof sigEntry.user === 'object' ? sigEntry.user.name : null;
+    const isOicSigned = !!oicSignedForName;
+    const displayName = isOicSigned ? (oicSignerName || chief?.name || '') : (chief?.name || '');
+    const oicNoteHtml = isOicSigned
+      ? `<div class="sig-oic-note">(OIC for ${escapeHtml(oicSignedForName || '')})</div>`
+      : '';
     return `
       <div class="sig-col">
         <div class="sig-header">RECOMMENDED BY ${index + 1}:</div>
         <div class="sig-box">
           ${sig ? `<div class="sig-img-wrap"><img src="${sig}" class="sig-img" alt="" /></div>` : `<div class="sig-placeholder">Pending</div>`}
-          <div class="sig-name-underline"><span class="sig-name">${name || '—'}</span></div>
+          <div class="sig-name-underline"><span class="sig-name">${escapeHtml(displayName) || '—'}</span></div>
         </div>
+        ${oicNoteHtml}
         <div class="sig-role">Immediate Chief</div>
       </div>`;
   }).join('');
-  const presidentName = item.presidentApprovedBy?.name || presidentNameFallback || '—';
+  const presidentOicOriginalName = item.presidentSignedAsOicFor?.name || null;
+  const presidentDisplayName = item.presidentApprovedBy?.name || presidentNameFallback || '—';
+  const presidentOicNoteHtml = presidentOicOriginalName
+    ? `<div class="sig-oic-note">(OIC for ${escapeHtml(presidentOicOriginalName)})</div>`
+    : '';
   const logoSlot = `<img class="logo-img" src="${DORSU_LOGO_DATA_URI}" alt="DOrSU Logo" />`;
   return `
 <!DOCTYPE html>
@@ -180,6 +221,7 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
     .sig-placeholder { position: absolute; top: 0; left: 0; right: 0; font-size: 10px; color: #667085; font-weight: 600; }
     .sig-name-underline { margin-top: 42px; border-bottom: 1px solid #000; padding-bottom: 2px; }
     .sig-name { font-size: 12px; font-weight: 800; }
+    .sig-oic-note { font-size: 9px; font-style: italic; color: #555; margin-top: 1px; }
     .sig-role { font-size: 10px; margin-top: 2px; }
 
     @media print {
@@ -302,8 +344,9 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
             <div class="sig-header">APPROVED BY:</div>
             <div class="sig-box">
               ${item.presidentSignature ? `<div class="sig-img-wrap"><img src="${item.presidentSignature}" class="sig-img" alt="" /></div>` : `<div class="sig-placeholder">Pending</div>`}
-              <div class="sig-name-underline"><span class="sig-name">${presidentName}</span></div>
+              <div class="sig-name-underline"><span class="sig-name">${escapeHtml(presidentDisplayName)}</span></div>
             </div>
+            ${presidentOicNoteHtml}
             <div class="sig-role">President</div>
           </div>
         </div>

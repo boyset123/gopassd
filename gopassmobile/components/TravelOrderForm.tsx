@@ -18,6 +18,8 @@ interface Recommender {
   name: string;
 }
 
+type UserRef = string | { _id?: string; name?: string; role?: string } | undefined | null;
+
 interface TravelOrder {
   _id: string;
   employee: Employee;
@@ -31,11 +33,15 @@ interface TravelOrder {
   arrivalDate: string;
   additionalInfo: string;
   recommendedBy: Recommender[];
-  recommenderSignatures?: { user: string; signature: string; date: string }[];
+  recommenderSignatures?: { user: UserRef; signature: string; date: string; signedAsOicFor?: UserRef }[];
   recommendersWhoApproved?: string[];
   approverSignature?: string;
   /** President’s signature image when not in signing mode (e.g. view-only modal). */
   presidentSignature?: string;
+  /** Populated when the President's slot was signed by an OIC standing in for them. */
+  presidentSignedAsOicFor?: { _id: string; name?: string; role?: string } | null;
+  /** Populated when the President's slot was signed (could be original or OIC). */
+  presidentApprovedBy?: { _id: string; name?: string; role?: string } | null;
   participants?: string[];
 }
 
@@ -293,9 +299,24 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
             const hasSigned = order.recommendersWhoApproved?.some(id => String(id) === recommenderId);
             const isUserCandidate = !!currentUserId && (String(recommender._id || recommender.id) === String(currentUserId));
             const isTurn = index === currentApprovedCount && isUserCandidate;
+            // Find the actual signature record for this slot (matched by signedAsOicFor for OIC, or user for direct signers).
+            const sigRecord = order.recommenderSignatures?.find(rs => {
+              const oic = typeof rs.signedAsOicFor === 'object' ? rs.signedAsOicFor?._id : rs.signedAsOicFor;
+              if (oic && String(oic) === recommenderId) return true;
+              const u = typeof rs.user === 'object' ? rs.user?._id : rs.user;
+              return String(u || '') === recommenderId;
+            });
             const existingSignature =
-              order.recommenderSignatures?.find(rs => String(rs.user) === recommenderId)?.signature ||
+              sigRecord?.signature ||
               (index === 0 ? (order.approverSignature || null) : null);
+
+            // Display name: if signed by OIC, show OIC's name; else show original recommender's name.
+            const oicSignedFor = sigRecord?.signedAsOicFor;
+            const oicSignedForName = typeof oicSignedFor === 'object' ? oicSignedFor?.name : null;
+            const oicSigner = sigRecord?.user;
+            const oicSignerName = typeof oicSigner === 'object' ? oicSigner?.name : null;
+            const isOicSigned = !!oicSignedForName;
+            const displayName = isOicSigned ? (oicSignerName || recommender.name) : recommender.name;
 
             return (
               <View key={recommenderId || `${recommender.name}-${index}`} style={styles.signatureBlockLeft}>
@@ -331,10 +352,13 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
                     </View>
                   )}
                   <View style={styles.signatureNameContainer}>
-                    <Text style={styles.signatureName}>{recommender.name}</Text>
+                    <Text style={styles.signatureName}>{displayName}</Text>
                   </View>
                 </View>
                 <Text style={styles.signatureTitle}>Immediate Chief</Text>
+                {isOicSigned && (
+                  <Text style={styles.oicNote}>(OIC for {oicSignedForName})</Text>
+                )}
               </View>
             );
           })}
@@ -368,10 +392,17 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
                 </View>
               ) : null}
               <View style={styles.signatureNameContainer}>
-                <Text style={styles.signatureName}>{presidentName}</Text>
+                <Text style={styles.signatureName}>
+                  {order.presidentSignedAsOicFor && order.presidentApprovedBy?.name
+                    ? order.presidentApprovedBy.name
+                    : presidentName}
+                </Text>
               </View>
             </View>
             <Text style={styles.signatureTitle}>President</Text>
+            {order.presidentSignedAsOicFor?.name && (
+              <Text style={styles.oicNote}>(OIC for {order.presidentSignedAsOicFor.name})</Text>
+            )}
           </View>
         </View>
       </View>
@@ -688,6 +719,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     textAlign: 'left',
+  },
+  oicNote: {
+    fontSize: 7,
+    fontStyle: 'italic',
+    color: '#444',
+    marginTop: 1,
   },
 });
 

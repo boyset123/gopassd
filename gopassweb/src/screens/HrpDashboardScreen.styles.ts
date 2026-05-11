@@ -1437,6 +1437,14 @@ export const styles = StyleSheet.create({
       marginTop: 5,
       textAlign: 'center',
     },
+    docOicNote: {
+      fontSize: 11,
+      fontStyle: 'italic',
+      color: '#555',
+      textAlign: 'center',
+      marginTop: 1,
+      marginBottom: 1,
+    },
     docSignatureUnderline: {
       borderTopWidth: 1,
       borderColor: '#000',

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Image, TouchableOpacity, Alert, Modal, TextInput, ImageBackground, Platform } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Image, TouchableOpacity, Alert, Modal, TextInput, ImageBackground, Platform, Switch, FlatList } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -39,6 +39,13 @@ interface PassSlip {
   status: string;
 }
 
+interface OicUserSummary {
+  _id: string;
+  name: string;
+  role: string;
+  faculty?: string;
+}
+
 interface User {
   name: string;
   email: string;
@@ -47,7 +54,24 @@ interface User {
   faculty?: string; // Faculty is optional
   profilePicture?: string;
   passSlipMinutes?: number;
+  oicPrimary?: OicUserSummary | null;
+  oicFallback?: OicUserSummary | null;
+  onTravelManual?: boolean;
+  onTravel?: boolean;
+  onTravelReason?: 'manual' | 'travel-order' | null;
+  canAssignOic?: boolean;
 }
+
+interface OicCandidate {
+  _id: string;
+  name: string;
+  role: string;
+  faculty?: string;
+  campus?: string;
+  profilePicture?: string;
+}
+
+const OIC_CAPABLE_ROLES: ReadonlyArray<string> = ['President', 'Faculty Dean', 'Program Head'];
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -64,6 +88,14 @@ export default function ProfileScreen() {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
   const [isLogoutConfirmModalVisible, setLogoutConfirmModalVisible] = useState(false);
+
+  // --- OIC Delegation state ---
+  const [isUpdatingOnTravel, setIsUpdatingOnTravel] = useState(false);
+  const [oicPickerSlot, setOicPickerSlot] = useState<'primary' | 'fallback' | null>(null);
+  const [oicCandidates, setOicCandidates] = useState<OicCandidate[]>([]);
+  const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
+  const [oicSearch, setOicSearch] = useState('');
+  const [isSavingOic, setIsSavingOic] = useState(false);
 
   const fetchUserData = useCallback(async () => {
     try {
@@ -145,6 +177,92 @@ export default function ProfileScreen() {
     await AsyncStorage.removeItem('userToken');
     router.replace('/');
   };
+
+  // --- OIC Delegation handlers ---
+  const canAssignOic = !!user?.canAssignOic || OIC_CAPABLE_ROLES.includes(user?.role || '');
+
+  const handleToggleOnTravel = async (next: boolean) => {
+    if (!user) return;
+    setIsUpdatingOnTravel(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await axios.put(
+        `${API_URL}/users/me/on-travel`,
+        { onTravelManual: next },
+        { headers: { 'x-auth-token': token } }
+      );
+      setUser((prev) => (prev ? {
+        ...prev,
+        onTravelManual: !!response.data.onTravelManual,
+        onTravel: !!response.data.onTravel,
+        onTravelReason: response.data.onTravelReason || null,
+      } : prev));
+    } catch (error) {
+      console.error('Failed to update on-travel status:', error);
+      Alert.alert('Update Failed', 'Could not update your on-travel status.');
+    } finally {
+      setIsUpdatingOnTravel(false);
+    }
+  };
+
+  const openOicPicker = async (slot: 'primary' | 'fallback') => {
+    setOicPickerSlot(slot);
+    setOicSearch('');
+    setOicCandidates([]);
+    setIsLoadingCandidates(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await axios.get(`${API_URL}/users/me/oic-candidates`, {
+        params: { slot },
+        headers: { 'x-auth-token': token },
+      });
+      setOicCandidates(response.data?.candidates || []);
+    } catch (error: any) {
+      console.error('Failed to fetch OIC candidates:', error);
+      Alert.alert('Could not load candidates', error?.response?.data?.message || 'Please try again.');
+      setOicPickerSlot(null);
+    } finally {
+      setIsLoadingCandidates(false);
+    }
+  };
+
+  const closeOicPicker = () => {
+    setOicPickerSlot(null);
+    setOicCandidates([]);
+    setOicSearch('');
+  };
+
+  const handleSelectOic = async (candidate: OicCandidate | null) => {
+    if (!oicPickerSlot) return;
+    setIsSavingOic(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const body: { oicPrimary?: string | null; oicFallback?: string | null } = {};
+      if (oicPickerSlot === 'primary') body.oicPrimary = candidate ? candidate._id : null;
+      else body.oicFallback = candidate ? candidate._id : null;
+      const response = await axios.put(`${API_URL}/users/me/oic`, body, {
+        headers: { 'x-auth-token': token },
+      });
+      setUser((prev) => (prev ? {
+        ...prev,
+        oicPrimary: response.data.oicPrimary || null,
+        oicFallback: response.data.oicFallback || null,
+      } : prev));
+      closeOicPicker();
+      Alert.alert('Saved', candidate ? 'OIC assignment updated.' : 'OIC cleared.');
+    } catch (error: any) {
+      console.error('Failed to update OIC:', error);
+      Alert.alert('Update Failed', error?.response?.data?.message || 'Could not update OIC.');
+    } finally {
+      setIsSavingOic(false);
+    }
+  };
+
+  const filteredCandidates = oicCandidates.filter((c) => {
+    if (!oicSearch.trim()) return true;
+    const q = oicSearch.trim().toLowerCase();
+    return c.name.toLowerCase().includes(q) || (c.role || '').toLowerCase().includes(q);
+  });
 
   const handleLogout = () => {
     setLogoutConfirmModalVisible(true);
@@ -352,6 +470,77 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
+      {/* OIC Picker Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={oicPickerSlot !== null}
+        onRequestClose={closeOicPicker}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+            <Text style={styles.modalTitle}>
+              {oicPickerSlot === 'primary' ? 'Choose Primary OIC' : 'Choose Fallback OIC'}
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholderTextColor={theme.textMuted}
+              value={oicSearch}
+              onChangeText={setOicSearch}
+              placeholder="Search by name or role"
+            />
+            {isLoadingCandidates ? (
+              <ActivityIndicator color={theme.primary} style={{ marginVertical: 16 }} />
+            ) : (
+              <FlatList
+                data={filteredCandidates}
+                keyExtractor={(item) => item._id}
+                style={{ maxHeight: 320 }}
+                ListEmptyComponent={
+                  <Text style={styles.oicEmptyText}>
+                    {oicSearch ? 'No matches found.' : 'No eligible candidates available.'}
+                  </Text>
+                }
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.oicCandidateRow}
+                    onPress={() => handleSelectOic(item)}
+                    disabled={isSavingOic}
+                  >
+                    <View style={styles.infoIconWrap}>
+                      <FontAwesome name="user" size={16} color={theme.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.oicCandidateName}>{item.name}</Text>
+                      <Text style={styles.oicCandidateRole}>
+                        {item.role}
+                        {item.faculty ? ` — ${item.faculty}` : ''}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+            <View style={styles.modalButtonContainer}>
+              <Pressable
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={closeOicPicker}
+                disabled={isSavingOic}
+              >
+                <Text style={styles.modalButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButton, styles.logoutConfirmButton]}
+                onPress={() => handleSelectOic(null)}
+                disabled={isSavingOic}
+              >
+                {isSavingOic ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Clear</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.contentContainer}>
         <ScrollView contentContainerStyle={[styles.scrollContainer, { paddingBottom: (insets.bottom || 20) + 88 }]}>
           <View style={styles.profileHeader}>
@@ -415,6 +604,87 @@ export default function ProfileScreen() {
               <View style={styles.cardBody}>
                 <Text style={styles.sectionTitle}>Weekly Pass Slip Limit</Text>
                 <Text style={styles.timeLimitText}>Remaining Minutes: {user.passSlipMinutes}</Text>
+              </View>
+            </View>
+          )}
+
+          {canAssignOic && (
+            <View style={styles.card}>
+              <View style={[styles.cardTopBar, styles.cardTopBarAccent]} />
+              <View style={styles.cardBody}>
+                <Text style={styles.sectionTitle}>Officer-In-Charge (OIC) Delegation</Text>
+                <Text style={styles.oicHelperText}>
+                  When you are on travel, your assigned OIC can sign documents on your behalf. The OIC&apos;s name will appear with a note that they signed in your place.
+                </Text>
+
+                <View style={styles.onTravelRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.onTravelLabel}>I am on travel</Text>
+                    <Text style={styles.onTravelSubLabel}>
+                      {user?.onTravel
+                        ? user?.onTravelReason === 'travel-order'
+                          ? 'Auto-detected from your approved Travel Order'
+                          : 'Manually set'
+                        : 'You are currently available to sign'}
+                    </Text>
+                  </View>
+                  {isUpdatingOnTravel ? (
+                    <ActivityIndicator color={theme.primary} />
+                  ) : (
+                    <Switch
+                      value={!!user?.onTravelManual}
+                      onValueChange={handleToggleOnTravel}
+                      trackColor={{ true: theme.primary, false: '#cbd5e1' }}
+                      thumbColor={user?.onTravelManual ? theme.accent : '#f4f4f5'}
+                    />
+                  )}
+                </View>
+
+                <View style={styles.separator} />
+
+                <Text style={styles.oicSlotLabel}>Primary OIC</Text>
+                <Text style={styles.oicSlotHint}>
+                  {user?.role === 'President'
+                    ? 'Pick a Vice President to act as your default OIC.'
+                    : user?.role === 'Faculty Dean'
+                      ? 'Pick a Program Head from your faculty.'
+                      : 'Pick a Faculty Staff from your faculty.'}
+                </Text>
+                <Pressable style={styles.oicPickerButton} onPress={() => openOicPicker('primary')}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.oicPickerName}>
+                      {user?.oicPrimary ? user.oicPrimary.name : 'Not assigned'}
+                    </Text>
+                    {user?.oicPrimary && (
+                      <Text style={styles.oicPickerRole}>
+                        {user.oicPrimary.role}
+                        {user.oicPrimary.faculty ? ` — ${user.oicPrimary.faculty}` : ''}
+                      </Text>
+                    )}
+                  </View>
+                  <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
+                </Pressable>
+
+                <View style={{ height: 12 }} />
+
+                <Text style={styles.oicSlotLabel}>Fallback OIC</Text>
+                <Text style={styles.oicSlotHint}>
+                  Used only when your Primary OIC is also on travel. Can be any user.
+                </Text>
+                <Pressable style={styles.oicPickerButton} onPress={() => openOicPicker('fallback')}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.oicPickerName}>
+                      {user?.oicFallback ? user.oicFallback.name : 'Not assigned'}
+                    </Text>
+                    {user?.oicFallback && (
+                      <Text style={styles.oicPickerRole}>
+                        {user.oicFallback.role}
+                        {user.oicFallback.faculty ? ` — ${user.oicFallback.faculty}` : ''}
+                      </Text>
+                    )}
+                  </View>
+                  <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
+                </Pressable>
               </View>
             </View>
           )}
@@ -739,5 +1009,78 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  oicHelperText: {
+    fontSize: 13,
+    color: theme.textMuted,
+    marginBottom: 14,
+    lineHeight: 18,
+  },
+  onTravelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  onTravelLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: theme.text,
+  },
+  onTravelSubLabel: {
+    fontSize: 12,
+    color: theme.textMuted,
+    marginTop: 2,
+  },
+  oicSlotLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: theme.primary,
+    marginBottom: 4,
+  },
+  oicSlotHint: {
+    fontSize: 12,
+    color: theme.textMuted,
+    marginBottom: 8,
+  },
+  oicPickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(1,26,107,0.06)',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  oicPickerName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: theme.text,
+  },
+  oicPickerRole: {
+    fontSize: 12,
+    color: theme.textMuted,
+    marginTop: 2,
+  },
+  oicCandidateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  oicCandidateName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: theme.text,
+  },
+  oicCandidateRole: {
+    fontSize: 12,
+    color: theme.textMuted,
+    marginTop: 2,
+  },
+  oicEmptyText: {
+    textAlign: 'center',
+    color: theme.textMuted,
+    paddingVertical: 16,
   },
 });

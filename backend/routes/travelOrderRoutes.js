@@ -7,6 +7,7 @@ const User = require('../models/User');
 const TravelOrderCounter = require('../models/TravelOrderCounter');
 const QRCode = require('qrcode');
 const { parseLocalDate, parseMeridiemTimeToDate } = require('../utils/dateTime');
+const { getEffectiveSigner, toIdString } = require('../utils/oic');
 const multer = require('multer');
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
@@ -172,23 +173,49 @@ router.post('/', [auth, upload.single('document')], async (req, res) => {
 });
 
 
-// Get all travel orders for president approval
-router.get('/for-president-approval', [auth, authorize('President')], async (req, res) => {
+// Get all travel orders for president approval (also accessible to anyone acting as OIC for the President)
+router.get('/for-president-approval', [auth], async (req, res) => {
   try {
     const forPresidentApprovalOrders = await TravelOrder.find({ status: 'For President Approval' })
       .populate('employee', 'name email profilePicture role')
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
+      .populate('recommenderSignatures.user', 'name role')
+      .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status signature approverSignature employeeAddress recommenderSignatures recommendersWhoApproved');
-    res.json(forPresidentApprovalOrders);
-  } catch (error) { 
+
+    // Resolve the current effective president signer once, since every doc here is "for President".
+    const president = await User.findOne({ role: 'President' }).select('_id').lean();
+    let presidentSigner = null;
+    if (president) {
+      const resolution = await getEffectiveSigner(president._id);
+      if (resolution) {
+        presidentSigner = {
+          originalId: resolution.originalId,
+          originalName: resolution.original?.name || null,
+          signerId: resolution.signerId,
+          signerName: resolution.signer?.name || null,
+          viaOic: resolution.viaOic,
+          noDelegateAvailable: !!resolution.noDelegateAvailable,
+        };
+      }
+    }
+
+    const annotated = forPresidentApprovalOrders.map((o) => {
+      const obj = o.toObject ? o.toObject() : o;
+      if (presidentSigner) obj.nextSigner = presidentSigner;
+      return obj;
+    });
+
+    res.json(annotated);
+  } catch (error) {
     console.error('Error fetching travel orders for president approval:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Approve a travel order (for President)
-router.put('/:id/approve-president', [auth, authorize('President')], async (req, res) => {
+// Approve a travel order (for President or their currently-acting OIC)
+router.put('/:id/approve-president', [auth], async (req, res) => {
   try {
     const { approverSignature } = req.body;
 
@@ -201,9 +228,28 @@ router.put('/:id/approve-president', [auth, authorize('President')], async (req,
       return res.status(400).json({ message: 'Only travel orders submitted for president approval can be approved.' });
     }
 
+    // Resolve the effective signer (President or their current OIC) and authorize.
+    const president = await User.findOne({ role: 'President' }).select('_id').lean();
+    if (!president) {
+      return res.status(500).json({ message: 'No President configured in the system.' });
+    }
+    const resolution = await getEffectiveSigner(president._id);
+    if (!resolution) {
+      return res.status(500).json({ message: 'Unable to resolve effective signer for the President.' });
+    }
+    const expectedSignerId = toIdString(resolution.signerId);
+    if (toIdString(req.user.userId) !== expectedSignerId) {
+      return res.status(403).json({
+        message: resolution.viaOic
+          ? 'Only the assigned OIC for the President can sign while the President is on travel.'
+          : 'Only the President can sign this travel order.',
+      });
+    }
+
     travelOrder.status = 'President Approved';
     travelOrder.presidentApprovedBy = req.user.userId;
     travelOrder.presidentSignature = approverSignature;
+    travelOrder.presidentSignedAsOicFor = resolution.viaOic ? resolution.originalId : null;
 
     await travelOrder.populate([{ path: 'employee', select: 'name role' }, { path: 'recommendedBy', select: 'name' }, { path: 'presidentApprovedBy', select: 'name' }]);
     const qrPayload = buildTravelOrderQrPayload(travelOrder);
@@ -235,38 +281,53 @@ router.put('/:id/approve-president', [auth, authorize('President')], async (req,
   }
 });
 
-// Get all pending travel orders (for Recommenders)
-router.get('/pending', [auth, authorize('Program Head', 'Faculty Dean')], async (req, res) => {
+// Get all pending travel orders (for Recommenders and any OIC standing in for them)
+router.get('/pending', [auth], async (req, res) => {
   try {
     const pendingOrders = await TravelOrder.find({ status: 'Pending' })
       .populate('employee', 'name email profilePicture role')
-      .populate('recommendedBy', 'name')
+      .populate('recommendedBy', 'name role faculty')
       .populate('approvedBy', 'name')
+      .populate('recommenderSignatures.user', 'name role')
+      .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress recommenderSignatures recommendersWhoApproved participants');
-    res.json(pendingOrders);
+
+    // Annotate each order with the next expected recommender's effective signer info,
+    // so clients can show "Acting as OIC for X" badges and filter to their queue.
+    const annotated = await Promise.all(
+      pendingOrders.map(async (order) => {
+        const obj = order.toObject ? order.toObject() : order;
+        const approvedCount = Array.isArray(obj.recommendersWhoApproved) ? obj.recommendersWhoApproved.length : 0;
+        const expectedNext = Array.isArray(obj.recommendedBy) ? obj.recommendedBy[approvedCount] : null;
+        if (expectedNext && expectedNext._id) {
+          const resolution = await getEffectiveSigner(expectedNext._id);
+          if (resolution) {
+            obj.nextSigner = {
+              originalId: resolution.originalId,
+              originalName: resolution.original?.name || null,
+              signerId: resolution.signerId,
+              signerName: resolution.signer?.name || null,
+              viaOic: resolution.viaOic,
+              noDelegateAvailable: !!resolution.noDelegateAvailable,
+            };
+          }
+        }
+        return obj;
+      })
+    );
+
+    res.json(annotated);
   } catch (error) {
     console.error('Error fetching pending travel orders:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Update travel order status (for Recommenders, HR and President)
-router.put('/:id/status', [auth, authorize('Program Head', 'Faculty Dean', 'Human Resource Personnel', 'President')], async (req, res) => {
+// Update travel order status (for Recommenders, their OICs, HR, and President)
+router.put('/:id/status', [auth], async (req, res) => {
   try {
     console.log(req.body);
     const { status, approverSignature, travelOrderNo, travelOrderNoSignature, departureSignature, arrivalSignature, rejectionReason } = req.body;
-    
-    // Recommenders (Program Head / Faculty Dean) can only recommend or reject
-    // HR can approve, complete, or reject
-    if (['Program Head', 'Faculty Dean'].includes(req.user.role)) {
-      if (!['Recommended', 'Rejected'].includes(status)) {
-        return res.status(400).json({ message: 'Recommenders can only recommend or reject travel orders.' });
-      }
-    } else if (req.user.role === 'Human Resource Personnel') {
-      if (!['Approved', 'For President Approval', 'Completed', 'Rejected'].includes(status)) {
-        return res.status(400).json({ message: 'Invalid status for HR personnel.' });
-      }
-    }
 
     const travelOrder = await TravelOrder.findById(req.params.id);
     if (!travelOrder) {
@@ -275,8 +336,22 @@ router.put('/:id/status', [auth, authorize('Program Head', 'Faculty Dean', 'Huma
 
     const previousStatus = travelOrder.status;
 
+    // Determine actor scope: are we acting as a recommender (or their OIC) or as HR?
+    const isHr = req.user.role === 'Human Resource Personnel';
+
+    // Whitelist of allowed transitions per role group.
+    if (isHr) {
+      if (!['Approved', 'For President Approval', 'Completed', 'Rejected'].includes(status)) {
+        return res.status(400).json({ message: 'Invalid status for HR personnel.' });
+      }
+    } else {
+      if (!['Recommended', 'Rejected'].includes(status)) {
+        return res.status(400).json({ message: 'Recommenders can only recommend or reject travel orders.' });
+      }
+    }
+
     // Validate status transitions
-    if (['Program Head', 'Faculty Dean'].includes(req.user.role)) {
+    if (!isHr) {
       if (status === 'Recommended' && travelOrder.status !== 'Pending') {
         return res.status(400).json({ message: 'Recommenders can only recommend pending travel orders.' });
       }
@@ -289,22 +364,38 @@ router.put('/:id/status', [auth, authorize('Program Head', 'Faculty Dean', 'Huma
         const currentApprovedCount = travelOrder.recommendersWhoApproved.length;
         const expectedNextRecommender = travelOrder.recommendedBy[currentApprovedCount];
 
-        if (!expectedNextRecommender || expectedNextRecommender.toString() !== req.user.userId) {
+        if (!expectedNextRecommender) {
           return res.status(403).json({ message: 'It is not yet your turn to recommend this travel order.' });
         }
 
-        // Use string comparison: DB has ObjectIds, JWT has string; .includes(string) would always be false
-        const alreadySigned = travelOrder.recommendersWhoApproved.some(
-          (r) => r && r.toString() === req.user.userId
-        );
-        if (!alreadySigned) {
-          travelOrder.recommendersWhoApproved.push(req.user.userId);
+        // Resolve effective signer (allows the configured OIC to sign while the recommender is on travel).
+        const resolution = await getEffectiveSigner(expectedNextRecommender);
+        if (!resolution) {
+          return res.status(404).json({ message: 'Recommender not found.' });
+        }
+        const expectedSignerId = toIdString(resolution.signerId);
+        if (toIdString(req.user.userId) !== expectedSignerId) {
+          return res.status(403).json({
+            message: resolution.viaOic
+              ? 'Only the assigned OIC can sign while this recommender is on travel.'
+              : 'It is not yet your turn to recommend this travel order.',
+          });
         }
 
-        // Store individual signature
+        // Track the original recommender slot as completed (preserves sequencing order).
+        const originalRecommenderId = toIdString(expectedNextRecommender);
+        const alreadySigned = travelOrder.recommendersWhoApproved.some(
+          (r) => r && r.toString() === originalRecommenderId
+        );
+        if (!alreadySigned) {
+          travelOrder.recommendersWhoApproved.push(expectedNextRecommender);
+        }
+
+        // Store individual signature with OIC metadata when applicable
         travelOrder.recommenderSignatures.push({
           user: req.user.userId,
-          signature: approverSignature
+          signature: approverSignature,
+          signedAsOicFor: resolution.viaOic ? resolution.originalId : null,
         });
 
         // Legacy support
@@ -342,10 +433,25 @@ router.put('/:id/status', [auth, authorize('Program Head', 'Faculty Dean', 'Huma
         }
 
       } else if (status === 'Rejected') {
+        // Only listed recommenders or their currently-acting OIC may reject.
+        const recIds = (travelOrder.recommendedBy || []).map((r) => toIdString(r));
+        let allowed = recIds.includes(toIdString(req.user.userId));
+        if (!allowed) {
+          for (const recId of recIds) {
+            const resolution = await getEffectiveSigner(recId);
+            if (resolution && toIdString(resolution.signerId) === toIdString(req.user.userId)) {
+              allowed = true;
+              break;
+            }
+          }
+        }
+        if (!allowed) {
+          return res.status(403).json({ message: 'Only a recommender or their OIC can reject this travel order.' });
+        }
         travelOrder.status = 'Rejected';
         if (rejectionReason != null) travelOrder.rejectionReason = String(rejectionReason).trim() || undefined;
       }
-    } else if (req.user.role === 'Human Resource Personnel') {
+    } else if (isHr) {
       // HR approves Recommended orders and sends to President
       if (status === 'For President Approval' && travelOrder.status !== 'Recommended') {
         return res.status(400).json({ message: 'HR can only process travel orders that have been recommended by all chiefs.' });
@@ -455,7 +561,10 @@ router.get('/my-orders', auth, async (req, res) => {
       .populate('employee', 'name profilePicture role employeeAddress')
       .populate('approvedBy', 'name')
       .populate('presidentApprovedBy', 'name')
+      .populate('presidentSignedAsOicFor', 'name role')
       .populate('recommendedBy', 'name faculty campus')
+      .populate('recommenderSignatures.user', 'name role')
+      .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .sort({ createdAt: -1 })
       .lean();
     res.json(userOrders);
@@ -538,6 +647,8 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
     const recommendedOrders = await TravelOrder.find({ status: 'Recommended' })
       .populate('employee', 'name email profilePicture')
       .populate('recommendedBy', 'name')
+      .populate('recommenderSignatures.user', 'name role')
+      .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy signature approverSignature latitude longitude routePolyline employeeAddress recommenderSignatures recommendersWhoApproved');
     res.json(recommendedOrders);
   } catch (error) {
@@ -554,7 +665,10 @@ router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async 
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
       .populate('presidentApprovedBy', 'name')
-      .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress presidentSignature presidentApprovedBy recommenderSignatures recommendersWhoApproved');
+      .populate('presidentSignedAsOicFor', 'name role')
+      .populate('recommenderSignatures.user', 'name role')
+      .populate('recommenderSignatures.signedAsOicFor', 'name role')
+      .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress presidentSignature presidentApprovedBy presidentSignedAsOicFor recommenderSignatures recommendersWhoApproved');
     res.json(hrApprovedOrders);
   } catch (error) {
     console.error('Error fetching HR approved travel orders:', error);
@@ -585,8 +699,11 @@ router.get('/approved', [auth, authorize('Human Resource Personnel')], async (re
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
       .populate('presidentApprovedBy', 'name')
+      .populate('presidentSignedAsOicFor', 'name role')
+      .populate('recommenderSignatures.user', 'name role')
+      .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .sort({ createdAt: -1 })
-      .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress presidentSignature presidentApprovedBy recommenderSignatures recommendersWhoApproved');
+      .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress presidentSignature presidentApprovedBy presidentSignedAsOicFor recommenderSignatures recommendersWhoApproved');
     res.json(approvedOrders);
   } catch (error) {
     console.error('Error fetching approved travel orders:', error);
@@ -602,6 +719,9 @@ router.get('/returned', [auth, authorize('Human Resource Personnel')], async (re
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
       .populate('presidentApprovedBy', 'name')
+      .populate('presidentSignedAsOicFor', 'name role')
+      .populate('recommenderSignatures.user', 'name role')
+      .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .sort({ arrivalTime: -1, createdAt: -1 });
     res.json(returnedOrders);
   } catch (error) {
@@ -618,6 +738,9 @@ router.get('/verified', [auth, authorize('Security Personnel')], async (req, res
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
       .populate('presidentApprovedBy', 'name')
+      .populate('presidentSignedAsOicFor', 'name role')
+      .populate('recommenderSignatures.user', 'name role')
+      .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .sort({ departureTime: -1, createdAt: -1 });
     res.json(verifiedOrders);
   } catch (error) {
@@ -753,7 +876,10 @@ router.get('/:id', [auth, authorize('Security Personnel')], async (req, res) => 
       .populate('employee', 'name email profilePicture role')
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
-      .populate('presidentApprovedBy', 'name');
+      .populate('presidentApprovedBy', 'name')
+      .populate('presidentSignedAsOicFor', 'name role')
+      .populate('recommenderSignatures.user', 'name role')
+      .populate('recommenderSignatures.signedAsOicFor', 'name role');
 
     if (!travelOrder) {
       return res.status(404).json({ message: 'Travel order not found.' });

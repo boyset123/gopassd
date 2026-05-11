@@ -35,6 +35,12 @@ const passSlipSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
   },
+  // When set, the first-line approver slot was signed by an OIC standing in for this user.
+  approvedBySignedAsOicFor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
   signature: {
     type: String, // Base64
     required: true,

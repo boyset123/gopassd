@@ -16,11 +16,16 @@ export interface TravelOrderPrintItem {
   additionalInfo?: string;
   participants?: string[];
   recommendedBy?: Array<{ _id?: string; name?: string }>;
-  recommenderSignatures?: Array<{ user?: string; signature?: string }>;
+  recommenderSignatures?: Array<{
+    user?: string | { _id?: string; name?: string };
+    signature?: string;
+    signedAsOicFor?: string | { _id?: string; name?: string } | null;
+  }>;
   approverSignature?: string;
   approvedBy?: { _id?: string; name?: string };
   presidentApprovedBy?: { name?: string };
   presidentSignature?: string;
+  presidentSignedAsOicFor?: { name?: string } | null;
 }
 
 const escapeHtml = (s: string) =>
@@ -93,12 +98,25 @@ export function getTravelOrderPrintHtml(
   const toNames = [item.employee?.name || '', ...((item.participants || []).filter(Boolean))];
   const recommenderBlocks = recs
     .map((chief, index) => {
+      const chiefId = chief._id ? String(chief._id) : '';
       const sigEntry =
-        item.recommenderSignatures?.find((s) => s.user && chief._id && String(s.user) === String(chief._id)) ??
-        item.recommenderSignatures?.[index];
+        item.recommenderSignatures?.find((s) => {
+          const oic = typeof s.signedAsOicFor === 'object' && s.signedAsOicFor ? s.signedAsOicFor._id : s.signedAsOicFor;
+          if (oic && chiefId && String(oic) === chiefId) return true;
+          const u = typeof s.user === 'object' && s.user ? s.user._id : s.user;
+          return !!u && !!chiefId && String(u) === chiefId;
+        }) ?? item.recommenderSignatures?.[index];
       const sig = sigEntry?.signature ?? (index === 0 ? item.approverSignature : undefined);
-      const name = chief?.name ?? '';
-      const safeName = escapeHtml(name || '—');
+      const oicSignedFor = sigEntry?.signedAsOicFor;
+      const oicSignedForName = typeof oicSignedFor === 'object' && oicSignedFor ? oicSignedFor.name : null;
+      const oicSigner = sigEntry?.user;
+      const oicSignerName = typeof oicSigner === 'object' && oicSigner ? oicSigner.name : null;
+      const isOicSigned = !!oicSignedForName;
+      const displayName = isOicSigned ? (oicSignerName || chief?.name || '') : (chief?.name || '');
+      const safeName = escapeHtml(displayName || '—');
+      const oicLine = isOicSigned
+        ? `<div class="sig-oic-note">(OIC for ${escapeHtml(oicSignedForName || '')})</div>`
+        : '';
       return `
       <div class="sig-col">
         <div class="sig-header">RECOMMENDED BY ${index + 1}:</div>
@@ -107,6 +125,7 @@ export function getTravelOrderPrintHtml(
           <div class="sig-name-line"><span class="sig-name">${safeName}</span></div>
         </div>
         <div class="sig-role">Immediate Chief</div>
+        ${oicLine}
       </div>`;
     })
     .join('');
@@ -126,7 +145,17 @@ export function getTravelOrderPrintHtml(
               </div>`;
   })();
 
-  const presidentName = escapeHtml(item.presidentApprovedBy?.name || presidentNameFallback || '—');
+  // When the President's slot was signed by an OIC, show the actual signer's name (presidentApprovedBy)
+  // and add an "(OIC for ...)" line below.
+  const presidentSignedByOicFor = item.presidentSignedAsOicFor?.name || null;
+  const presidentDisplayName =
+    presidentSignedByOicFor && item.presidentApprovedBy?.name
+      ? item.presidentApprovedBy.name
+      : item.presidentApprovedBy?.name || presidentNameFallback || '—';
+  const presidentName = escapeHtml(presidentDisplayName);
+  const presidentOicLine = presidentSignedByOicFor
+    ? `<div class="sig-oic-note">(OIC for ${escapeHtml(presidentSignedByOicFor)})</div>`
+    : '';
   const docTitle = escapeHtml(String(item.travelOrderNo || item._id));
   const logoSlot =
     options?.logoDataUri != null && options.logoDataUri.length > 0
@@ -254,6 +283,7 @@ export function getTravelOrderPrintHtml(
     }
     .sig-name { font-size: 12px; font-weight: 800; display: block; text-align: center; }
     .sig-role { font-size: 10px; margin-top: 8px; text-align: center; width: 100%; }
+    .sig-oic-note { font-size: 8px; font-style: italic; color: #555; margin-top: 2px; text-align: center; width: 100%; }
 
     @media print {
       body { width: auto; min-height: auto; }
@@ -362,6 +392,7 @@ export function getTravelOrderPrintHtml(
               <div class="sig-name-line"><span class="sig-name">${presidentName}</span></div>
             </div>
             <div class="sig-role">President</div>
+            ${presidentOicLine}
           </div>
         </div>
       </div>

@@ -11,7 +11,9 @@ const travelOrderSchema = new mongoose.Schema({
   recommenderSignatures: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     signature: String,
-    date: { type: Date, default: Date.now }
+    date: { type: Date, default: Date.now },
+    // When set, this signature was made by an OIC standing in for the user referenced here.
+    signedAsOicFor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
   }],
   hrSignature: {
     type: String, // Base64
@@ -45,6 +47,8 @@ const travelOrderSchema = new mongoose.Schema({
   recommendersWhoApproved: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   presidentApprovedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  // When set, the president's slot was signed by an OIC standing in for the user referenced here.
+  presidentSignedAsOicFor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   qrCode: { type: String },
   departureTime: { type: Date },
   arrivalTime: { type: Date },

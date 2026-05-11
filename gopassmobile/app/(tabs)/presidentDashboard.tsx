@@ -32,6 +32,7 @@ const theme = {
 // --- Type Definitions ---
 interface User {
   _id: string;
+  id?: string;
   name: string;
   email: string;
   role: string;
@@ -42,6 +43,15 @@ interface Employee {
   name: string;
   email: string;
   role?: string;
+}
+
+interface NextSignerInfo {
+  originalId: string;
+  originalName?: string | null;
+  signerId: string;
+  signerName?: string | null;
+  viaOic: 'primary' | 'fallback' | null;
+  noDelegateAvailable?: boolean;
 }
 
 interface PassSlip {
@@ -56,6 +66,7 @@ interface PassSlip {
   signature: string;
   approverSignature?: string;
   approvedBy?: { name: string };
+  nextSigner?: NextSignerInfo;
 }
 
 interface TravelOrder {
@@ -83,6 +94,7 @@ interface TravelOrder {
   recommenderSignatures?: { user: string, signature: string, date: string }[];
   recommendersWhoApproved?: string[];
   departureTime?: string;
+  nextSigner?: NextSignerInfo;
 }
 
 const formatDate = (dateString: string, includeTime: boolean = false) => {
@@ -336,6 +348,14 @@ export default function PresidentDashboard() {
   const renderItem = (item: PassSlip | TravelOrder, type: ItemType) => (
     <Pressable key={item._id} style={styles.itemCard} onPress={() => handleOpenReview(item, type)}>
       <View style={[styles.itemCardTopBar, type === 'slip' ? styles.itemCardTopBarSlip : styles.itemCardTopBarOrder]} />
+      {item.nextSigner?.viaOic && item.nextSigner.signerId === (user?._id || user?.id) && (
+        <View style={styles.oicBadge}>
+          <FontAwesome name="user-secret" size={12} color="#fff" />
+          <Text style={styles.oicBadgeText}>
+            Acting as OIC for {item.nextSigner.originalName || 'original signatory'}
+          </Text>
+        </View>
+      )}
       <View style={styles.itemCardHeader}>
         <View style={[styles.itemIconWrap, type === 'slip' ? styles.itemIconWrapSlip : styles.itemIconWrapOrder]}>
           <FontAwesome name={type === 'slip' ? 'file-text-o' : 'plane'} size={18} color="#fff" />
@@ -423,6 +443,9 @@ export default function PresidentDashboard() {
               <Text style={styles.docSignatureName}>{user?.name}</Text>
             </View>
             <Text style={styles.docSignatureUnderline}>President</Text>
+            {selectedItem?.nextSigner?.viaOic && selectedItem?.nextSigner?.originalName && (
+              <Text style={styles.docOicNote}>(OIC for {selectedItem.nextSigner.originalName})</Text>
+            )}
           </View>
         </View>
       </View>
@@ -760,6 +783,20 @@ const styles = StyleSheet.create({
   itemCardTopBar: {
     height: 4,
     width: '100%',
+  },
+  oicBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: theme.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  oicBadgeText: {
+    color: theme.primaryDark,
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
   itemCardTopBarSlip: {
     backgroundColor: theme.primary,
@@ -1229,6 +1266,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     textAlign: 'left',
+  },
+  docOicNote: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: '#444',
+    marginTop: 2,
   },
   docSignatureUnderline: {
     borderTopWidth: 1,

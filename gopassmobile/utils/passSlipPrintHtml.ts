@@ -15,6 +15,8 @@ export interface PassSlipPrintItem {
   signature?: string;
   approverSignature?: string;
   approvedBy?: { name?: string };
+  /** Populated when the first-line approver slot was signed by an OIC standing in for this user. */
+  approvedBySignedAsOicFor?: { name?: string } | null;
   rejectionReason?: string;
 }
 
@@ -217,6 +219,14 @@ export function getPassSlipPrintHtml(
       width: 100%;
       text-align: center;
     }
+    .sig-oic-note {
+      font-size: 11px;
+      font-style: italic;
+      color: rgba(1, 26, 107, 0.75);
+      width: 100%;
+      text-align: center;
+      margin-top: 2px;
+    }
     @media print {
       body { width: auto; min-height: auto; }
       .page { max-width: 100%; padding: 0; }
@@ -281,6 +291,9 @@ export function getPassSlipPrintHtml(
         </div>
         <div class="sig-name-line">${escapeHtml(item.approvedBy?.name || 'N/A')}</div>
         <div class="sig-role-line">${escapeHtml(approvedByRoleLabel(viewerRole))}</div>
+        ${item.approvedBySignedAsOicFor?.name
+          ? `<div class="sig-oic-note">(OIC for ${escapeHtml(item.approvedBySignedAsOicFor.name)})</div>`
+          : ''}
       </div>
     </div>
   </div>

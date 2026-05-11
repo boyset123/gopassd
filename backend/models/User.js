@@ -37,9 +37,11 @@ const userSchema = new mongoose.Schema({
       'Faculty Dean',
       'Security Personnel',
       'admin',
-      'President'
+      'President',
+      'Vice President'
     ],
-    required: true
+    required: true,
+    index: true
   },
   campus: {
     type: String,
@@ -71,7 +73,27 @@ const userSchema = new mongoose.Schema({
   },
   notifications: [notificationSchema],
   resetPasswordToken: String,
-  resetPasswordExpires: Date
+  resetPasswordExpires: Date,
+  // OIC (Officer-In-Charge) delegation
+  oicPrimary: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  oicFallback: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  // Manual on-travel override (separate from auto-detection via approved Travel Orders)
+  onTravelManual: {
+    type: Boolean,
+    default: false
+  },
+  onTravelManualUntil: {
+    type: Date,
+    default: null
+  }
 });
 
 // Hash password before saving

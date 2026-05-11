@@ -99,7 +99,7 @@ router.post('/login', async (req, res) => {
         role: user.role,
         faculty: user.faculty,
         createdAt: user.createdAt,
-        passSlipMinutes: user.passSlipMinutes,
+        passSlipMinutes: Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0)),
         activeOicForRoles,
       }
     });
@@ -291,7 +291,7 @@ router.get('/me', auth, async (req, res) => {
         faculty: user.faculty,
         createdAt: user.createdAt,
         profilePicture: user.profilePicture,
-        passSlipMinutes: user.passSlipMinutes,
+        passSlipMinutes: Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0)),
         oicPrimary: user.oicPrimary || null,
         oicFallback: user.oicFallback || null,
         onTravelManual: !!user.onTravelManual,
@@ -340,7 +340,7 @@ router.post(
           faculty: user.faculty,
           createdAt: user.createdAt,
           profilePicture: user.profilePicture,
-          passSlipMinutes: user.passSlipMinutes,
+          passSlipMinutes: Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0)),
         },
       });
     } catch (error) {
@@ -380,7 +380,7 @@ router.put('/me/name', auth, async (req, res) => {
         faculty: user.faculty,
         createdAt: user.createdAt,
         profilePicture: user.profilePicture,
-        passSlipMinutes: user.passSlipMinutes
+        passSlipMinutes: Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0))
       }
     });
   } catch (error) {

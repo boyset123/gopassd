@@ -9,6 +9,95 @@ const { parseMeridiemTimeToDate, parseMeridiemTimeToMillisOfDay } = require('../
 const { getEffectiveSigner, isUserOnTravel, toIdString } = require('../utils/oic');
 
 /**
+ * Format a number of minutes as a clean human-readable string
+ * (e.g. 0 -> "0 min", 5 -> "5 min", 60 -> "1h 0m", 83 -> "1h 23m").
+ */
+function formatMinutes(value) {
+  const total = Math.max(0, Math.floor(Number(value) || 0));
+  if (total < 60) return `${total} min`;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  return `${hours}h ${mins}m`;
+}
+
+/** Weekly pass-slip cap (mirrors HRP tracker WEEKLY_LIMIT_HOURS = 2). */
+const WEEKLY_LIMIT_MINUTES = 120;
+
+/**
+ * Extract Manila-intent date parts (year, monthIndex, day) for a value,
+ * independent of the server's local timezone. Returns null on invalid input.
+ */
+function getManilaDateParts(value) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const [y, m, day] = fmt.format(d).split('-').map((n) => parseInt(n, 10));
+  if (!y || !m || !day) return null;
+  return { year: y, monthIndex: m - 1, day };
+}
+
+/**
+ * Compute Manila-intent day-of-week (0=Sun..6=Sat) and a stable weekKey
+ * (Monday YYYY-MM-DD) for a date value.
+ */
+function getManilaWeekInfo(value) {
+  const parts = getManilaDateParts(value);
+  if (!parts) return null;
+  const utcDay = new Date(Date.UTC(parts.year, parts.monthIndex, parts.day));
+  const dow = utcDay.getUTCDay();
+  const diff = dow === 0 ? -6 : 1 - dow;
+  const monday = new Date(utcDay.getTime());
+  monday.setUTCDate(utcDay.getUTCDate() + diff);
+  const weekKey = `${monday.getUTCFullYear()}-${String(monday.getUTCMonth() + 1).padStart(2, '0')}-${String(monday.getUTCDate()).padStart(2, '0')}`;
+  return { dayOfWeek: dow, weekKey };
+}
+
+/**
+ * Sum (planned + overdue) minutes used by the given employee in the same
+ * Monday-Friday week as `targetDate`, across approved-or-later slips.
+ * Mirrors the HRP Pass Slip Tracker's bucketing rules.
+ */
+async function getWeeklyUsedMinutes(employeeId, targetDate) {
+  const target = getManilaWeekInfo(targetDate);
+  if (!target) return 0;
+
+  // Cast a generous window around the target to keep the Mongo query
+  // index-friendly while staying robust to timezone offsets.
+  const targetInstant = new Date(targetDate);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const fromDate = new Date(targetInstant.getTime() - 10 * dayMs);
+  const toDate = new Date(targetInstant.getTime() + 10 * dayMs);
+
+  const candidates = await PassSlip.find({
+    employee: employeeId,
+    status: { $in: ['Approved', 'Verified', 'Returned', 'Completed'] },
+    date: { $gte: fromDate, $lte: toDate },
+  }).select('date timeOut estimatedTimeBack overdueMinutes');
+
+  let used = 0;
+  for (const slip of candidates) {
+    const info = getManilaWeekInfo(slip.date);
+    if (!info || info.weekKey !== target.weekKey) continue;
+    if (info.dayOfWeek < 1 || info.dayOfWeek > 5) continue;
+
+    const s = parseMeridiemTimeToDate(slip.timeOut, slip.date);
+    const e = parseMeridiemTimeToDate(slip.estimatedTimeBack, slip.date);
+    if (s && e && e > s) {
+      used += (e.getTime() - s.getTime()) / 60000;
+    }
+    if (typeof slip.overdueMinutes === 'number' && slip.overdueMinutes > 0) {
+      used += slip.overdueMinutes;
+    }
+  }
+  return used;
+}
+
+/**
  * Build a Mongo `$in` list of approver IDs for which the calling user should see
  * pending pass slips: the user themselves plus any on-travel approver whose
  * effective signer currently resolves to them (via OIC primary or fallback).
@@ -70,7 +159,23 @@ router.post('/', auth, async (req, res) => {
     const durationMinutes = (endTime.getTime() - startTime.getTime()) / 60000; // duration in minutes
 
     if (user.passSlipMinutes < durationMinutes) {
-      return res.status(400).json({ message: `Insufficient pass slip minutes. You have ${user.passSlipMinutes} minutes remaining.` });
+      return res.status(400).json({
+        message: `Insufficient pass slip minutes. You have ${formatMinutes(user.passSlipMinutes)} remaining, but this request needs ${formatMinutes(durationMinutes)}.`,
+      });
+    }
+
+    // Weekly 2-hour cap (matches the HRP Pass Slip Tracker view). Only Mon-Fri
+    // slips count, and only Approved-or-later existing slips are summed —
+    // mirroring how the tracker buckets approved usage.
+    const slipWeek = getManilaWeekInfo(date);
+    if (slipWeek && slipWeek.dayOfWeek >= 1 && slipWeek.dayOfWeek <= 5) {
+      const weekUsedMinutes = await getWeeklyUsedMinutes(req.user.userId, date);
+      if (weekUsedMinutes + durationMinutes > WEEKLY_LIMIT_MINUTES) {
+        const remaining = Math.max(0, WEEKLY_LIMIT_MINUTES - weekUsedMinutes);
+        return res.status(400).json({
+          message: `This pass slip exceeds the 2-hour weekly cap. You have ${formatMinutes(remaining)} left this week, but this request needs ${formatMinutes(durationMinutes)}.`,
+        });
+      }
     }
 
     const newPassSlip = new PassSlip({
@@ -270,10 +375,29 @@ router.put('/:id/status', [auth], async (req, res) => {
         const durationMinutes = (endTime.getTime() - startTime.getTime()) / 60000;
 
         if (user.passSlipMinutes < durationMinutes) {
-          return res.status(400).json({ message: `Insufficient pass slip minutes. The user has ${user.passSlipMinutes} minutes remaining.` });
+          return res.status(400).json({
+            message: `Insufficient pass slip minutes. The user has ${formatMinutes(user.passSlipMinutes)} remaining, but this request needs ${formatMinutes(durationMinutes)}.`,
+          });
         }
 
-        user.passSlipMinutes -= durationMinutes;
+        // Enforce the same 2-hour weekly cap at approval time so a backlog of
+        // pending slips cannot collectively exceed the limit shown in the tracker.
+        const approvalWeek = getManilaWeekInfo(passSlip.date);
+        if (approvalWeek && approvalWeek.dayOfWeek >= 1 && approvalWeek.dayOfWeek <= 5) {
+          const weekUsedMinutes = await getWeeklyUsedMinutes(passSlip.employee, passSlip.date);
+          if (weekUsedMinutes + durationMinutes > WEEKLY_LIMIT_MINUTES) {
+            const remaining = Math.max(0, WEEKLY_LIMIT_MINUTES - weekUsedMinutes);
+            return res.status(400).json({
+              message: `Approving this pass slip would exceed the user's 2-hour weekly cap. They have ${formatMinutes(remaining)} left this week, but this slip needs ${formatMinutes(durationMinutes)}.`,
+            });
+          }
+        }
+
+        // Round to whole minutes when applying so the running balance stays
+        // a clean integer (avoids fractional residues like 0.2161666...).
+        const baseBalance = Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0));
+        const deduct = Math.round(durationMinutes);
+        user.passSlipMinutes = Math.max(0, baseBalance - deduct);
         await user.save();
 
         passSlip.status = 'Approved';
@@ -666,8 +790,11 @@ router.put('/:id/return', auth, async (req, res) => {
     if (overdueMinutes > 0) {
       const employee = await User.findById(passSlip.employee);
       if (employee) {
-        const currentBalance = typeof employee.passSlipMinutes === 'number' ? employee.passSlipMinutes : 0;
-        employee.passSlipMinutes = Math.max(0, currentBalance - overdueMinutes);
+        // Floor any pre-existing fractional residue, then deduct overdue
+        // rounded up to whole minutes (strict: a partial minute counts as 1).
+        const currentBalance = Math.max(0, Math.floor(Number(employee.passSlipMinutes) || 0));
+        const deduct = Math.ceil(overdueMinutes);
+        employee.passSlipMinutes = Math.max(0, currentBalance - deduct);
         await employee.save();
       }
     }

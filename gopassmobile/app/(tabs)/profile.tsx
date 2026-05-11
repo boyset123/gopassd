@@ -62,6 +62,14 @@ interface User {
   canAssignOic?: boolean;
 }
 
+const formatMinutes = (value: number | undefined | null): string => {
+  const total = Math.max(0, Math.floor(Number(value) || 0));
+  if (total < 60) return `${total} min`;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  return `${hours}h ${mins}m`;
+};
+
 interface OicCandidate {
   _id: string;
   name: string;
@@ -602,8 +610,8 @@ export default function ProfileScreen() {
             <View style={styles.card}>
               <View style={[styles.cardTopBar, styles.cardTopBarAccent]} />
               <View style={styles.cardBody}>
-                <Text style={styles.sectionTitle}>Weekly Pass Slip Limit</Text>
-                <Text style={styles.timeLimitText}>Remaining Minutes: {user.passSlipMinutes}</Text>
+                <Text style={styles.sectionTitle}>Monthly Pass Slip Balance</Text>
+                <Text style={styles.timeLimitText}>Remaining: {formatMinutes(user.passSlipMinutes)}</Text>
               </View>
             </View>
           )}

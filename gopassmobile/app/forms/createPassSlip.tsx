@@ -37,6 +37,14 @@ interface User {
   passSlipMinutes?: number;
 }
 
+const formatMinutes = (value: number | undefined | null): string => {
+  const total = Math.max(0, Math.floor(Number(value) || 0));
+  if (total < 60) return `${total} min`;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  return `${hours}h ${mins}m`;
+};
+
 interface Suggestion {
   place_id: number;
   lat: string;
@@ -353,7 +361,10 @@ const CreatePassSlipScreen = () => {
 
     const durationMinutes = (estimatedTimeBack.getTime() - timeOut.getTime()) / 60000;
     if (user?.passSlipMinutes !== undefined && user.passSlipMinutes < durationMinutes) {
-      Alert.alert('Insufficient Minutes', `You only have ${user.passSlipMinutes} minutes remaining.`);
+      Alert.alert(
+        'Insufficient Minutes',
+        `You only have ${formatMinutes(user.passSlipMinutes)} remaining, but this pass slip needs ${formatMinutes(durationMinutes)}.`,
+      );
       return;
     }
 

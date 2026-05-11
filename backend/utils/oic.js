@@ -212,6 +212,37 @@ function buildFallbackCandidateFilter(user) {
   };
 }
 
+/**
+ * Returns the set of distinct roles for which `userId` is currently the
+ * effective OIC (i.e., a user with that role has assigned `userId` as their
+ * oicPrimary/oicFallback AND is currently on travel AND `userId` resolves as
+ * the active signer via OIC). Used by the mobile shell to decide which
+ * dashboard tabs to surface for a user temporarily standing in for an
+ * on-travel approver.
+ */
+async function getActiveOicForRoles(userId) {
+  if (!userId) return [];
+  const delegators = await User.find({
+    $or: [{ oicPrimary: userId }, { oicFallback: userId }],
+  })
+    .select('_id role')
+    .lean();
+
+  const roles = new Set();
+  for (const d of delegators) {
+    const resolution = await getEffectiveSigner(d._id);
+    if (
+      resolution &&
+      toIdString(resolution.signerId) === toIdString(userId) &&
+      resolution.viaOic &&
+      d.role
+    ) {
+      roles.add(d.role);
+    }
+  }
+  return Array.from(roles);
+}
+
 module.exports = {
   RANK_BELOW_BY_ROLE,
   OIC_CAPABLE_ROLES,
@@ -224,5 +255,6 @@ module.exports = {
   assertCanSignFor,
   buildPrimaryCandidateFilter,
   buildFallbackCandidateFilter,
+  getActiveOicForRoles,
   toIdString,
 };

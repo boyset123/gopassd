@@ -15,6 +15,7 @@ const {
   buildPrimaryCandidateFilter,
   buildFallbackCandidateFilter,
   getRankBelowRoles,
+  getActiveOicForRoles,
 } = require('../utils/oic');
 
 const upload = multer({
@@ -86,6 +87,8 @@ router.post('/login', async (req, res) => {
       { expiresIn: '1d' }
     );
 
+    const activeOicForRoles = await getActiveOicForRoles(user._id);
+
     res.json({
       token,
       user: {
@@ -96,7 +99,8 @@ router.post('/login', async (req, res) => {
         role: user.role,
         faculty: user.faculty,
         createdAt: user.createdAt,
-        passSlipMinutes: user.passSlipMinutes
+        passSlipMinutes: user.passSlipMinutes,
+        activeOicForRoles,
       }
     });
   } catch (error) {
@@ -277,6 +281,7 @@ router.get('/me', auth, async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
     const onTravelStatus = await isUserOnTravel(user);
+    const activeOicForRoles = await getActiveOicForRoles(user._id);
     res.json({
         id: user._id,
         name: user.name,
@@ -293,7 +298,8 @@ router.get('/me', auth, async (req, res) => {
         onTravelManualUntil: user.onTravelManualUntil || null,
         onTravel: !!onTravelStatus.onTravel,
         onTravelReason: onTravelStatus.reason || null,
-        canAssignOic: isOicCapableRole(user.role)
+        canAssignOic: isOicCapableRole(user.role),
+        activeOicForRoles,
     });
   } catch (error) {
     console.error('Get user error:', error);

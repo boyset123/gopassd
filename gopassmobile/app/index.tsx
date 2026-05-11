@@ -18,6 +18,25 @@ const theme = {
   border: 'rgba(1,26,107,0.22)',
 };
 
+// Highest-priority dashboard the caller is entitled to, considering both their
+// own role and any roles they currently cover as an active Officer-In-Charge.
+// Vice President shares the President dashboard (default OIC for the President).
+const DASHBOARD_PRIORITY: Array<{ role: string; route: string }> = [
+  { role: 'President',          route: '/(tabs)/presidentDashboard' },
+  { role: 'Vice President',     route: '/(tabs)/presidentDashboard' },
+  { role: 'Faculty Dean',       route: '/(tabs)/facultyDeanDashboard' },
+  { role: 'Program Head',       route: '/(tabs)/programHeadDashboard' },
+  { role: 'Security Personnel', route: '/(tabs)/securityDashboard' },
+];
+
+function pickDashboardRoute(role: string | undefined | null, activeOicForRoles: string[] = []): string {
+  const all = new Set<string>([role || '', ...activeOicForRoles].filter(Boolean) as string[]);
+  for (const entry of DASHBOARD_PRIORITY) {
+    if (all.has(entry.role)) return entry.route;
+  }
+  return '/(tabs)/slips';
+}
+
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,19 +59,10 @@ export default function LoginScreen() {
       });
       const { token, user } = response.data;
       await AsyncStorage.setItem('userToken', token);
-      await AsyncStorage.setItem('userData', JSON.stringify(user)); // Store user data
+      await AsyncStorage.setItem('userData', JSON.stringify(user)); // Store user data (includes activeOicForRoles)
 
-      // Role-based redirection
-      if (user.role === 'Program Head') {
-        router.replace('/(tabs)/programHeadDashboard');
-      } else if (user.role === 'President' || user.role === 'Vice President') {
-        // Vice Presidents act as the President's default OIC, so they share the dashboard.
-        router.replace('/(tabs)/presidentDashboard');
-      } else if (user.role === 'Security Personnel') {
-        router.replace('/(tabs)/securityDashboard');
-      } else {
-        router.replace('/(tabs)/slips');
-      }
+      const activeOicForRoles: string[] = Array.isArray(user?.activeOicForRoles) ? user.activeOicForRoles : [];
+      router.replace(pickDashboardRoute(user?.role, activeOicForRoles) as any);
     } catch (error: any) {
       let errorMessage = 'Login failed. Please try again.';
       if (axios.isAxiosError(error)) {

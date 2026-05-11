@@ -102,6 +102,7 @@ const CreateTravelOrderScreen = () => {
   const [showArrivalTimePicker, setShowArrivalTimePicker] = useState(false);
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [isLocatingUser, setIsLocatingUser] = useState(false);
   const [isMapVisible, setIsMapVisible] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [currentUserLocation, setCurrentUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -212,35 +213,41 @@ const CreateTravelOrderScreen = () => {
     };
   }, [currentUserLocation]);
 
-  useEffect(() => {
-    (async () => {
+  const fetchUserLocation = useCallback(async () => {
+    setIsLocatingUser(true);
+    setLocationError(null);
+    try {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         setLocationError('Permission to access location was denied');
         return;
       }
-      try {
-        let currentLocation =
-          (await Location.getLastKnownPositionAsync({ maxAge: 60_000 })) ??
-          (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
-        const { latitude, longitude } = currentLocation.coords;
-        setCurrentUserLocation({ latitude, longitude });
-        setMapRegion({
-          latitude,
-          longitude,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
-        });
-      } catch (error) {
-        setLocationError(
-          'Could not detect your current position. Enable device location or use the map as usual; the map shows a default area.',
-        );
-        if (__DEV__) {
-          console.warn('Map centering: no current location', error);
-        }
+      let currentLocation =
+        (await Location.getLastKnownPositionAsync({ maxAge: 60_000 })) ??
+        (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+      const { latitude, longitude } = currentLocation.coords;
+      setCurrentUserLocation({ latitude, longitude });
+      setMapRegion({
+        latitude,
+        longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      });
+    } catch (error) {
+      setLocationError(
+        'Could not detect your current position. Enable device location or use the map as usual; the map shows a default area.',
+      );
+      if (__DEV__) {
+        console.warn('Map centering: no current location', error);
       }
-    })();
+    } finally {
+      setIsLocatingUser(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchUserLocation();
+  }, [fetchUserLocation]);
 
   // When selectedLocation changes (e.g. from dropdown or map tap), update map region to show whole destination/route (not zoomed to user only)
   useEffect(() => {
@@ -710,6 +717,33 @@ const CreateTravelOrderScreen = () => {
                 </Pressable>
             </View>
             <View style={styles.mapWrapper}>
+                {!currentUserLocation && (
+                  <View style={styles.mapBannerWarn}>
+                    <FontAwesome name="location-arrow" size={14} color="#fff" style={styles.mapBannerIcon} />
+                    <Text style={styles.mapBannerText} numberOfLines={2}>
+                      {locationError || 'Detecting your current location...'}
+                    </Text>
+                    <Pressable
+                      onPress={fetchUserLocation}
+                      disabled={isLocatingUser}
+                      style={({ pressed }) => [
+                        styles.mapBannerBtn,
+                        isLocatingUser && styles.mapBannerBtnDisabled,
+                        pressed && !isLocatingUser && styles.mapBannerBtnPressed,
+                      ]}
+                      accessibilityLabel="Retry detecting current location"
+                    >
+                      {isLocatingUser ? (
+                        <ActivityIndicator size="small" color={theme.danger} />
+                      ) : (
+                        <>
+                          <FontAwesome name="refresh" size={12} color={theme.danger} style={styles.mapBannerBtnIcon} />
+                          <Text style={styles.mapBannerBtnText}>Retry</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                )}
                 <WebView
                   style={styles.map}
                   originWhitelist={['*']}
@@ -975,7 +1009,31 @@ const CreateTravelOrderScreen = () => {
                 <Text style={styles.locationCoordsText}>Latitude: {location.latitude.toFixed(4)}, Longitude: {location.longitude.toFixed(4)}</Text>
               </View>
             )}
-            {locationError && <Text style={styles.errorText}>{locationError}</Text>}
+            {locationError && (
+              <View style={styles.locationErrorRow}>
+                <FontAwesome name="exclamation-circle" size={14} color={theme.danger} style={styles.locationErrorIcon} />
+                <Text style={[styles.errorText, styles.locationErrorText]}>{locationError}</Text>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.retryLocationBtn,
+                    isLocatingUser && styles.retryLocationBtnDisabled,
+                    pressed && !isLocatingUser && styles.retryLocationBtnPressed,
+                  ]}
+                  onPress={fetchUserLocation}
+                  disabled={isLocatingUser}
+                  accessibilityLabel="Retry detecting current location"
+                >
+                  {isLocatingUser ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <FontAwesome name="refresh" size={14} color="#fff" style={styles.retryLocationBtnIcon} />
+                      <Text style={styles.retryLocationBtnText}>Retry</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            )}
 
             <Text style={styles.staticTextFirst}>Your travelling expenses in the field will be authorized or allowed under Official Business.</Text>
             <Text style={styles.staticText}>Chargeable against Higher Education.</Text>
@@ -1873,6 +1931,98 @@ const styles = StyleSheet.create({
     color: theme.danger,
     marginTop: 6,
     fontSize: 14,
+  },
+  locationErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(220,53,69,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(220,53,69,0.35)',
+    borderRadius: 10,
+  },
+  locationErrorIcon: {
+    marginRight: 4,
+  },
+  locationErrorText: {
+    flex: 1,
+    marginTop: 0,
+    fontSize: 13,
+  },
+  retryLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.danger,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    minWidth: 84,
+  },
+  retryLocationBtnDisabled: {
+    opacity: 0.7,
+  },
+  retryLocationBtnPressed: {
+    opacity: 0.85,
+  },
+  retryLocationBtnIcon: {
+    marginRight: 6,
+  },
+  retryLocationBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  mapBannerWarn: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.danger,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 }, android: { elevation: 4 } }),
+  },
+  mapBannerIcon: {
+    marginRight: 8,
+  },
+  mapBannerText: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 13,
+    marginRight: 8,
+  },
+  mapBannerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    minWidth: 76,
+  },
+  mapBannerBtnDisabled: {
+    opacity: 0.7,
+  },
+  mapBannerBtnPressed: {
+    opacity: 0.85,
+  },
+  mapBannerBtnIcon: {
+    marginRight: 4,
+  },
+  mapBannerBtnText: {
+    color: theme.danger,
+    fontSize: 12,
+    fontWeight: '700',
   },
   locationCoordsText: {
     fontSize: 14,

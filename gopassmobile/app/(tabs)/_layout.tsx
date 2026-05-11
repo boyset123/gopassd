@@ -1,12 +1,14 @@
-import { Tabs, useSegments, useRouter } from 'expo-router';
+import { Tabs, useSegments, useRouter, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { View, ActivityIndicator, Platform, Dimensions, Pressable, StyleSheet, Alert, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { CreateModalProvider, useCreateModal } from '../../contexts/CreateModalContext';
+import { API_URL } from '../../config/api';
 
 const tabTheme = {
   primary: '#0f172a',
@@ -292,6 +294,7 @@ function PillTabBar({ state, descriptors, navigation, visibleTabNames }: PillTab
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [activeOicForRoles, setActiveOicForRoles] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const insets = useSafeAreaInsets();
   const segments = useSegments();
@@ -304,7 +307,8 @@ export default function TabLayout() {
         const userDataString = await AsyncStorage.getItem('userData');
         if (userDataString) {
           const userData = JSON.parse(userDataString);
-          setUserRole(userData.role);
+          setUserRole(userData.role || null);
+          setActiveOicForRoles(Array.isArray(userData.activeOicForRoles) ? userData.activeOicForRoles : []);
         }
       } catch (e) {
         console.error("Failed to fetch user role from storage", e);
@@ -315,6 +319,45 @@ export default function TabLayout() {
     fetchUserRole();
   }, []);
 
+  // Refresh `activeOicForRoles` whenever the tab area regains focus so that an
+  // OIC dashboard appears/disappears as the principal goes on/off travel.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        try {
+          const token = await AsyncStorage.getItem('userToken');
+          if (!token) return;
+          const response = await axios.get(`${API_URL}/users/me`, {
+            headers: { 'x-auth-token': token },
+          });
+          if (cancelled || !response?.data) return;
+          const role = response.data.role || null;
+          const oicRoles = Array.isArray(response.data.activeOicForRoles)
+            ? response.data.activeOicForRoles
+            : [];
+          setUserRole(role);
+          setActiveOicForRoles(oicRoles);
+          try {
+            const stored = await AsyncStorage.getItem('userData');
+            const parsed = stored ? JSON.parse(stored) : {};
+            await AsyncStorage.setItem(
+              'userData',
+              JSON.stringify({ ...parsed, ...response.data, activeOicForRoles: oicRoles })
+            );
+          } catch (storageErr) {
+            if (__DEV__) console.warn('Failed to persist refreshed userData', storageErr);
+          }
+        } catch (err) {
+          if (__DEV__) console.warn('Failed to refresh activeOicForRoles', err);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [])
+  );
+
   if (isLoading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -323,15 +366,20 @@ export default function TabLayout() {
     );
   }
 
+  // Effective roles include both the user's own role and any roles they are
+  // currently an active OIC for. Slips visibility intentionally stays keyed to
+  // the user's actual role since slips are personal, not delegated.
+  const effectiveRoles = new Set<string>(
+    [userRole || '', ...activeOicForRoles].filter(Boolean) as string[]
+  );
+  const hasPresidentDash = effectiveRoles.has('President') || effectiveRoles.has('Vice President');
+
   const visibleTabNames = new Set<string>(['profile']);
   if (userRole && !['Security Personnel', 'President'].includes(userRole)) visibleTabNames.add('slips');
-  if (userRole === 'Program Head') visibleTabNames.add('programHeadDashboard');
-  if (userRole === 'Faculty Dean') visibleTabNames.add('facultyDeanDashboard');
+  if (effectiveRoles.has('Program Head')) visibleTabNames.add('programHeadDashboard');
+  if (effectiveRoles.has('Faculty Dean')) visibleTabNames.add('facultyDeanDashboard');
   if (userRole === 'Security Personnel') visibleTabNames.add('securityDashboard');
-  if (userRole === 'President') visibleTabNames.add('presidentDashboard');
-  // Vice President is the President's default OIC; surface the President dashboard
-  // so they can act on items when the President is on travel.
-  if (userRole === 'Vice President') visibleTabNames.add('presidentDashboard');
+  if (hasPresidentDash) visibleTabNames.add('presidentDashboard');
 
   return (
     <CreateModalProvider>
@@ -344,7 +392,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="programHeadDashboard"
         options={{
-          href: userRole === 'Program Head' ? '/(tabs)/programHeadDashboard' : null,
+          href: effectiveRoles.has('Program Head') ? '/(tabs)/programHeadDashboard' : null,
           headerShown: false,
           title: 'Dashboard',
           tabBarIcon: ({ color, size }) => <FontAwesome size={size ?? 24} name="dashboard" color={color} />,
@@ -362,7 +410,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="facultyDeanDashboard"
         options={{
-          href: userRole === 'Faculty Dean' ? '/(tabs)/facultyDeanDashboard' : null,
+          href: effectiveRoles.has('Faculty Dean') ? '/(tabs)/facultyDeanDashboard' : null,
           headerShown: false,
           title: 'Dashboard',
           tabBarIcon: ({ color, size }) => <FontAwesome size={size ?? 24} name="dashboard" color={color} />,
@@ -380,7 +428,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="presidentDashboard"
         options={{
-          href: ['President', 'Vice President'].includes(userRole || '') ? '/(tabs)/presidentDashboard' : null,
+          href: hasPresidentDash ? '/(tabs)/presidentDashboard' : null,
           headerShown: false,
           title: 'Dashboard',
           tabBarIcon: ({ color, size }) => <FontAwesome size={size ?? 24} name="dashboard" color={color} />,

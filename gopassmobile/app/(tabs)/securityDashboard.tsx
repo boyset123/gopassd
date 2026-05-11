@@ -47,6 +47,8 @@ interface PassSlip {
   approverSignature?: string;
   hrApproverSignature?: string;
   approvedBy?: Employee;
+  /** Populated when the first-line approver slot was signed by an OIC. */
+  approvedBySignedAsOicFor?: { _id?: string; name?: string; role?: string } | null;
   hrApprovedBy?: Employee;
   departureTime?: string;
   trackingNo?: string;
@@ -69,6 +71,13 @@ interface TravelOrder {
   approverSignature?: string;
   approvedBy?: Employee;
   presidentApprovedBy?: Employee;
+  /** Populated when the President's slot was signed by an OIC. */
+  presidentSignedAsOicFor?: { _id?: string; name?: string; role?: string } | null;
+  recommenderSignatures?: {
+    user?: string | { _id?: string; name?: string };
+    signature?: string;
+    signedAsOicFor?: { _id?: string; name?: string } | null;
+  }[];
 }
 
 type ItemType = 'slip' | 'order';
@@ -264,40 +273,54 @@ export default function SecurityDashboard() {
         Alert.alert('Invalid QR Code', 'The scanned QR code is missing required information.');
         return;
       }
-
-      const validStatuses = ['Approved', 'Verified'];
-      const isFullPayload = parsedData.employee && typeof parsedData.employee === 'object' && parsedData.employee.name;
       if (!['PassSlip', 'TravelOrder'].includes(parsedData.type)) {
         Alert.alert('Invalid QR Code', 'This QR code is not for a supported document.');
         return;
       }
 
+      const validStatuses = ['Approved', 'Verified'];
+
+      // QR codes can't carry the full base64 signature images (they would
+      // exceed QR capacity), so always fetch the authoritative document from
+      // the API. The QR payload is used only as a fallback if the network
+      // call fails.
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        const headers = { 'x-auth-token': token };
+        const url = parsedData.type === 'PassSlip'
+          ? `${API_URL}/pass-slips/${parsedData.id}`
+          : `${API_URL}/travel-orders/${parsedData.id}`;
+
+        const response = await axios.get(url, { headers });
+        const item = { ...response.data, type: parsedData.type };
+
+        if (!validStatuses.includes(item.status)) {
+          Alert.alert('Invalid Status', `This document has a status of '${item.status}' and cannot be scanned for departure or arrival.`);
+          return;
+        }
+        setScannedData(item);
+        setScannerVisible(false);
+        return;
+      } catch (fetchError) {
+        console.warn('Pass slip / travel order fetch after scan failed, falling back to QR payload:', fetchError);
+      }
+
+      // Offline / fetch-failure fallback: render whatever the QR carried.
+      // Signatures will be missing in this branch because they cannot fit in
+      // a QR, but the rest of the details are still useful for the guard.
+      const isFullPayload = parsedData.employee && typeof parsedData.employee === 'object' && parsedData.employee.name;
       if (isFullPayload) {
-        // QR contains full details – use them so guard sees complete info without API
         if (!validStatuses.includes(parsedData.status)) {
           Alert.alert('Invalid Status', `This document has a status of '${parsedData.status}' and cannot be scanned for departure or arrival.`);
           return;
         }
         setScannedData({ ...parsedData, type: parsedData.type });
         setScannerVisible(false);
-        return;
-      }
-
-      // Legacy QR (id + type only): fetch full document from API
-      const token = await AsyncStorage.getItem('userToken');
-      const headers = { 'x-auth-token': token };
-      const url = parsedData.type === 'PassSlip'
-        ? `${API_URL}/pass-slips/${parsedData.id}`
-        : `${API_URL}/travel-orders/${parsedData.id}`;
-
-      const response = await axios.get(url, { headers });
-      const item = { ...response.data, type: parsedData.type };
-
-      if (item.status === 'Approved' || item.status === 'Verified') {
-        setScannedData(item);
-        setScannerVisible(false);
       } else {
-        Alert.alert('Invalid Status', `This document has a status of '${item.status}' and cannot be scanned for departure or arrival.`);
+        Alert.alert(
+          'Connection Error',
+          'Could not load the document. Check your internet connection and try scanning again.',
+        );
       }
     } catch (error) {
       console.error('QR Code Scan Error:', error);
@@ -621,6 +644,11 @@ export default function SecurityDashboard() {
                           </View>
                         </View>
                         <Text style={[styles.signatureTitle, styles.chiefSignatureLabel]}>{scannedData.employee?.role === 'Faculty Dean' ? 'President' : 'Immediate Head'}</Text>
+                        {(scannedData as PassSlip).approvedBySignedAsOicFor?.name && (
+                          <Text style={styles.docOicNote}>
+                            (OIC for {(scannedData as PassSlip).approvedBySignedAsOicFor?.name})
+                          </Text>
+                        )}
                       </View>
                     </View>
                   </>
@@ -670,7 +698,12 @@ export default function SecurityDashboard() {
                         {(((scannedData as any).recommendedBy && Array.isArray((scannedData as any).recommendedBy)) ? (scannedData as any).recommendedBy : (scannedData as any).recommendedBy ? [(scannedData as any).recommendedBy].flat() : []).map((recommender: any, index: number) => {
                           const currentRecId = String(recommender?._id ?? recommender?.id ?? index);
                           const hasSigned = ((scannedData as any).recommendersWhoApproved || []).some((id: any) => String(id) === currentRecId);
-                          const sig = ((scannedData as any).recommenderSignatures || []).find((rs: any) => String(rs.user) === currentRecId)?.signature || (index === 0 ? scannedData.approverSignature : null);
+                          const matchedRecSig = ((scannedData as any).recommenderSignatures || []).find((rs: any) => {
+                            const userId = typeof rs?.user === 'object' ? rs?.user?._id : rs?.user;
+                            return String(userId) === currentRecId;
+                          });
+                          const sig = matchedRecSig?.signature || (index === 0 ? scannedData.approverSignature : null);
+                          const oicForName = matchedRecSig?.signedAsOicFor?.name;
                           return (
                             <View key={recommender?._id ?? index} style={styles.recommenderChiefBlock}>
                               <View style={styles.chiefSignatureDisplay}>
@@ -684,6 +717,9 @@ export default function SecurityDashboard() {
                                 </View>
                               </View>
                               <Text style={[styles.signatureTitle, styles.chiefSignatureLabel]}>Immediate Chief</Text>
+                              {oicForName && (
+                                <Text style={styles.docOicNote}>(OIC for {oicForName})</Text>
+                              )}
                             </View>
                           );
                         })}
@@ -704,6 +740,11 @@ export default function SecurityDashboard() {
                             </View>
                           </View>
                           <Text style={[styles.signatureTitle, styles.chiefSignatureLabel]}>President</Text>
+                          {(scannedData as TravelOrder).presidentSignedAsOicFor?.name && (
+                            <Text style={styles.docOicNote}>
+                              (OIC for {(scannedData as TravelOrder).presidentSignedAsOicFor?.name})
+                            </Text>
+                          )}
                         </View>
                       )}
                     </View>
@@ -1417,6 +1458,13 @@ const styles = StyleSheet.create({
   signatureTitle: {
     fontSize: 12,
     color: '#333',
+  },
+  docOicNote: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: theme.textMuted,
+    textAlign: 'center',
+    marginTop: 2,
   },
   docSignatureImage: {
     width: 90,

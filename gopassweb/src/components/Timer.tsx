@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Text, StyleSheet } from 'react-native';
 
-const Timer = ({ timeOut, estimatedTimeBack, departureTime }: { timeOut: string, estimatedTimeBack: string, departureTime: string }) => {
+// `timeOut` is accepted for backwards compatibility but no longer used in the
+// countdown. We anchor against the scheduled `estimatedTimeBack` so a late
+// scan eats into the trip — matching the backend overdue rule in
+// PUT /pass-slips/:id/return.
+const Timer = ({ estimatedTimeBack, departureTime }: { timeOut?: string, estimatedTimeBack: string, departureTime: string }) => {
   const calculateRemainingTime = () => {
-    if (!timeOut || !estimatedTimeBack || !departureTime) {
+    if (!estimatedTimeBack || !departureTime) {
       return { hours: 0, minutes: 0, seconds: 0, isOverdue: true };
     }
 
@@ -26,27 +30,21 @@ const Timer = ({ timeOut, estimatedTimeBack, departureTime }: { timeOut: string,
       return { hours, minutes };
     };
 
-    const timeOutParts = parseTime(timeOut);
     const etbParts = parseTime(estimatedTimeBack);
-
-    if (!timeOutParts || !etbParts) {
+    if (!etbParts) {
       return { hours: 0, minutes: 0, seconds: 0, isOverdue: true };
     }
 
-    const timeOutDate = new Date(departureDate.getTime());
-    timeOutDate.setHours(timeOutParts.hours, timeOutParts.minutes, 0, 0);
-
+    // Anchor scheduled return to the departure date so cross-midnight trips
+    // and next-day views resolve correctly.
     const etbDate = new Date(departureDate.getTime());
     etbDate.setHours(etbParts.hours, etbParts.minutes, 0, 0);
-
-    if (etbDate.getTime() < timeOutDate.getTime()) {
+    if (etbDate.getTime() < departureDate.getTime()) {
       etbDate.setDate(etbDate.getDate() + 1);
     }
 
-    const totalDuration = etbDate.getTime() - timeOutDate.getTime();
     const now = new Date();
-    const elapsedTime = now.getTime() - departureDate.getTime();
-    const diff = totalDuration - elapsedTime;
+    const diff = etbDate.getTime() - now.getTime();
 
     const isOverdue = diff <= 0;
     const absDiff = Math.abs(diff);

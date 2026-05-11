@@ -1,52 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { Text, StyleSheet } from 'react-native';
 
-const Timer = ({ timeOut, estimatedTimeBack, departureTime, onTimeShort, onTimeOver }: { timeOut?: string, estimatedTimeBack: string, departureTime?: string, onTimeShort?: () => void, onTimeOver?: () => void }) => {
+// `timeOut` is accepted for backwards compatibility but no longer used in the
+// countdown. We anchor against the scheduled `estimatedTimeBack` so a late
+// scan eats into the trip — matching the backend overdue rule in
+// PUT /pass-slips/:id/return.
+const Timer = ({ estimatedTimeBack, departureTime, onTimeShort, onTimeOver }: { timeOut?: string, estimatedTimeBack: string, departureTime?: string, onTimeShort?: () => void, onTimeOver?: () => void }) => {
   const calculateRemainingTime = () => {
-    if (!timeOut || !estimatedTimeBack || !departureTime) return { hours: 0, minutes: 0, seconds: 0, isOver: true };
+    if (!estimatedTimeBack || !departureTime) return { hours: 0, minutes: 0, seconds: 0, isOver: true };
 
-    const timeOutDate = new Date();
-    const timeOutMatch = timeOut.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (timeOutMatch) {
-      let h = parseInt(timeOutMatch[1], 10);
-      const m = parseInt(timeOutMatch[2], 10);
-      const ampm = timeOutMatch[3].toUpperCase();
-      if (ampm === 'PM' && h < 12) h += 12;
-      if (ampm === 'AM' && h === 12) h = 0;
-      timeOutDate.setHours(h, m, 0, 0);
-    } else {
-      return { hours: 0, minutes: 0, seconds: 0, isOver: true };
-    }
-
-    const etbDate = new Date();
-    const etbMatch = estimatedTimeBack.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (etbMatch) {
-      let h = parseInt(etbMatch[1], 10);
-      const m = parseInt(etbMatch[2], 10);
-      const ampm = etbMatch[3].toUpperCase();
-      if (ampm === 'PM' && h < 12) h += 12;
-      if (ampm === 'AM' && h === 12) h = 0;
-      etbDate.setHours(h, m, 0, 0);
-    } else {
-      return { hours: 0, minutes: 0, seconds: 0, isOver: true };
-    }
-
-    if (etbDate.getTime() < timeOutDate.getTime()) {
-      etbDate.setDate(etbDate.getDate() + 1);
-    }
-
-    const totalDuration = etbDate.getTime() - timeOutDate.getTime();
     const departureDate = new Date(departureTime);
-
     if (isNaN(departureDate.getTime())) {
       return { hours: 0, minutes: 0, seconds: 0, isOver: true };
     }
 
-    const now = new Date();
-    const elapsedTime = now.getTime() - departureDate.getTime();
-    const diff = totalDuration - elapsedTime;
+    const etbMatch = estimatedTimeBack.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!etbMatch) return { hours: 0, minutes: 0, seconds: 0, isOver: true };
 
-        const isOver = diff <= 0;
+    let h = parseInt(etbMatch[1], 10);
+    const m = parseInt(etbMatch[2], 10);
+    const ampm = etbMatch[3].toUpperCase();
+    if (ampm === 'PM' && h < 12) h += 12;
+    if (ampm === 'AM' && h === 12) h = 0;
+
+    // Anchor the scheduled return to the same calendar date as the departure
+    // stamp so the math is correct even if the user opens the screen the next
+    // day, and handle cross-midnight trips.
+    const etbDate = new Date(departureDate);
+    etbDate.setHours(h, m, 0, 0);
+    if (etbDate.getTime() < departureDate.getTime()) {
+      etbDate.setDate(etbDate.getDate() + 1);
+    }
+
+    const now = new Date();
+    const diff = etbDate.getTime() - now.getTime();
+
+    const isOver = diff <= 0;
     const absDiff = Math.abs(diff);
 
     if (isOver) {

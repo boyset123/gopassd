@@ -382,7 +382,7 @@ const CreateTravelOrderScreen = () => {
   };
 
   const handlePreview = () => {
-    if (!address || !salary || !purpose || !recommenders[0]?.name || !employeeAddress) {
+    if (!address || !purpose || !recommenders[0]?.name || !employeeAddress) {
       Alert.alert('Validation Error', 'Please fill out all required fields and ensure at least one recommender is set.');
       return;
     }
@@ -865,7 +865,7 @@ const CreateTravelOrderScreen = () => {
                     <TextInput style={[styles.input, styles.inputDisabled]} value={user?.role} editable={false} />
                 </View>
                 <View style={[styles.fieldContainer, styles.fieldContainerTight, styles.flexInput]}>
-                    <Text style={styles.label}>Salary:</Text>
+                    <Text style={styles.label}>Salary (optional):</Text>
                     <View style={styles.currencyInputContainer}>
                       <Text style={styles.currencySymbol}>₱</Text>
                       <TextInput
@@ -873,7 +873,7 @@ const CreateTravelOrderScreen = () => {
                         value={salary ? salary.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
                         onChangeText={(text) => setSalary(text.replace(/,/g, '').replace(/\D/g, ''))}
                         keyboardType="numeric"
-                        placeholder="0"
+                        placeholder=""
                         placeholderTextColor={theme.placeholder}
                       />
                     </View>
@@ -1234,7 +1234,11 @@ const CreateTravelOrderScreen = () => {
                 </View>
                 <View style={styles.formRow}>
                   <Text style={styles.formLabel}>SALARY:</Text>
-                  <Text style={styles.formValue}>₱{salary ? salary.replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}</Text>
+                  <Text style={styles.formValue}>
+                    {salary
+                      ? `₱${salary.replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`
+                      : '—'}
+                  </Text>
                 </View>
 
                 <Text style={styles.directiveText}>You are hereby directed to travel on official business:</Text>

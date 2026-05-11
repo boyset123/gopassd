@@ -35,7 +35,7 @@ const travelOrderSchema = new mongoose.Schema({
   date: { type: Date, required: true },
   address: { type: String, required: true },
   employeeAddress: { type: String },
-  salary: { type: String, required: true },
+  salary: { type: String },
   to: { type: String, required: true },
   purpose: { type: String, required: true },
   departureDate: { type: Date, required: true },

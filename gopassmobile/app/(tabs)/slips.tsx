@@ -731,12 +731,9 @@ export default function SlipsScreen() {
   }
 
   const isHistoryItem = (item: Submission) => {
-    if (item.type === 'Pass Slip') {
-      // Finalized states for employee-created pass slips
-      return item.status === 'Completed' || item.status === 'Returned';
-    }
-    // Travel Orders are considered finalized only when completed
-    return item.status === 'Completed';
+    // Any terminal state (success or not) should live in History, not Active.
+    const terminalStatuses = ['Completed', 'Returned', 'Rejected', 'Cancelled'];
+    return terminalStatuses.includes(item.status);
   };
 
   const activeSubmissions = submissions.filter((s) => !isHistoryItem(s));

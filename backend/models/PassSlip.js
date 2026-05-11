@@ -64,6 +64,10 @@ const passSlipSchema = new mongoose.Schema({
   arrivalTime: {
     type: Date,
   },
+  overdueMinutes: {
+    type: Number,
+    default: 0,
+  },
   latitude: {
     type: Number,
   },

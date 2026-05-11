@@ -60,6 +60,7 @@ interface PassSlip {
   routePolyline?: string;
   trackingNo?: string;
   arrivalStatus?: string;
+  overdueMinutes?: number;
 }
 
 interface TravelOrder {

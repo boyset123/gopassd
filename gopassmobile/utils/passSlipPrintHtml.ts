@@ -10,6 +10,8 @@ export interface PassSlipPrintItem {
   employee?: { name?: string };
   timeOut?: string;
   estimatedTimeBack?: string;
+  arrivalTime?: string;
+  overdueMinutes?: number;
   additionalInfo?: string;
   purpose?: string;
   signature?: string;
@@ -63,6 +65,22 @@ export function getPassSlipPrintHtml(
   const trackingRow =
     item.trackingNo != null && String(item.trackingNo).trim() !== ''
       ? `<div class="meta-item"><span class="field">Tracking No.: </span><span class="val">${escapeHtml(String(item.trackingNo))}</span></div>`
+      : '';
+
+  const formatTimeOnly = (value?: string) => {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+  };
+
+  const arrivalDisplay = formatTimeOnly(item.arrivalTime);
+  const arrivalRow = arrivalDisplay
+    ? `<div class="row"><span class="field">Actual Time Back: </span><span class="val">${escapeHtml(arrivalDisplay)}</span></div>`
+    : '';
+  const overdueRow =
+    typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0
+      ? `<div class="row overdue-row"><span class="field">Overdue: </span><span class="val overdue-val">${Math.round(item.overdueMinutes)} min</span></div>`
       : '';
 
   const logoSlot =
@@ -167,6 +185,8 @@ export function getPassSlipPrintHtml(
       color: #dc3545;
     }
     .reason-block { margin: 12px 0; font-size: 13px; color: #011a6b; }
+    .overdue-row { color: #dc3545; }
+    .overdue-val { color: #dc3545; }
     .sig-row {
       display: flex;
       justify-content: space-between;
@@ -260,6 +280,8 @@ export function getPassSlipPrintHtml(
     <div class="row"><span class="field">Name of Employee: </span><span class="val">${escapeHtml(item.employee?.name || 'N/A')}</span></div>
     <div class="row"><span class="field">Time Out: </span><span class="val">${escapeHtml(item.timeOut || '')}</span></div>
     <div class="row"><span class="field">Estimated Time to be Back: </span><span class="val">${escapeHtml(item.estimatedTimeBack || '')}</span></div>
+    ${arrivalRow}
+    ${overdueRow}
     ${dest ? `<div class="row"><span class="field">Destination: </span><span class="val">${escapeHtml(dest)}</span></div>` : ''}
     <div class="row"><span class="field">Additional Information: </span><span class="val">${escapeHtml(normalizeInline(item.additionalInfo) || '')}</span></div>
     <div class="row"><span class="field">Purpose/s: </span><span class="val">${escapeHtml(normalizeInline(item.purpose) || '')}</span></div>

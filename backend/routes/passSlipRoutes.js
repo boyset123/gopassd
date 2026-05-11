@@ -471,7 +471,7 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
       .populate('employee', 'name email profilePicture')
       .populate('approvedBy', 'name role')
       .populate('approvedBySignedAsOicFor', 'name role')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor signature approverSignature latitude longitude routePolyline');
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor signature approverSignature latitude longitude routePolyline overdueMinutes');
     res.json(recommendedSlips);
   } catch (error) {
     console.error('Error fetching recommended pass slips:', error);
@@ -487,7 +487,7 @@ router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async 
       .populate('approvedBy', 'name role')
       .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature hrApproverSignature');
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature hrApproverSignature overdueMinutes');
     res.json(hrApprovedSlips);
   } catch (error) {
     console.error('Error fetching HR approved pass slips:', error);
@@ -531,7 +531,7 @@ router.get('/verified-hr', [auth, authorize('Human Resource Personnel')], async 
       .populate('approvedBy', 'name role')
       .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature departureTime arrivalTime trackingNo');
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature departureTime arrivalTime trackingNo overdueMinutes');
     res.json(verifiedSlips);
   } catch (error) {
     console.error('Error fetching verified pass slips for HR:', error);
@@ -644,9 +644,33 @@ router.put('/:id/return', auth, async (req, res) => {
       return res.status(400).json({ message: 'Only verified pass slips can be marked as returned.' });
     }
 
+    const arrival = new Date();
     passSlip.status = 'Returned';
-    passSlip.arrivalTime = new Date();
+    passSlip.arrivalTime = arrival;
+
+    // If returned past the scheduled estimatedTimeBack, treat the excess as
+    // additional time spent: persist it on the slip and deduct from the
+    // employee's monthly passSlipMinutes balance (capped at zero).
+    let overdueMinutes = 0;
+    const scheduledReturn = parseMeridiemTimeToDate(passSlip.estimatedTimeBack, passSlip.date);
+    if (scheduledReturn) {
+      const diffMs = arrival.getTime() - scheduledReturn.getTime();
+      if (diffMs > 0) {
+        overdueMinutes = diffMs / 60000;
+      }
+    }
+    passSlip.overdueMinutes = overdueMinutes;
+
     await passSlip.save();
+
+    if (overdueMinutes > 0) {
+      const employee = await User.findById(passSlip.employee);
+      if (employee) {
+        const currentBalance = typeof employee.passSlipMinutes === 'number' ? employee.passSlipMinutes : 0;
+        employee.passSlipMinutes = Math.max(0, currentBalance - overdueMinutes);
+        await employee.save();
+      }
+    }
 
     // --- Real-time Update via Socket.IO ---
     req.io.emit('passSlipReturned', passSlip);

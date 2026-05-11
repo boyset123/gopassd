@@ -7,6 +7,7 @@ type PassSlipLike = {
   timeOut?: string;
   estimatedTimeBack?: string;
   status?: string;
+  overdueMinutes?: number;
   hrApprovedBy?: unknown;
   employee?: {
     name?: string;
@@ -23,6 +24,7 @@ type TrackerRow = {
   wednesday: number;
   thursday: number;
   friday: number;
+  overdue: number;
 };
 
 type WeeklyTrackerSheet = {
@@ -156,8 +158,11 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
       if (!field) continue;
 
       const employeeName = slip.employee?.name?.trim() || 'Unknown Employee';
-      const durationHours = getSlipDurationHours(slip);
-      if (durationHours <= 0) continue;
+      const plannedHours = getSlipDurationHours(slip);
+      const overdueHours =
+        typeof slip.overdueMinutes === 'number' && slip.overdueMinutes > 0 ? slip.overdueMinutes / 60 : 0;
+      const totalHours = plannedHours + overdueHours;
+      if (totalHours <= 0) continue;
 
       const weekKey = getWeekKey(slipDate);
       if (!perWeek.has(weekKey)) {
@@ -176,10 +181,12 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
           wednesday: 0,
           thursday: 0,
           friday: 0,
+          overdue: 0,
         });
       }
       const row = week.rowsByEmployee.get(employeeKey)!;
-      row[field] += durationHours;
+      row[field] += totalHours;
+      row.overdue += overdueHours;
     }
 
     const result = Array.from(perWeek.entries())
@@ -223,6 +230,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
       'Wednesday (h:m)',
       'Thursday (h:m)',
       'Friday (h:m)',
+      'Overdue (h:m)',
       'Total Used',
       'Remaining Balance (2h cap)',
     ];
@@ -239,6 +247,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
           formatHoursAndMinutes(row.wednesday),
           formatHoursAndMinutes(row.thursday),
           formatHoursAndMinutes(row.friday),
+          row.overdue > 0 ? formatHoursAndMinutes(row.overdue) : '—',
           formatHoursAndMinutes(totalUsed),
           remaining < 0 ? `Over by ${formatHoursAndMinutes(Math.abs(remaining))}` : formatHoursAndMinutes(remaining),
         ]
@@ -311,6 +320,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
               <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Wednesday (h:m)</Text>
               <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Thursday (h:m)</Text>
               <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Friday (h:m)</Text>
+              <Text style={[styles.headerCell, styles.colOverdue, isCompactTable && styles.colOverdueCompact]}>Overdue (h:m)</Text>
               <Text style={[styles.headerCell, styles.colTotal, isCompactTable && styles.colTotalCompact]}>Total Used</Text>
               <Text style={[styles.headerCell, styles.colBalance, isCompactTable && styles.colBalanceCompact]}>Remaining Balance (2h cap)</Text>
             </View>
@@ -339,6 +349,11 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
                     </View>
                     <View style={[styles.colDay, styles.cell, isCompactTable && styles.colDayCompact]}>
                       <Text style={styles.valueText}>{formatHoursAndMinutes(row.friday)}</Text>
+                    </View>
+                    <View style={[styles.colOverdue, styles.cell, isCompactTable && styles.colOverdueCompact]}>
+                      <Text style={[styles.valueText, row.overdue > 0 && styles.overdueText]}>
+                        {row.overdue > 0 ? formatHoursAndMinutes(row.overdue) : '—'}
+                      </Text>
                     </View>
                     <View style={[styles.colTotal, styles.cell, isCompactTable && styles.colTotalCompact]}>
                       <Text style={styles.valueTextStrong}>{formatHoursAndMinutes(totalUsed)}</Text>
@@ -528,6 +543,9 @@ const styles = StyleSheet.create({
   colBalance: {
     flex: 2.1,
   },
+  colOverdue: {
+    flex: 1.35,
+  },
   colEmployeeCompact: {
     width: 220,
     flex: undefined,
@@ -543,6 +561,14 @@ const styles = StyleSheet.create({
   colBalanceCompact: {
     width: 180,
     flex: undefined,
+  },
+  colOverdueCompact: {
+    width: 120,
+    flex: undefined,
+  },
+  overdueText: {
+    color: '#b91c1c',
+    fontWeight: '700',
   },
   emptyStateRow: {
     padding: 18,

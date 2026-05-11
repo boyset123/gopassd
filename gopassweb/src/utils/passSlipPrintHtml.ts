@@ -9,6 +9,8 @@ export interface PassSlipPrintItem {
   purpose?: string;
   timeOut?: string;
   estimatedTimeBack?: string;
+  arrivalTime?: string;
+  overdueMinutes?: number;
   employee?: { name?: string; role?: string };
   approvedBy?: { name?: string };
   /** Populated when the first-line approver slot was actually signed by an OIC standing in for this user. */
@@ -54,13 +56,22 @@ const approvedRoleLabel = (role: string | undefined) => {
 
 const statusStamp = (item: PassSlipPrintItem) => {
   const raw = String(item.arrivalStatus || item.status || '').toLowerCase();
-  if (raw.includes('overdue')) return '<div class="stamp overdue">OVERDUE</div>';
+  if (raw.includes('overdue') || (typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0)) {
+    return '<div class="stamp overdue">OVERDUE</div>';
+  }
   if (raw.includes('on time')) return '<div class="stamp ontime">ON TIME</div>';
   if (raw.includes('approved') || raw.includes('verified') || raw.includes('completed')) {
     return '<div class="stamp approved">APPROVED</div>';
   }
   if (raw.includes('rejected')) return '<div class="stamp rejected">REJECTED</div>';
   return '';
+};
+
+const formatPrintTime = (value?: string) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 };
 
 const renderSlipCard = (item: PassSlipPrintItem, options?: PassSlipPrintOptions) => {
@@ -99,6 +110,12 @@ const renderSlipCard = (item: PassSlipPrintItem, options?: PassSlipPrintOptions)
       <div class="field data-field"><strong>Name of Employee:</strong> ${escapeHtml(normalizeInline(item.employee?.name) || 'N/A')}</div>
       <div class="field data-field"><strong>Time Out:</strong> ${escapeHtml(normalizeInline(item.timeOut) || 'N/A')}</div>
       <div class="field data-field"><strong>Estimated Time to be Back:</strong> ${escapeHtml(normalizeInline(item.estimatedTimeBack) || 'N/A')}</div>
+      ${formatPrintTime(item.arrivalTime)
+        ? `<div class="field data-field"><strong>Actual Time Back:</strong> ${escapeHtml(formatPrintTime(item.arrivalTime))}</div>`
+        : ''}
+      ${typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0
+        ? `<div class="field data-field overdue-field"><strong>Overdue:</strong> ${Math.round(item.overdueMinutes)} min</div>`
+        : ''}
       <div class="field data-field"><strong>Destination:</strong> ${escapeHtml(normalizeInline(item.destination) || 'N/A')}</div>
       <div class="field data-field"><strong>Purpose/s:</strong> ${escapeHtml(normalizeInline(item.purpose) || 'N/A')}</div>
 
@@ -210,6 +227,8 @@ export function getPassSlipPrintHtml(item: PassSlipPrintItem, options?: PassSlip
 
     .field { font-size: 9.8px; margin-bottom: 2px; line-height: 1.24; }
     .data-field { font-size: 11.8px; line-height: 1.32; margin-bottom: 3px; }
+    .overdue-field { color: #c53030; }
+    .overdue-field strong { color: #c53030; }
 
     .stamp {
       align-self: center;

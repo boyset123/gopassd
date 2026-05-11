@@ -87,6 +87,8 @@ interface Submission {
   departureDate?: string;
   arrivalDate?: string;
   departureTime?: string;
+  arrivalTime?: string;
+  overdueMinutes?: number;
   trackingNo?: string;
   employeeAddress?: string;
   participants?: string[];
@@ -251,6 +253,8 @@ export default function SlipsScreen() {
           employee: item.employee,
           timeOut: item.timeOut,
           estimatedTimeBack: item.estimatedTimeBack,
+          arrivalTime: item.arrivalTime,
+          overdueMinutes: item.overdueMinutes,
           additionalInfo: item.additionalInfo,
           purpose: item.purpose,
           signature: item.signature,
@@ -673,6 +677,12 @@ export default function SlipsScreen() {
               <Timer timeOut={item.timeOut} estimatedTimeBack={item.estimatedTimeBack} departureTime={item.departureTime} onTimeShort={() => handleTimeShort(item._id)} onTimeOver={() => handleTimeOver(item._id)} />
             </View>
           )}
+          {item.type === 'Pass Slip' && item.status === 'Returned' && typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0 && (
+            <View style={styles.overdueBox}>
+              <FontAwesome name="exclamation-triangle" size={14} color={theme.danger} style={styles.cardRowIcon} />
+              <Text style={styles.overdueText}>Overdue: {Math.round(item.overdueMinutes)} min added to time spent</Text>
+            </View>
+          )}
         </View>
         <View style={[styles.cardFooter, item.type === 'Pass Slip' ? styles.cardFooterSlip : styles.cardFooterOrder]}>
           <Pressable style={styles.viewButton} onPress={() => {
@@ -920,6 +930,12 @@ export default function SlipsScreen() {
                     <View style={styles.docRow}><Text style={styles.docField}>Name of Employee: <Text style={styles.docValue}>{selectedSubmission.employee?.name}</Text></Text></View>
                     <View style={styles.docRow}><Text style={styles.docField}>Time Out: <Text style={styles.docValue}>{selectedSubmission.timeOut}</Text></Text></View>
                     <View style={styles.docRow}><Text style={styles.docField}>Estimated Time to be Back: <Text style={styles.docValue}>{selectedSubmission.estimatedTimeBack}</Text></Text></View>
+                    {selectedSubmission.arrivalTime && (
+                      <View style={styles.docRow}><Text style={styles.docField}>Actual Time Back: <Text style={styles.docValue}>{new Date(selectedSubmission.arrivalTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</Text></Text></View>
+                    )}
+                    {typeof selectedSubmission.overdueMinutes === 'number' && selectedSubmission.overdueMinutes > 0 && (
+                      <View style={styles.docRow}><Text style={styles.docField}>Overdue: <Text style={[styles.docValue, styles.overdueValue]}>{Math.round(selectedSubmission.overdueMinutes)} min</Text></Text></View>
+                    )}
                     <View style={styles.docRow}><Text style={styles.docField}>Additional Information: <Text style={styles.docValue}>{selectedSubmission.additionalInfo}</Text></Text></View>
                     <View style={styles.docRow}><Text style={styles.docField}>Purpose/s: <Text style={styles.docValue}>{selectedSubmission.purpose}</Text></Text></View>
 
@@ -1559,6 +1575,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: theme.textMuted,
     marginBottom: 5,
+  },
+  overdueBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(220,53,69,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(220,53,69,0.35)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginTop: 10,
+  },
+  overdueText: {
+    flex: 1,
+    color: theme.danger,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  overdueValue: {
+    color: theme.danger,
+    fontWeight: '700',
   },
   historyWrapper: {
     width: '100%',

@@ -610,7 +610,7 @@ export default function ProfileScreen() {
             <View style={styles.card}>
               <View style={[styles.cardTopBar, styles.cardTopBarAccent]} />
               <View style={styles.cardBody}>
-                <Text style={styles.sectionTitle}>Monthly Pass Slip Balance</Text>
+                <Text style={styles.sectionTitle}>Weekly Pass Slip Balance</Text>
                 <Text style={styles.timeLimitText}>Remaining: {formatMinutes(user.passSlipMinutes)}</Text>
               </View>
             </View>

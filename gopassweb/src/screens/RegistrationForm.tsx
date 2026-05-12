@@ -5,6 +5,7 @@ import { Picker } from '@react-native-picker/picker';
 import axios, { isAxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../config/api';
+import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 
 // Theme: match AdminScreen / HrpDashboardScreen (#fece00, darker blue, #ffffff)
 const theme = {
@@ -53,6 +54,7 @@ const campuses = [
 ];
 
 const RegistrationForm = () => {
+  const { isCompact } = useResponsiveLayout();
   const [firstName, setFirstName] = useState('');
   const [middleName, setMiddleName] = useState('');
   const [surname, setSurname] = useState('');
@@ -154,7 +156,13 @@ const RegistrationForm = () => {
         }}
       >
         <View style={styles.centeredView}>
-          <View style={[styles.modalView, modalType === 'success' ? styles.successModal : styles.errorModal]}>
+          <View
+            style={[
+              styles.modalView,
+              modalType === 'success' ? styles.successModal : styles.errorModal,
+              isCompact && styles.modalViewCompact,
+            ]}
+          >
             {modalType === 'success' && (
               <FontAwesome name="check-circle" size={48} color={theme.success} style={{ marginBottom: 15 }} />
             )}
@@ -278,6 +286,9 @@ const styles = StyleSheet.create({
   },
   modalView: {
     margin: 20,
+    width: '92%',
+    maxWidth: 420,
+    maxHeight: '90%',
     backgroundColor: theme.surface,
     borderRadius: 16,
     padding: 35,
@@ -290,6 +301,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 5,
+  },
+  modalViewCompact: {
+    margin: 12,
+    padding: 24,
+    borderRadius: 12,
   },
   successModal: {
     borderColor: theme.success,

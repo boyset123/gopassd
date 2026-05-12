@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert, Platform, Image, ImageBackground, Modal, TouchableOpacity, FlatList, TextInput, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert, Platform, Image, ImageBackground, Modal, TouchableOpacity, FlatList, TextInput, RefreshControl, KeyboardAvoidingView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import SignatureScreen, { SignatureViewRef } from 'react-native-signature-canvas';
@@ -489,29 +489,38 @@ export default function PresidentDashboard() {
       </ImageBackground>
 
       <Modal visible={rejectModalVisible} animationType="fade" transparent>
-        <View style={styles.rejectModalOverlay}>
-          <View style={styles.rejectModalContent}>
-            <Text style={styles.rejectModalTitle}>Reject request</Text>
-            <Text style={styles.rejectModalSubtitle}>Add an optional comment for the employee (e.g. reason for rejection).</Text>
-            <TextInput
-              style={styles.rejectCommentInput}
-              placeholder="Comment (optional)"
-              placeholderTextColor={theme.textMuted}
-              value={rejectComment}
-              onChangeText={setRejectComment}
-              multiline
-              numberOfLines={3}
-            />
-            <View style={styles.rejectModalButtons}>
-              <Pressable style={[styles.rejectModalButton, styles.rejectModalCancel]} onPress={() => { setRejectModalVisible(false); setRejectTarget(null); setRejectComment(''); }}>
-                <Text style={styles.rejectModalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.rejectModalButton, styles.rejectModalConfirm]} onPress={handleRejectConfirm}>
-                <Text style={styles.rejectModalConfirmText}>Confirm Rejection</Text>
-              </Pressable>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.rejectModalOverlay}
+        >
+          <ScrollView
+            contentContainerStyle={styles.rejectModalScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.rejectModalContent}>
+              <Text style={styles.rejectModalTitle}>Reject request</Text>
+              <Text style={styles.rejectModalSubtitle}>Add an optional comment for the employee (e.g. reason for rejection).</Text>
+              <TextInput
+                style={styles.rejectCommentInput}
+                placeholder="Comment (optional)"
+                placeholderTextColor={theme.textMuted}
+                value={rejectComment}
+                onChangeText={setRejectComment}
+                multiline
+                numberOfLines={3}
+              />
+              <View style={styles.rejectModalButtons}>
+                <Pressable style={[styles.rejectModalButton, styles.rejectModalCancel]} onPress={() => { setRejectModalVisible(false); setRejectTarget(null); setRejectComment(''); }}>
+                  <Text style={styles.rejectModalCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[styles.rejectModalButton, styles.rejectModalConfirm]} onPress={handleRejectConfirm}>
+                  <Text style={styles.rejectModalConfirmText}>Confirm Rejection</Text>
+                </Pressable>
+              </View>
             </View>
-          </View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
       <Modal
         visible={isReviewModalVisible}
@@ -878,9 +887,13 @@ const styles = StyleSheet.create({
   rejectModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  /** Scroll wrapper so the keyboard never hides the action buttons. */
+  rejectModalScrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    padding: 16,
   },
   rejectModalContent: {
     backgroundColor: '#fff',
@@ -888,6 +901,7 @@ const styles = StyleSheet.create({
     padding: 20,
     width: '100%',
     maxWidth: 360,
+    maxHeight: '95%',
   },
   rejectModalTitle: {
     fontSize: 18,

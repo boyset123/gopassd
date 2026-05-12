@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, Platform, Alert, TouchableOpacity, Modal, Image, ImageBackground, FlatList, ActivityIndicator, Keyboard } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, Platform, Alert, TouchableOpacity, Modal, Image, ImageBackground, FlatList, ActivityIndicator, Keyboard, KeyboardAvoidingView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
@@ -799,8 +799,15 @@ const CreateTravelOrderScreen = () => {
             </View>
           </View>
         </ImageBackground>
-      <View style={styles.contentContainer}>
-        <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.contentContainer}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.formCard}>
             <View style={styles.formCardTopBar} />
             <View style={styles.formCardHeader}>
@@ -1161,7 +1168,7 @@ const CreateTravelOrderScreen = () => {
             </View>
           </View>
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
 
         <Modal
           animationType="fade"
@@ -2051,8 +2058,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.border,
     borderRadius: 10,
-    alignSelf: 'flex-start',
-    width: 180,
+    /** flex grows the input inside row containers (recommenderRow); width:'100%'
+     * makes it fill column containers (signatureContainerSpaced). maxWidth caps
+     * it on wide screens so it never overflows narrow ones. */
+    flex: 1,
+    width: '100%',
     minWidth: 120,
     maxWidth: 200,
     marginTop: 8,

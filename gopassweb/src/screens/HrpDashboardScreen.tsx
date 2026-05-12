@@ -299,7 +299,9 @@ const SidebarScroll = ({ narrow, children }: { narrow: boolean; children: React.
 };
 
 const HrpDashboardScreen = () => {
-  const { isNarrow, isCompact } = useResponsiveLayout();
+  const { isNarrow, isCompact, width: viewportWidth } = useResponsiveLayout();
+  const sigCanvasWidth = Math.max(220, Math.min(300, viewportWidth - 80));
+  const sigCanvasHeight = isCompact ? 160 : 200;
 
   const [forReviewItems, setForReviewItems] = useState<(PassSlip | TravelOrder)[]>([]);
   const [verifiedSlips, setVerifiedSlips] = useState<PassSlip[]>([]);
@@ -1147,8 +1149,18 @@ const HrpDashboardScreen = () => {
                           Showing {Math.min((safeRecordsCurrentPage - 1) * recordsPageSize + 1, filteredRecords.length)}-
                           {Math.min(safeRecordsCurrentPage * recordsPageSize, filteredRecords.length)} of {filteredRecords.length}
                         </Text>
+                        <View style={(styles as any).recordsTableMetaBadge}>
+                          <Text style={(styles as any).recordsTableMetaBadgeText}>
+                            {filteredRecords.length} record{filteredRecords.length === 1 ? '' : 's'}
+                          </Text>
+                        </View>
                       </View>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={(styles as any).recordsTableHorizontalScroll}>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={(styles as any).recordsTableHorizontalScroll}
+                        contentContainerStyle={{ flexGrow: 1 }}
+                      >
                         <View style={[(styles as any).recordsTableInner, styles.recordsTableHeader]}>
                           <Text style={[styles.recordsTableHeaderCell, styles.recordsColEmployee]}>Employee</Text>
                           <Text style={[styles.recordsTableHeaderCell, styles.recordsColTracking]}>Tracking No.</Text>
@@ -1167,6 +1179,7 @@ const HrpDashboardScreen = () => {
                           horizontal
                           showsHorizontalScrollIndicator={false}
                           style={(styles as any).recordsTableHorizontalScroll}
+                          contentContainerStyle={{ flexGrow: 1 }}
                         >
                           <View style={[(styles as any).recordsTableInner, styles.recordsTableRow, index % 2 === 1 && styles.recordsTableRowAlt]}>
                             <Text style={[styles.recordsTableCell, styles.recordsColEmployee]} numberOfLines={1}>
@@ -1179,15 +1192,25 @@ const HrpDashboardScreen = () => {
                             </Text>
                             <View style={[styles.recordsColType]}>
                               <View style={['destination' in item ? styles.recordsBadgeSlip : styles.recordsBadgeOrder]}>
+                                <View style={'destination' in item ? (styles as any).recordsBadgeSlipDot : (styles as any).recordsBadgeOrderDot} />
                                 <Text style={'destination' in item ? styles.recordsBadgeSlipText : styles.recordsBadgeOrderText}>
                                   {'destination' in item ? 'Pass Slip' : 'Travel Order'}
                                 </Text>
                               </View>
                             </View>
                             <Text style={[styles.recordsTableCell, styles.recordsColDate]}>{formatDate(item.date)}</Text>
-                            <Text style={[styles.recordsTableCell, styles.recordsColStatus]} numberOfLines={1}>
-                              {('arrivalStatus' in item && item.arrivalStatus) ? item.arrivalStatus : '—'}
-                            </Text>
+                            <View style={[styles.recordsColStatus]}>
+                              {('arrivalStatus' in item && item.arrivalStatus) ? (
+                                <View style={(item as any).arrivalStatus === 'Returned' || (item as any).arrivalStatus === 'On Time' || (item as any).arrivalStatus === 'Completed' ? (styles as any).recordsBadgeSuccess : (styles as any).recordsBadgeNeutral}>
+                                  <View style={(item as any).arrivalStatus === 'Returned' || (item as any).arrivalStatus === 'On Time' || (item as any).arrivalStatus === 'Completed' ? (styles as any).recordsBadgeSuccessDot : (styles as any).recordsBadgeNeutralDot} />
+                                  <Text style={(item as any).arrivalStatus === 'Returned' || (item as any).arrivalStatus === 'On Time' || (item as any).arrivalStatus === 'Completed' ? (styles as any).recordsBadgeSuccessText : (styles as any).recordsBadgeNeutralText} numberOfLines={1}>
+                                    {(item as any).arrivalStatus}
+                                  </Text>
+                                </View>
+                              ) : (
+                                <Text style={[styles.recordsTableCell]} numberOfLines={1}>—</Text>
+                              )}
+                            </View>
                             <Text style={[styles.recordsTableCell, styles.recordsColCampus]} numberOfLines={1}>
                               {item.employee?.campus || '—'}
                             </Text>
@@ -1335,7 +1358,12 @@ const HrpDashboardScreen = () => {
           onRequestClose={() => setProfileModalVisible(false)}
         >
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalView, styles.profileModalView]}>
+            <View style={[
+              styles.modalView,
+              styles.profileModalView,
+              isNarrow && styles.modalViewNarrow,
+              isCompact && (styles as any).profileModalViewNarrow,
+            ]}>
               <View style={styles.profileModalHeader}>
                 <Text style={styles.profileModalTitle}>My Profile</Text>
                 <Pressable onPress={() => setProfileModalVisible(false)} style={styles.closeModalButton}>
@@ -1400,16 +1428,16 @@ const HrpDashboardScreen = () => {
           onRequestClose={() => setIsModalVisible(false)}
         >
           <View style={styles.modalOverlay}>
-            <View style={styles.modalView}>
+            <View style={[styles.modalView, isNarrow && styles.modalViewNarrow]}>
               {isSignatureModalVisible && (
-                <View style={styles.signatureModalOverlay}>
-                  <View style={styles.signatureModalView}>
+                <View style={[styles.signatureModalOverlay, isNarrow && (styles as any).signatureModalOverlayNarrow]}>
+                  <View style={[styles.signatureModalView, isNarrow && (styles as any).signatureModalViewNarrow]}>
                     <Text style={styles.modalTitle}>Provide Signature</Text>
                     <View style={styles.signaturePadContainer}>
                       <SignatureCanvas
                         ref={sigPad}
                         penColor='black'
-                        canvasProps={{width: 300, height: 200, className: 'sigCanvas'}}
+                        canvasProps={{ width: sigCanvasWidth, height: sigCanvasHeight, className: 'sigCanvas' }}
                       />
                     </View>
                     <View style={styles.signatureButtons}>
@@ -1580,7 +1608,7 @@ const HrpDashboardScreen = () => {
                 )}
               </ScrollView>
               {selectedItem && (
-                <View style={styles.modalButtonContainer}>
+                <View style={[styles.modalButtonContainer, isNarrow && (styles as any).modalButtonContainerNarrow]}>
                   {forReviewItems.includes(selectedItem) ? (
                     <>
                       {(() => {
@@ -1640,8 +1668,13 @@ const HrpDashboardScreen = () => {
           onRequestClose={() => setIsCtcModalVisible(false)}
         >
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalView, styles.ctcModalView]}>
-              <View style={styles.modalHeader}>
+            <View style={[
+              styles.modalView,
+              styles.ctcModalView,
+              isNarrow && styles.modalViewNarrow,
+              isCompact && (styles as any).ctcModalViewNarrow,
+            ]}>
+              <View style={[styles.modalHeader, isNarrow && (styles as any).modalHeaderNarrow]}>
                 <Text style={styles.modalTitle}>Certificate of Travel Completed</Text>
                 <Pressable onPress={() => setIsCtcModalVisible(false)} style={styles.closeModalButton}>
                   <FontAwesome name="close" size={20} color="#011a6b" />
@@ -1755,7 +1788,7 @@ const HrpDashboardScreen = () => {
                   })()}
                 </View>
               </ScrollView>
-              <View style={styles.modalButtonContainer}>
+              <View style={[styles.modalButtonContainer, isNarrow && (styles as any).modalButtonContainerNarrow]}>
                 <Pressable style={[styles.button, styles.cancelButton, styles.modalButton]} onPress={() => setIsCtcModalVisible(false)}>
                   <Text style={styles.buttonText}>Close</Text>
                 </Pressable>
@@ -1880,8 +1913,13 @@ const HrpDashboardScreen = () => {
           onRequestClose={() => setIsMapModalVisible(false)}
         >
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalView, styles.mapModalView]}>
-              <View style={styles.modalHeader}>
+            <View style={[
+              styles.modalView,
+              styles.mapModalView,
+              isNarrow && styles.modalViewNarrow,
+              isNarrow && (styles as any).mapModalViewNarrow,
+            ]}>
+              <View style={[styles.modalHeader, isNarrow && (styles as any).modalHeaderNarrow]}>
                 <Text style={styles.modalTitle}>Route Map</Text>
                 <Pressable onPress={() => setIsMapModalVisible(false)} style={styles.closeModalButton}>
                   <FontAwesome name="close" size={24} color="#333" />

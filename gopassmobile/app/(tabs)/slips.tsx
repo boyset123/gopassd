@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator, Modal, TouchableOpacity, Image, ImageBackground, ScrollView, Alert, TextInput, Animated as RNAnimated, Platform } from 'react-native';
+import { View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator, Modal, TouchableOpacity, Image, ImageBackground, ScrollView, Alert, TextInput, Animated as RNAnimated, Platform, KeyboardAvoidingView, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Print from 'expo-print';
@@ -131,6 +131,10 @@ const getStatusStyle = (status: string) => {
 
 export default function SlipsScreen() {
   const router = useRouter();
+  const { width: windowWidth } = useWindowDimensions();
+  // QR is shown inside qrModalContent (width: 80%, padding: 25). Fit it to the
+  // visible interior on small phones so the code is never clipped.
+  const qrCodeSize = Math.min(250, Math.max(160, Math.floor(windowWidth * 0.8) - 50));
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
@@ -829,51 +833,60 @@ export default function SlipsScreen() {
           setCancellationReason('');
         }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Cancel Submission</Text>
-            <Text style={styles.modalText}>Please provide a reason for cancelling this pass slip.</Text>
-            {selectedReason !== 'Other' &&
-              ['Change of plans', 'Emergency', 'Incorrect details', 'Other'].map(reason => (
-                <TouchableOpacity key={reason} style={[styles.reasonOption, selectedReason === reason && styles.reasonOptionSelected]} onPress={() => setSelectedReason(reason)}>
-                  <Text style={[styles.reasonOptionText, selectedReason === reason && styles.reasonOptionTextSelected]}>{reason}</Text>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <ScrollView
+            contentContainerStyle={styles.cancelModalScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Cancel Submission</Text>
+              <Text style={styles.modalText}>Please provide a reason for cancelling this pass slip.</Text>
+              {selectedReason !== 'Other' &&
+                ['Change of plans', 'Emergency', 'Incorrect details', 'Other'].map(reason => (
+                  <TouchableOpacity key={reason} style={[styles.reasonOption, selectedReason === reason && styles.reasonOptionSelected]} onPress={() => setSelectedReason(reason)}>
+                    <Text style={[styles.reasonOptionText, selectedReason === reason && styles.reasonOptionTextSelected]}>{reason}</Text>
+                  </TouchableOpacity>
+                ))
+              }
+              {selectedReason === 'Other' && (
+                <TextInput
+                  style={styles.reasonInput}
+                  placeholder="Please specify your reason"
+                  value={cancellationReason}
+                  onChangeText={setCancellationReason}
+                  multiline
+                />
+              )}
+              <View style={styles.modalButtonContainer}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelModalButton]}
+                  onPress={() => {
+                    if (selectedReason === 'Other') {
+                      setSelectedReason('');
+                      setCancellationReason('');
+                    } else {
+                      setCancelModalVisible(false);
+                      setSelectedReason('');
+                      setCancellationReason('');
+                    }
+                  }}
+                >
+                  <Text style={styles.cancelButtonText}>Back</Text>
                 </TouchableOpacity>
-              ))
-            }
-            {selectedReason === 'Other' && (
-              <TextInput
-                style={styles.reasonInput}
-                placeholder="Please specify your reason"
-                value={cancellationReason}
-                onChangeText={setCancellationReason}
-                multiline
-              />
-            )}
-            <View style={styles.modalButtonContainer}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelModalButton]}
-                onPress={() => {
-                  if (selectedReason === 'Other') {
-                    setSelectedReason('');
-                    setCancellationReason('');
-                  } else {
-                    setCancelModalVisible(false);
-                    setSelectedReason('');
-                    setCancellationReason('');
-                  }
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Back</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.submitModalButton]}
-                onPress={submitCancellation}
-              >
-                <Text style={styles.submitButtonText}>Submit</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.submitModalButton]}
+                  onPress={submitCancellation}
+                >
+                  <Text style={styles.submitButtonText}>Submit</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal
@@ -1032,7 +1045,10 @@ export default function SlipsScreen() {
           <View style={styles.qrModalContent}>
             <Text style={styles.modalTitle}>Scan for Verification</Text>
             {selectedSubmission?.qrCode && (
-              <Image source={{ uri: selectedSubmission.qrCode }} style={styles.qrCodeImage} />
+              <Image
+                source={{ uri: selectedSubmission.qrCode }}
+                style={[styles.qrCodeImage, { width: qrCodeSize, height: qrCodeSize }]}
+              />
             )}
             <TouchableOpacity
               style={styles.cancelButton}
@@ -1856,6 +1872,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
+  /** Scroll wrapper for the cancel-submission modal so the keyboard never hides Submit. */
+  cancelModalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+  },
   modalContent: {
     width: '90%',
     maxHeight: '94%',
@@ -2115,17 +2139,16 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
   },
   qrModalContent: {
-    width: '80%',
+    width: '90%',
+    maxWidth: 360,
     backgroundColor: theme.surface,
     borderRadius: 12,
-    padding: 25,
+    padding: 20,
     alignItems: 'center',
     borderTopWidth: 4,
     borderTopColor: theme.accent,
   },
   qrCodeImage: {
-    width: 250,
-    height: 250,
     marginBottom: 20,
   },
   notificationIndicator: {

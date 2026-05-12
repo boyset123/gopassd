@@ -41,7 +41,13 @@ export default function LoginRecaptcha({ siteKey, onVerify }: Props) {
     [siteKey]
   );
 
-  const webViewHeight = Math.min(Math.round(winH * 0.78), 720);
+  // Reserve room for sheet header (~80) + safe insets (~64) + bottom margin so the
+  // WebView never overflows the visible viewport on small/short phones.
+  const reservedChrome = 80 + insets.top + Math.max(insets.bottom, 16) + 24;
+  const webViewHeight = Math.max(
+    320,
+    Math.min(Math.round(winH * 0.78), 720, winH - reservedChrome)
+  );
   const sheetMaxW = Math.min(winW - 24, 440);
 
   const onMessage = useCallback(

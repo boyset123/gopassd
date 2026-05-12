@@ -5,6 +5,7 @@ import { Picker } from '@react-native-picker/picker';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../config/api';
+import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 
 // Theme: match AdminScreen / HrpDashboardScreen (#fece00, darker blue, #ffffff)
 const theme = {
@@ -31,6 +32,7 @@ interface User {
 }
 
 const UserManagement = () => {
+  const { isCompact } = useResponsiveLayout();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedCampus, setSelectedCampus] = useState('All Campuses');
@@ -147,11 +149,21 @@ const UserManagement = () => {
         <View style={styles.colActions}>
           {item.role !== 'admin' && (
             <>
-              <Pressable style={[styles.actionButton, styles.editButton]} onPress={() => openEditModal(item)}>
-                <FontAwesome name="pencil" size={14} color="#fff" />
+              <Pressable
+                style={[styles.actionButton, styles.editButton]}
+                onPress={() => openEditModal(item)}
+                accessibilityLabel="Edit user"
+                {...(Platform.OS === 'web' ? ({ title: 'Edit' } as any) : {})}
+              >
+                <FontAwesome name="pencil" size={16} color="#667085" />
               </Pressable>
-              <Pressable style={[styles.actionButton, styles.deleteButton]} onPress={() => confirmDelete(item._id)}>
-                <FontAwesome name="trash" size={14} color="#fff" />
+              <Pressable
+                style={[styles.actionButton, styles.deleteButton]}
+                onPress={() => confirmDelete(item._id)}
+                accessibilityLabel="Delete user"
+                {...(Platform.OS === 'web' ? ({ title: 'Delete' } as any) : {})}
+              >
+                <FontAwesome name="trash" size={16} color="#667085" />
               </Pressable>
             </>
           )}
@@ -194,7 +206,7 @@ const UserManagement = () => {
         onRequestClose={() => setIsEditModalVisible(false)}
       >
         <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, isCompact && styles.modalContentCompact]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit User</Text>
               <Pressable onPress={() => setIsEditModalVisible(false)}>
@@ -202,7 +214,7 @@ const UserManagement = () => {
               </Pressable>
             </View>
             {editingUser && (
-              <ScrollView>
+              <ScrollView contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
                 <Text style={styles.label}>Name</Text>
                 <TextInput
                   style={styles.input}
@@ -336,61 +348,66 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.surface,
     borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 14,
+    borderColor: '#EAECF0',
+    borderRadius: 12,
     overflow: 'hidden',
     ...Platform.select({
       web: {
-        boxShadow: '0 18px 45px rgba(1,26,107,0.10)',
+        boxShadow: '0 1px 2px rgba(16,24,40,0.05), 0 1px 3px rgba(16,24,40,0.10)',
       },
     }),
   },
   tableListContent: {
-    paddingBottom: 6,
+    paddingBottom: 0,
   },
   paginationFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
     borderTopWidth: 1,
-    borderTopColor: theme.border,
-    backgroundColor: 'rgba(1,26,107,0.03)',
+    borderTopColor: '#EAECF0',
+    backgroundColor: '#FFFFFF',
   },
   paginationInfo: {
-    color: theme.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#475467',
+    fontSize: 14,
+    fontWeight: '500',
   },
   paginationActions: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
     alignItems: 'center',
   },
   paginationButton: {
     paddingVertical: 8,
     paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: theme.primary,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    backgroundColor: '#FFFFFF',
     ...Platform.select({
       web: {
         cursor: 'pointer',
+        boxShadow: '0 1px 2px rgba(16,24,40,0.05)',
       },
     }),
   },
   paginationButtonDisabled: {
-    backgroundColor: 'rgba(1,26,107,0.35)',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#EAECF0',
     ...Platform.select({
       web: {
-        cursor: 'auto',
+        cursor: 'not-allowed' as any,
+        boxShadow: 'none' as any,
       },
     }),
   },
   paginationButtonText: {
-    color: theme.surface,
-    fontWeight: '700',
-    fontSize: 12,
+    color: '#344054',
+    fontWeight: '600',
+    fontSize: 13,
   },
   tableHorizontalScroll: {
     flexGrow: 0,
@@ -405,34 +422,34 @@ const styles = StyleSheet.create({
   },
   tableHeader: {
     flexDirection: 'row',
-    borderBottomWidth: 3,
-    borderBottomColor: theme.accent,
-    paddingVertical: 10,
-    marginBottom: 4,
-    backgroundColor: 'rgba(1,26,107,0.06)',
-    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EAECF0',
+    paddingVertical: 12,
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 20,
     alignItems: 'center',
   },
   headerText: {
-    fontWeight: '700',
-    fontSize: 13,
-    color: theme.primary,
+    fontWeight: '600',
+    fontSize: 12,
+    color: '#475467',
     textAlign: 'left',
   },
   tableRow: {
     flexDirection: 'row',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(1,26,107,0.14)',
+    borderBottomColor: '#EAECF0',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
   },
   tableRowAlt: {
-    backgroundColor: 'rgba(1,26,107,0.03)',
+    backgroundColor: '#F9FAFB',
   },
   rowText: {
-    fontSize: 13,
-    color: theme.primary,
+    fontSize: 14,
+    color: '#101828',
     fontWeight: '500',
     textAlign: 'left',
   },
@@ -442,44 +459,53 @@ const styles = StyleSheet.create({
   colRole: { width: 200, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
   colFaculty: { width: 280, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
   colActions: {
-    width: 160,
+    width: 120,
     flexGrow: 0,
     flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'flex-end',
+    gap: 2,
   },
+  /** ButtonUtility xs tertiary — transparent, hover bg, slate icon */
   actionButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    marginRight: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
     ...Platform.select({
       web: {
         cursor: 'pointer',
+        transitionProperty: 'background-color' as any,
+        transitionDuration: '120ms' as any,
       },
     }),
   },
   actionButtonText: {
-    color: theme.surface,
+    color: '#667085',
     fontWeight: '600',
     textAlign: 'center',
   },
   editButton: {
-    backgroundColor: theme.primary,
+    backgroundColor: 'transparent',
   },
   deleteButton: {
-    backgroundColor: theme.danger,
+    backgroundColor: 'transparent',
   },
   modalContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(1,26,107,0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   modalContent: {
-    width: '90%',
+    width: '100%',
     maxWidth: 560,
+    maxHeight: '90%',
     backgroundColor: theme.surface,
     borderRadius: 16,
     padding: 28,
@@ -491,6 +517,10 @@ const styles = StyleSheet.create({
         boxShadow: '0 20px 50px rgba(1,26,107,0.15)',
       },
     }),
+  },
+  modalContentCompact: {
+    padding: 20,
+    borderRadius: 12,
   },
   modalHeader: {
     flexDirection: 'row',

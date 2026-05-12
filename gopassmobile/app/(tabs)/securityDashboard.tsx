@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, Modal, Alert, Image, ImageBackground, Animated, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, Modal, Alert, Image, ImageBackground, Animated, TextInput, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import Timer from '../../components/Timer';
@@ -131,6 +131,10 @@ function getDepartureMoment(item: SecurityItem): Date | null {
 
 export default function SecurityDashboard() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  // QR is shown inside qrModalContent (width: 90%, padding: 25). Fit it to the
+  // visible interior on small phones so the code is never clipped.
+  const returnQrCodeSize = Math.min(250, Math.max(160, Math.floor(windowWidth * 0.9) - 50));
   const [currentlyOut, setCurrentlyOut] = useState<SecurityItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -515,7 +519,7 @@ export default function SecurityDashboard() {
               <Text style={styles.modalTitle}>Employee Return</Text>
               <Text style={styles.qrEmployeeName}>{returnQrCode.employeeName}</Text>
               <View style={styles.qrCodeWrapper}>
-                <QRCode value={returnQrCode.data} size={250} />
+                <QRCode value={returnQrCode.data} size={returnQrCodeSize} />
               </View>
               <Text style={styles.qrInstruction}>Present this code to the employee to scan for their arrival.</Text>
               <Pressable style={styles.closeModalButton} onPress={() => setReturnQrCode(null)}>
@@ -1517,10 +1521,12 @@ const styles = StyleSheet.create({
   },
   qrModalContent: {
     backgroundColor: '#fff',
-    padding: 25,
+    padding: 20,
     borderRadius: 15,
     alignItems: 'center',
     width: '90%',
+    maxWidth: 360,
+    maxHeight: '92%',
   },
   qrEmployeeName: {
     fontSize: 20,

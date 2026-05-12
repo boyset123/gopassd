@@ -91,7 +91,7 @@ export default function MonitoringApprovedTravelOrdersCard(props: MonitoringAppr
               key={item._id}
               style={[(styles as any).monitoringTableRow, index % 2 === 1 && (styles as any).monitoringTableRowAlt]}
             >
-              <View style={[(styles as any).monitoringColEmployee, colFit, { flexDirection: 'row', alignItems: 'center' }]}>
+              <View style={[(styles as any).monitoringColEmployee, colFit, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
                 <Image
                   source={{
                     uri: profilePictureUri(
@@ -100,11 +100,21 @@ export default function MonitoringApprovedTravelOrdersCard(props: MonitoringAppr
                       'https://via.placeholder.com/48'
                     ),
                   }}
-                  style={{ width: 32, height: 32, borderRadius: 16, marginRight: 10, backgroundColor: '#f1f5f9' }}
+                  style={{ width: 40, height: 40, borderRadius: 999, backgroundColor: '#F2F4F7', borderWidth: 1, borderColor: 'rgba(16,24,40,0.06)' }}
                 />
-                <Text style={[(styles as any).monitoringRowText, { flex: 1, minWidth: 0 }]} numberOfLines={1}>
-                  {item.employee?.name || 'N/A'}
-                </Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text
+                    style={[(styles as any).monitoringRowText, { fontSize: 14, fontWeight: '500', color: '#101828' }]}
+                    numberOfLines={1}
+                  >
+                    {item.employee?.name || 'N/A'}
+                  </Text>
+                  {item.employee?.email ? (
+                    <Text style={{ fontSize: 13, color: '#475467', marginTop: 2 }} numberOfLines={1}>
+                      {item.employee.email}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
               <Text style={[(styles as any).monitoringRowText, (styles as any).monitoringColDestination, colFit]} numberOfLines={1}>
                 {item.to || '—'}

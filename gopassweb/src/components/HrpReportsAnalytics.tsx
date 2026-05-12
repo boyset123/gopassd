@@ -20,6 +20,7 @@ type PassSlipLike = {
   destination?: string;
   status?: string;
   arrivalStatus?: string;
+  trackingNo?: string;
 };
 
 type TravelOrderLike = {
@@ -29,6 +30,7 @@ type TravelOrderLike = {
   to?: string;
   status?: string;
   arrivalStatus?: string;
+  travelOrderNo?: string;
 };
 
 export type RecordLike = PassSlipLike | TravelOrderLike;
@@ -85,6 +87,12 @@ const formatExcelCsvDateText = (dateString?: string) => {
 };
 
 const getRecordTypeLabel = (r: RecordLike) => ('destination' in r && r.destination ? 'Pass Slip' : 'Travel Order');
+
+/** Pass slip uses `trackingNo`; travel order uses `travelOrderNo`. */
+const getTrackingNo = (r: RecordLike) => {
+  if ('destination' in r) return (r as PassSlipLike).trackingNo || '—';
+  return (r as TravelOrderLike).travelOrderNo || '—';
+};
 
 const escapeCsv = (value: string) => {
   const v = value ?? '';
@@ -353,6 +361,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
       <View style={[styles.tableInner, isNarrow && styles.tableInnerNarrow]}>
         <View style={styles.tableHeadRow}>
           <Text style={[styles.tableHeadCell, styles.cEmployee]}>Employee</Text>
+          <Text style={[styles.tableHeadCell, styles.cTracking]}>Tracking No.</Text>
           <Text style={[styles.tableHeadCell, styles.cType]}>Type</Text>
           <Text style={[styles.tableHeadCell, styles.cDate]}>Date</Text>
           <Text style={[styles.tableHeadCell, styles.cStatus]}>Status</Text>
@@ -376,6 +385,8 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
                 ? 'onTime'
                 : 'neutral';
 
+            const trackingNo = getTrackingNo(r);
+
             return (
               <View
                 key={`${r._id}-${idx}`}
@@ -384,36 +395,67 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
                 <Text style={[styles.tableCell, styles.cEmployee]} numberOfLines={1}>
                   {employee}
                 </Text>
+                <Text style={[styles.tableCell, styles.cTracking]} numberOfLines={1}>
+                  {trackingNo}
+                </Text>
                 <View style={styles.cType}>
-                  <Text
+                  <View
                     style={[
                       styles.typeBadge,
                       typeLabel === 'Pass Slip' ? styles.typeBadgeSlip : styles.typeBadgeOrder,
                     ]}
                   >
-                    {typeLabel}
-                  </Text>
+                    <View
+                      style={[
+                        styles.typeBadgeDot,
+                        typeLabel === 'Pass Slip' ? styles.typeBadgeDotSlip : styles.typeBadgeDotOrder,
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.typeBadgeText,
+                        typeLabel === 'Pass Slip' ? styles.typeBadgeTextSlip : styles.typeBadgeTextOrder,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {typeLabel}
+                    </Text>
+                  </View>
                 </View>
                 <Text style={[styles.tableCell, styles.cDate]}>{formatDate(r.date)}</Text>
                 <Text style={[styles.tableCell, styles.cStatus]} numberOfLines={1}>
                   {status}
                 </Text>
-                <View
-                  style={[
-                    styles.cArrival,
-                    styles.arrivalBadge,
-                    arrivalVariant === 'overdue' && styles.arrivalBadgeOverdue,
-                    arrivalVariant === 'onTime' && styles.arrivalBadgeOnTime,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.arrivalBadgeText,
-                      arrivalVariant === 'overdue' && styles.arrivalBadgeTextOverdue,
-                    ]}
-                  >
-                    {arrival}
-                  </Text>
+                <View style={styles.cArrival}>
+                  {arrival !== '—' ? (
+                    <View
+                      style={[
+                        styles.arrivalBadge,
+                        arrivalVariant === 'overdue' && styles.arrivalBadgeOverdue,
+                        arrivalVariant === 'onTime' && styles.arrivalBadgeOnTime,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.arrivalDot,
+                          arrivalVariant === 'overdue' && styles.arrivalDotOverdue,
+                          arrivalVariant === 'onTime' && styles.arrivalDotOnTime,
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.arrivalBadgeText,
+                          arrivalVariant === 'overdue' && styles.arrivalBadgeTextOverdue,
+                          arrivalVariant === 'onTime' && styles.arrivalBadgeTextOnTime,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {arrival}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.tableCell}>—</Text>
+                  )}
                 </View>
                 <Text style={[styles.tableCell, styles.cCampus]} numberOfLines={1}>
                   {campus}
@@ -450,7 +492,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
     if (typeof window === 'undefined') return;
 
     // Longer date header so Excel opens with a wider Date column (avoids ######)
-    const headers = ['Date (YYYY-MM-DD)', 'Type', 'Employee', 'Campus', 'Faculty', 'Status', 'Arrival Status'];
+    const headers = ['Date (YYYY-MM-DD)', 'Tracking No.', 'Type', 'Employee', 'Campus', 'Faculty', 'Status', 'Arrival Status'];
     const rows = appliedFilteredRecords.map((r) => {
       const type = getRecordTypeLabel(r);
       const employee = r.employee?.name || '—';
@@ -458,9 +500,11 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
       const office = r.employee?.faculty || r.employee?.department || '—';
       const status = r.status || '—';
       const arrivalStatus = r.arrivalStatus || '—';
+      const trackingNo = getTrackingNo(r);
 
       return [
         escapeCsv(formatExcelCsvDateText(r.date)),
+        escapeCsv(trackingNo),
         escapeCsv(type),
         escapeCsv(employee),
         escapeCsv(campus),
@@ -880,10 +924,17 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
 
       <View style={styles.tableCard}>
         <View style={styles.tableHeader}>
-          <Text style={styles.tableTitle}>Detailed Report</Text>
-          <Text style={styles.tableSubtitle}>
-            Showing {appliedFilteredRecords.length} result{appliedFilteredRecords.length === 1 ? '' : 's'}
-          </Text>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.tableTitle}>Detailed Report</Text>
+            <Text style={styles.tableSubtitle}>
+              Showing {appliedFilteredRecords.length} result{appliedFilteredRecords.length === 1 ? '' : 's'}
+            </Text>
+          </View>
+          <View style={styles.tableHeaderBadge}>
+            <Text style={styles.tableHeaderBadgeText}>
+              {appliedFilteredRecords.length} record{appliedFilteredRecords.length === 1 ? '' : 's'}
+            </Text>
+          </View>
         </View>
 
         {Platform.OS === 'web' ? (
@@ -1513,34 +1564,57 @@ const styles = StyleSheet.create({
     color: 'rgba(1,26,107,0.65)',
     fontWeight: '600',
   },
+  /** Untitled UI-style table card */
   tableCard: {
-    backgroundColor: '#fff',
-    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(1,26,107,0.14)',
+    borderColor: '#EAECF0',
     padding: 0,
+    overflow: 'hidden',
     ...Platform.select({
       web: {
-        boxShadow: '0 14px 40px rgba(1,26,107,0.06)',
+        boxShadow: '0 1px 2px rgba(16,24,40,0.05), 0 1px 3px rgba(16,24,40,0.10)',
       },
     }),
   },
+  /** TableCard.Header — title left, count pill right */
   tableHeader: {
-    padding: 16,
-    backgroundColor: '#011a6b',
-    borderBottomWidth: 3,
-    borderBottomColor: '#fece00',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EAECF0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    flexWrap: 'wrap',
   },
   tableTitle: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#101828',
+    letterSpacing: -0.2,
   },
   tableSubtitle: {
+    fontSize: 13,
+    color: '#475467',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  tableHeaderBadge: {
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    backgroundColor: '#FFFFFF',
+  },
+  tableHeaderBadgeText: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.78)',
-    fontWeight: '600',
-    marginTop: 4,
+    fontWeight: '500',
+    color: '#344054',
   },
   tableHorizontal: {
     flexGrow: 0,
@@ -1548,7 +1622,6 @@ const styles = StyleSheet.create({
   tableHorizontalWrapper: {
     width: '100%',
     borderRadius: 0,
-    padding: 16,
     ...Platform.select({
       web: {
         overflowX: 'auto' as any,
@@ -1557,62 +1630,100 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  /**
+   * Responsive: stretch to fill on wide screens; columns clamp to their minWidths
+   * on narrow ones and the wrapper above provides horizontal scroll.
+   * 1140 = sum of column minWidths (180+130+110+100+130+200+120+170).
+   */
   tableInner: {
-    minWidth: 1100,
+    flexGrow: 1,
+    flexShrink: 0,
+    minWidth: 1140,
   },
   tableInnerNarrow: {
-    minWidth: 980,
+    minWidth: 1140,
   },
   tableHeadRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(1,26,107,0.10)',
-    paddingBottom: 8,
-    backgroundColor: 'rgba(1,26,107,0.06)',
+    borderBottomColor: '#EAECF0',
+    backgroundColor: '#F9FAFB',
   },
   tableHeadCell: {
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    fontWeight: '900',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    fontWeight: '600',
     fontSize: 12,
-    color: '#011a6b',
+    color: '#475467',
+    textAlign: 'left',
   },
   tableRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(1,26,107,0.10)',
-    paddingVertical: 10,
+    borderBottomColor: '#EAECF0',
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
   },
+  /** Untitled UI alternating fill */
   tableRowAlt: {
-    backgroundColor: 'rgba(2,132,199,0.05)',
+    backgroundColor: '#F9FAFB',
   },
   tableCell: {
-    paddingHorizontal: 10,
-    fontSize: 12,
-    color: '#0f172a',
-    fontWeight: '700',
+    paddingHorizontal: 16,
+    fontSize: 14,
+    color: '#101828',
+    fontWeight: '500',
   },
+  /** Arrival badge — modern w/ dot. Default is neutral; variants override. */
   arrivalBadge: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    backgroundColor: '#f1f5f9',
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#EAECF0',
+    backgroundColor: '#F2F4F7',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    marginHorizontal: 16,
   },
   arrivalBadgeOnTime: {
-    backgroundColor: '#dcfce7',
+    backgroundColor: '#ECFDF3',
+    borderColor: '#ABEFC6',
   },
   arrivalBadgeOverdue: {
-    backgroundColor: '#fee2e2',
+    backgroundColor: '#FEF3F2',
+    borderColor: '#FECDCA',
+  },
+  arrivalDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: '#475467',
+    marginRight: 6,
+    flexShrink: 0,
+  },
+  arrivalDotOnTime: {
+    backgroundColor: '#17B26A',
+  },
+  arrivalDotOverdue: {
+    backgroundColor: '#F04438',
   },
   arrivalBadgeText: {
     fontSize: 12,
-    fontWeight: '900',
-    color: '#0f172a',
+    fontWeight: '500',
+    color: '#344054',
+    flexShrink: 1,
+    minWidth: 0 as any,
+  },
+  arrivalBadgeTextOnTime: {
+    color: '#067647',
   },
   arrivalBadgeTextOverdue: {
-    color: '#b91c1c',
+    color: '#B42318',
   },
   tableHorizontalCell: {
     paddingHorizontal: 10,
@@ -1623,41 +1734,73 @@ const styles = StyleSheet.create({
   },
   noResultsTitle: {
     fontSize: 16,
-    fontWeight: '900',
-    color: '#011a6b',
+    fontWeight: '600',
+    color: '#101828',
     marginBottom: 6,
     textAlign: 'center',
   },
   noResultsText: {
-    fontSize: 13,
-    color: 'rgba(1,26,107,0.65)',
-    fontWeight: '600',
+    fontSize: 14,
+    color: '#475467',
+    fontWeight: '500',
     textAlign: 'center',
   },
 
-  cEmployee: { width: 260, flexGrow: 0 },
-  cType: { width: 140, flexGrow: 0 },
-  cDate: { width: 150, minWidth: 130, flexGrow: 0 },
-  cStatus: { width: 170, flexGrow: 0 },
-  cArrival: { width: 160, flexGrow: 0 },
-  cCampus: { width: 150, flexGrow: 0 },
-  cOffice: { width: 170, flexGrow: 0 },
+  /** Flex-based columns: ratios + minWidths so the table fills wide screens and clamps on narrow */
+  cEmployee: { flex: 2, minWidth: 180, flexBasis: 0 as any },
+  cTracking: { flex: 1.2, minWidth: 130, flexBasis: 0 as any },
+  cType: { flex: 1, minWidth: 110, flexBasis: 0 as any },
+  cDate: { flex: 1, minWidth: 100, flexBasis: 0 as any },
+  cStatus: { flex: 1.2, minWidth: 130, flexBasis: 0 as any },
+  cArrival: { flex: 1.6, minWidth: 200, flexBasis: 0 as any, overflow: 'hidden' as any },
+  cCampus: { flex: 1.2, minWidth: 120, flexBasis: 0 as any },
+  cOffice: { flex: 1.6, minWidth: 170, flexBasis: 0 as any },
 
+  /** Type badge — "BadgeWithDot modern" */
   typeBadge: {
     alignSelf: 'flex-start',
-    paddingVertical: 4,
-    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 2,
+    paddingHorizontal: 8,
     borderRadius: 999,
-    fontSize: 12,
-    fontWeight: '900',
+    borderWidth: 1,
+    maxWidth: '100%',
+    overflow: 'hidden',
+    marginHorizontal: 16,
   },
   typeBadgeSlip: {
-    backgroundColor: '#dbeafe',
-    color: '#1e40af',
+    backgroundColor: '#EFF8FF',
+    borderColor: '#B2DDFF',
   },
   typeBadgeOrder: {
-    backgroundColor: '#e0e7ff',
-    color: '#3730a3',
+    backgroundColor: '#EEF4FF',
+    borderColor: '#C7D7FE',
+  },
+  typeBadgeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 999,
+    marginRight: 6,
+    flexShrink: 0,
+  },
+  typeBadgeDotSlip: {
+    backgroundColor: '#2E90FA',
+  },
+  typeBadgeDotOrder: {
+    backgroundColor: '#6172F3',
+  },
+  typeBadgeText: {
+    fontSize: 12,
+    fontWeight: '500',
+    flexShrink: 1,
+    minWidth: 0 as any,
+  },
+  typeBadgeTextSlip: {
+    color: '#175CD3',
+  },
+  typeBadgeTextOrder: {
+    color: '#3538CD',
   },
 });
 

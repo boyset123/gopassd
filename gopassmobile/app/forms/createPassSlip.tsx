@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, Platform, Alert, Modal, Image, ImageBackground, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, Platform, Alert, Modal, Image, ImageBackground, ActivityIndicator, TouchableOpacity, KeyboardAvoidingView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
@@ -846,8 +846,15 @@ const CreatePassSlipScreen = () => {
           onChange={onChangeTime}
         />
       )}
-      <View style={styles.contentContainer}>
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.contentContainer}
+      >
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.formCard}>
           <View style={styles.formCardTopBar} />
           <View style={styles.formCardHeader}>
@@ -1056,7 +1063,7 @@ const CreatePassSlipScreen = () => {
           </View>
         </View>
       </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
     </View>
     </>
   );

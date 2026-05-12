@@ -3,7 +3,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import React, { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-import { View, ActivityIndicator, Platform, Dimensions, Pressable, StyleSheet, Alert, Text } from 'react-native';
+import { View, ActivityIndicator, Platform, Pressable, StyleSheet, Alert, Text, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -247,11 +247,12 @@ function PillTabBar({ state, descriptors, navigation, visibleTabNames }: PillTab
   const isSlipsTab = tabSegment === 'slips';
   const isSecurityTab = tabSegment === 'securityDashboard';
   const hasFAB = isSlipsTab || isSecurityTab;
-  const { width: screenWidth } = Dimensions.get('window');
+  const { width: screenWidth } = useWindowDimensions();
+  const isNarrowPhone = screenWidth < 360;
   const FAB_RIGHT_MARGIN = 20;
   const GAP = 12;
-  const PILL_LEFT_MARGIN = 20;
-  const PILL_RIGHT_MARGIN = 20;
+  const PILL_LEFT_MARGIN = isNarrowPhone ? 12 : 20;
+  const PILL_RIGHT_MARGIN = isNarrowPhone ? 12 : 20;
   const pillWidth = hasFAB
     ? screenWidth - PILL_LEFT_MARGIN - FAB_SIZE - FAB_RIGHT_MARGIN - GAP
     : screenWidth - PILL_LEFT_MARGIN - PILL_RIGHT_MARGIN;

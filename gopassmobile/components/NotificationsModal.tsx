@@ -9,7 +9,8 @@ import {
   TextInput,
   ScrollView,
   Platform,
-  Dimensions,
+  KeyboardAvoidingView,
+  useWindowDimensions,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 
@@ -114,7 +115,8 @@ export function NotificationsModal({
     return `${trimmed.slice(0, PREVIEW_MAX_LENGTH).trim()}…`;
   };
 
-  const listScrollHeight = Math.round(Dimensions.get('window').height * 0.48);
+  const { height: windowHeight } = useWindowDimensions();
+  const listScrollHeight = Math.round(windowHeight * 0.48);
 
   const handleDeleteAllPress = useCallback(() => {
     if (!onDeleteAllNotifications) return;
@@ -141,7 +143,10 @@ export function NotificationsModal({
       transparent
       onRequestClose={onClose}
     >
-      <View style={styles.modalBackdrop}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.modalBackdrop}
+      >
         <View style={styles.content}>
           <View style={styles.topBar} />
           <View style={styles.header}>
@@ -321,7 +326,7 @@ export function NotificationsModal({
             )}
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -332,13 +337,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   content: {
     backgroundColor: theme.listBackground,
     borderRadius: 20,
     width: '100%',
-    maxHeight: '85%',
+    maxWidth: 520,
+    maxHeight: '90%',
     overflow: 'hidden',
     ...Platform.select({
       ios: {

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Image, TouchableOpacity, Alert, Modal, TextInput, ImageBackground, Platform, Switch, FlatList } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Image, TouchableOpacity, Alert, Modal, TextInput, ImageBackground, Platform, Switch, FlatList, KeyboardAvoidingView } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -371,40 +371,49 @@ export default function ProfileScreen() {
         visible={isEditNameModalVisible}
         onRequestClose={() => setEditNameModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Edit Name</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholderTextColor={theme.textMuted}
-              value={firstName}
-              onChangeText={setFirstName}
-              placeholder="First Name"
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholderTextColor={theme.textMuted}
-              value={middleName}
-              onChangeText={setMiddleName}
-              placeholder="Middle Name (Optional)"
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholderTextColor={theme.textMuted}
-              value={surname}
-              onChangeText={setSurname}
-              placeholder="Surname"
-            />
-            <View style={styles.modalButtonContainer}>
-              <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setEditNameModalVisible(false)} disabled={isUpdating}>
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.modalButton, styles.saveButton]} onPress={handleUpdateName} disabled={isUpdating}>
-                {isUpdating ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Save</Text>}
-              </Pressable>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <ScrollView
+            contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Edit Name</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholderTextColor={theme.textMuted}
+                value={firstName}
+                onChangeText={setFirstName}
+                placeholder="First Name"
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholderTextColor={theme.textMuted}
+                value={middleName}
+                onChangeText={setMiddleName}
+                placeholder="Middle Name (Optional)"
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholderTextColor={theme.textMuted}
+                value={surname}
+                onChangeText={setSurname}
+                placeholder="Surname"
+              />
+              <View style={styles.modalButtonContainer}>
+                <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setEditNameModalVisible(false)} disabled={isUpdating}>
+                  <Text style={styles.modalButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[styles.modalButton, styles.saveButton]} onPress={handleUpdateName} disabled={isUpdating}>
+                  {isUpdating ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Save</Text>}
+                </Pressable>
+              </View>
             </View>
-          </View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Change Password Modal */}
@@ -414,43 +423,52 @@ export default function ProfileScreen() {
         visible={isChangePasswordModalVisible}
         onRequestClose={() => setChangePasswordModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Change Password</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholderTextColor={theme.textMuted}
-              value={currentPassword}
-              onChangeText={setCurrentPassword}
-              placeholder="Current Password"
-              secureTextEntry
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholderTextColor={theme.textMuted}
-              value={newPassword}
-              onChangeText={setNewPassword}
-              placeholder="New Password"
-              secureTextEntry
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholderTextColor={theme.textMuted}
-              value={confirmNewPassword}
-              onChangeText={setConfirmNewPassword}
-              placeholder="Confirm New Password"
-              secureTextEntry
-            />
-            <View style={styles.modalButtonContainer}>
-              <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setChangePasswordModalVisible(false)} disabled={isUpdating}>
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.modalButton, styles.saveButton]} onPress={handleChangePassword} disabled={isUpdating}>
-                {isUpdating ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Save</Text>}
-              </Pressable>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <ScrollView
+            contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Change Password</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholderTextColor={theme.textMuted}
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+                placeholder="Current Password"
+                secureTextEntry
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholderTextColor={theme.textMuted}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                placeholder="New Password"
+                secureTextEntry
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholderTextColor={theme.textMuted}
+                value={confirmNewPassword}
+                onChangeText={setConfirmNewPassword}
+                placeholder="Confirm New Password"
+                secureTextEntry
+              />
+              <View style={styles.modalButtonContainer}>
+                <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setChangePasswordModalVisible(false)} disabled={isUpdating}>
+                  <Text style={styles.modalButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[styles.modalButton, styles.saveButton]} onPress={handleChangePassword} disabled={isUpdating}>
+                  {isUpdating ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Save</Text>}
+                </Pressable>
+              </View>
             </View>
-          </View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Logout Confirmation Modal */}
@@ -951,8 +969,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
+  /** ScrollView container so input modals always scroll above the keyboard. */
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 12,
+  },
   modalContent: {
     width: '90%',
+    maxWidth: 420,
     backgroundColor: theme.surface,
     borderRadius: 16,
     padding: 20,

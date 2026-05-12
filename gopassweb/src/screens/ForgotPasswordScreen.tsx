@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Platform, Modal, ImageBackground, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, Platform, Modal, ImageBackground, ActivityIndicator } from 'react-native';
 import axios from 'axios';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { API_URL } from '../config/api';
+import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 
 const image = require('../../assets/dorsubg3.jpg');
 
@@ -18,6 +19,7 @@ interface Props {
 }
 
 const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
+  const { isCompact } = useResponsiveLayout();
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -70,7 +72,7 @@ const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
     <ImageBackground source={image} resizeMode="cover" style={styles.backgroundImage}>
       <View style={styles.overlay} />
       <View style={styles.centeredContainer}>
-        <View style={styles.formCard}>
+        <View style={[styles.formCard, isCompact && styles.formCardCompact]}>
           <Text style={styles.title}>Forgot Password</Text>
           <Text style={styles.subtitle}>Enter your email and we will send a password reset link.</Text>
 
@@ -110,27 +112,32 @@ const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={[styles.modalTitle, isModalError ? styles.modalTitleError : styles.modalTitleSuccess]}>
-              {modalTitle}
-            </Text>
-            <Text style={styles.modalMessage}>{modalMessage}</Text>
+          <View style={[styles.modalCard, isCompact && styles.modalCardCompact]}>
+            <ScrollView
+              contentContainerStyle={{ paddingBottom: 4 }}
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={[styles.modalTitle, isModalError ? styles.modalTitleError : styles.modalTitleSuccess]}>
+                {modalTitle}
+              </Text>
+              <Text style={styles.modalMessage}>{modalMessage}</Text>
 
-            {!isModalError ? (
-              <View style={styles.infoBlock}>
-                <Text style={styles.infoText}>- Check your inbox and spam/junk folder.</Text>
-                <Text style={styles.infoText}>- The reset link expires in 1 hour.</Text>
-                <Text style={styles.infoText}>- Use the latest email if you requested multiple times.</Text>
-              </View>
-            ) : (
-              <View style={styles.infoBlock}>
-                <Text style={styles.infoText}>- Confirm the email format is correct.</Text>
-                <Text style={styles.infoText}>- Make sure your internet connection is stable.</Text>
-                <Text style={styles.infoText}>- Try again in a few moments.</Text>
-              </View>
-            )}
+              {!isModalError ? (
+                <View style={styles.infoBlock}>
+                  <Text style={styles.infoText}>- Check your inbox and spam/junk folder.</Text>
+                  <Text style={styles.infoText}>- The reset link expires in 1 hour.</Text>
+                  <Text style={styles.infoText}>- Use the latest email if you requested multiple times.</Text>
+                </View>
+              ) : (
+                <View style={styles.infoBlock}>
+                  <Text style={styles.infoText}>- Confirm the email format is correct.</Text>
+                  <Text style={styles.infoText}>- Make sure your internet connection is stable.</Text>
+                  <Text style={styles.infoText}>- Try again in a few moments.</Text>
+                </View>
+              )}
+            </ScrollView>
 
-            <View style={styles.modalButtonRow}>
+            <View style={[styles.modalButtonRow, isCompact && styles.modalButtonRowCompact]}>
               {!isModalError ? (
                 <Pressable
                   style={[styles.modalButton, styles.modalSecondaryButton]}
@@ -174,6 +181,7 @@ const styles = StyleSheet.create({
   formCard: {
     width: '92%',
     maxWidth: 440,
+    maxHeight: '92%',
     backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 28,
@@ -184,6 +192,11 @@ const styles = StyleSheet.create({
         boxShadow: '0 18px 40px rgba(1, 26, 107, 0.2), 0 0 0 1px rgba(1, 26, 107, 0.08)',
       },
     }),
+  },
+  formCardCompact: {
+    width: '94%',
+    padding: 20,
+    borderRadius: 12,
   },
   title: {
     fontSize: 26,
@@ -238,14 +251,20 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   modalCard: {
     width: '100%',
     maxWidth: 460,
+    maxHeight: '90%',
     backgroundColor: '#ffffff',
     borderRadius: 14,
     padding: 20,
+  },
+  modalCardCompact: {
+    padding: 16,
+    borderRadius: 12,
   },
   modalTitle: {
     fontSize: 22,
@@ -280,7 +299,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 10,
+  },
+  modalButtonRowCompact: {
+    marginTop: 12,
+    justifyContent: 'center',
   },
   modalButton: {
     minWidth: 112,

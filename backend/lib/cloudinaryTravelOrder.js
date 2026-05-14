@@ -60,8 +60,62 @@ function uploadTravelOrderAttachment(buffer, opts) {
 }
 
 /**
+ * Primary then alternate Cloudinary resource_type (handles bad or missing `resourceType` on old rows).
+ *
+ * @param {{ resourceType?: string; contentType?: string }} doc
+ * @returns {('image' | 'raw')[]}
+ */
+function resourceTypesToTry(doc) {
+  const primary =
+    doc.resourceType === 'image' || doc.resourceType === 'raw'
+      ? doc.resourceType
+      : resourceTypeForMime(doc.contentType);
+  const secondary = primary === 'image' ? 'raw' : 'image';
+  if (primary === secondary) return [primary];
+  return [primary, secondary];
+}
+
+/**
+ * Admin API: resolve canonical delivery URL (includes version segment). Tries resource_type
+ * candidates in order (wrong type returns 404 from Admin API).
+ *
+ * @param {string} publicId
+ * @param {('image' | 'raw')[]} resourceTypesInOrder
+ * @returns {Promise<string | null>}
+ */
+function resourceSecureUrlFromAdmin(publicId, resourceTypesInOrder) {
+  applyConfig();
+  const id = String(publicId || '').trim();
+  if (!id) return Promise.resolve(null);
+  const types =
+    Array.isArray(resourceTypesInOrder) && resourceTypesInOrder.length > 0
+      ? [...new Set(resourceTypesInOrder)]
+      : ['image', 'raw'];
+
+  return new Promise((resolve) => {
+    let i = 0;
+    function tryNext() {
+      if (i >= types.length) {
+        resolve(null);
+        return;
+      }
+      const rt = types[i++];
+      cloudinary.api.resource(id, { resource_type: rt }, (err, result) => {
+        if (!err && result && (result.secure_url || result.url)) {
+          const u = result.secure_url || result.url;
+          resolve(typeof u === 'string' ? u.replace(/^http:\/\//i, 'https://') : null);
+          return;
+        }
+        tryNext();
+      });
+    }
+    tryNext();
+  });
+}
+
+/**
  * Delivery URLs to try when fetching an asset from Cloudinary (server-side only).
- * Tries signed first (works when unsigned delivery is restricted), then unsigned.
+ * Tries signed first, then unsigned.
  *
  * @param {string} publicId
  * @param {'image' | 'raw'} resourceType
@@ -116,9 +170,11 @@ function destroyTravelOrderUpload(publicId, resourceType) {
 module.exports = {
   isConfigured,
   resourceTypeForMime,
+  resourceTypesToTry,
   uploadTravelOrderAttachment,
   assetDeliveryUrl,
   assetDeliveryUrlsToTry,
+  resourceSecureUrlFromAdmin,
   signedDeliveryUrl,
   destroyTravelOrderUpload,
 };

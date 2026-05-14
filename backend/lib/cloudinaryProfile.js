@@ -12,7 +12,33 @@ function isConfigured() {
 }
 
 function applyConfig() {
-  if (process.env.CLOUDINARY_URL) {
+  const conn = process.env.CLOUDINARY_URL;
+  if (conn && String(conn).trim().startsWith('cloudinary://')) {
+    const withoutScheme = String(conn).trim().replace(/^cloudinary:\/\//, '');
+    const atIdx = withoutScheme.lastIndexOf('@');
+    if (atIdx > 0) {
+      const cloudName = withoutScheme.slice(atIdx + 1).split('?')[0];
+      const pair = withoutScheme.slice(0, atIdx);
+      const colonIdx = pair.indexOf(':');
+      const apiKey = colonIdx >= 0 ? pair.slice(0, colonIdx) : pair;
+      const apiSecret = colonIdx >= 0 ? pair.slice(colonIdx + 1) : '';
+      if (cloudName && apiKey && apiSecret) {
+        cloudinary.config({
+          cloud_name: cloudName,
+          api_key: apiKey,
+          api_secret: apiSecret,
+          secure: true,
+        });
+        return;
+      }
+    }
+  }
+  if (conn && String(conn).trim()) {
+    try {
+      cloudinary.config(String(conn).trim());
+    } catch (e) {
+      console.warn('CLOUDINARY_URL cloudinary.config failed:', e?.message || e);
+    }
     return;
   }
   cloudinary.config({

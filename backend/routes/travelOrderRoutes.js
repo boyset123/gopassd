@@ -16,7 +16,8 @@ const {
   isConfigured: isCloudinaryForTravelOrdersConfigured,
   uploadTravelOrderAttachment,
   assetDeliveryUrlsToTry,
-  resourceTypeForMime,
+  resourceSecureUrlFromAdmin,
+  resourceTypesToTry,
   destroyTravelOrderUpload,
 } = require('../lib/cloudinaryTravelOrder');
 const { proxyHttpUrlToExpressResponse } = require('../utils/proxyHttpUrlToExpressResponse');
@@ -1091,31 +1092,43 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
       if (!isCloudinaryForTravelOrdersConfigured()) {
         return res.status(503).json({ message: 'Cloudinary is not configured; cannot serve this attachment.' });
       }
-      const rt =
-        doc.resourceType === 'image' || doc.resourceType === 'raw'
-          ? doc.resourceType
-          : resourceTypeForMime(doc.contentType);
-      const urls = assetDeliveryUrlsToTry(doc.publicId, rt);
+      const rtList = resourceTypesToTry(doc);
       const rawName = doc.name || 'attachment';
       const filename = String(rawName).replace(/[^\w.\- ]+/g, '_').slice(0, 200);
+      const proxyOpts = {
+        filename,
+        fallbackContentType: doc.contentType || 'application/octet-stream',
+      };
       let lastErr;
-      for (const url of urls) {
-        try {
-          await proxyHttpUrlToExpressResponse(url, res, {
-            filename,
-            fallbackContentType: doc.contentType || 'application/octet-stream',
-          });
-          return;
-        } catch (err) {
-          lastErr = err;
-          if (res.headersSent) {
-            console.error('Cloudinary attachment proxy failed mid-stream:', err?.message || err);
+      for (const rtt of rtList) {
+        for (const url of assetDeliveryUrlsToTry(doc.publicId, rtt)) {
+          try {
+            await proxyHttpUrlToExpressResponse(url, res, proxyOpts);
             return;
+          } catch (err) {
+            lastErr = err;
+            if (res.headersSent) {
+              console.error('Cloudinary attachment proxy failed mid-stream:', err?.message || err);
+              return;
+            }
           }
         }
       }
+      try {
+        const adminUrl = await resourceSecureUrlFromAdmin(String(doc.publicId).trim(), rtList);
+        if (adminUrl) {
+          await proxyHttpUrlToExpressResponse(adminUrl, res, proxyOpts);
+          return;
+        }
+      } catch (err) {
+        lastErr = err;
+        if (res.headersSent) {
+          console.error('Cloudinary admin URL resolve failed mid-stream:', err?.message || err);
+          return;
+        }
+      }
       console.error(
-        'Cloudinary attachment proxy failed (all URLs):',
+        'Cloudinary attachment proxy failed (all strategies):',
         lastErr?.message || lastErr,
         lastErr?.statusCode != null ? `(upstream ${lastErr.statusCode})` : ''
       );

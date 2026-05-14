@@ -20,15 +20,22 @@ function travelOrderToClientJson(doc) {
     return false;
   };
 
+  const hasCloudinaryRef = (d) => {
+    const pid = d?.publicId;
+    return typeof pid === 'string' && pid.trim().length > 0;
+  };
+
+  const slotHasAttachment = (d) => hasBufferData(d?.data) || hasCloudinaryRef(d);
+
   const rawDocuments = Array.isArray(o.documents) ? o.documents : [];
 
   if (rawDocuments.length > 0) {
     for (const d of rawDocuments) {
       if (!d) continue;
-      const { data: _data, ...meta } = d;
-      const hadBinary = hasBufferData(_data);
-      const name = meta.name || (hadBinary ? 'attachment' : '');
-      const contentType = meta.contentType || (hadBinary ? 'application/octet-stream' : '');
+      if (!slotHasAttachment(d)) continue;
+      const { data: _data, publicId: _pid, resourceType: _rt, format: _fmt, ...meta } = d;
+      const name = meta.name || 'attachment';
+      const contentType = meta.contentType || 'application/octet-stream';
       if (name || contentType) metaList.push({ name, contentType });
     }
     // If list queries stripped subdoc fields but slots still exist, keep one client row per file
@@ -39,11 +46,11 @@ function travelOrderToClientJson(doc) {
         contentType: 'application/octet-stream',
       });
     }
-  } else if (o.document) {
-    const { data: _data, ...meta } = o.document;
-    const hadBinary = hasBufferData(_data);
-    const name = meta.name || (hadBinary ? 'attachment' : '');
-    const contentType = meta.contentType || (hadBinary ? 'application/octet-stream' : '');
+  } else if (o.document && slotHasAttachment(o.document)) {
+    const d = o.document;
+    const { data: _data, publicId: _pid, resourceType: _rt, format: _fmt, ...meta } = d;
+    const name = meta.name || 'attachment';
+    const contentType = meta.contentType || 'application/octet-stream';
     if (name || contentType) metaList.push({ name, contentType });
   }
 

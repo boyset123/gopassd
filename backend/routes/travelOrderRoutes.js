@@ -11,6 +11,14 @@ const { getEffectiveSigner, toIdString } = require('../utils/oic');
 const { travelOrderToClientJson, travelOrdersToClientJson } = require('../utils/travelOrderSerialize');
 const multer = require('multer');
 const storage = multer.memoryStorage();
+const mongoose = require('mongoose');
+const {
+  isConfigured: isCloudinaryForTravelOrdersConfigured,
+  uploadTravelOrderAttachment,
+  signedDeliveryUrl,
+  resourceTypeForMime,
+  destroyTravelOrderUpload,
+} = require('../lib/cloudinaryTravelOrder');
 
 const ALLOWED_SUPPORTING_MIMES = new Set([
   'image/jpeg',
@@ -230,19 +238,62 @@ router.post(
     }
 
     if (fileList.length > 0) {
+      if (!isCloudinaryForTravelOrdersConfigured()) {
+        return res.status(503).json({
+          message:
+            'Supporting file uploads require Cloudinary. Set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.',
+        });
+      }
+      const orderId = new mongoose.Types.ObjectId();
+      travelOrderData._id = orderId;
       travelOrderData.documents = [];
+      let fileIndex = 0;
       for (const file of fileList) {
         const mt = normalizeSupportingMime(file);
         if (!ALLOWED_SUPPORTING_MIMES.has(mt)) {
+          for (const d of travelOrderData.documents) {
+            if (d.publicId) {
+              try {
+                await destroyTravelOrderUpload(d.publicId, d.resourceType);
+              } catch (e) {
+                console.warn('Cloudinary rollback destroy failed:', e?.message || e);
+              }
+            }
+          }
           return res.status(400).json({
             message: 'Only PDF, Word (.docx), and image files are allowed for supporting documents.',
           });
         }
-        travelOrderData.documents.push({
-          data: file.buffer,
-          contentType: mt,
-          name: file.originalname,
-        });
+        try {
+          const uploaded = await uploadTravelOrderAttachment(file.buffer, {
+            orderId: orderId.toString(),
+            fileIndex,
+            mimeType: mt,
+            originalName: file.originalname,
+          });
+          travelOrderData.documents.push({
+            publicId: uploaded.publicId,
+            resourceType: uploaded.resourceType,
+            format: uploaded.format,
+            contentType: mt,
+            name: file.originalname,
+          });
+        } catch (uploadErr) {
+          console.error('Cloudinary travel-order upload failed:', uploadErr);
+          for (const d of travelOrderData.documents) {
+            if (d.publicId) {
+              try {
+                await destroyTravelOrderUpload(d.publicId, d.resourceType);
+              } catch (e) {
+                console.warn('Cloudinary rollback destroy failed:', e?.message || e);
+              }
+            }
+          }
+          return res.status(502).json({
+            message: 'Could not store supporting files. Try again later or contact support.',
+          });
+        }
+        fileIndex += 1;
       }
     }
 
@@ -1017,7 +1068,7 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
       for (const d of travelOrder.documents) {
         if (d) fileSlots.push(d);
       }
-    } else if (travelOrder.document && travelOrder.document.data) {
+    } else if (travelOrder.document && (travelOrder.document.data || travelOrder.document.publicId)) {
       fileSlots.push(travelOrder.document);
     }
 
@@ -1026,14 +1077,30 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
     }
 
     const doc = fileSlots[index];
-    const buf = doc && doc.data;
-    if (!buf || (Buffer.isBuffer(buf) ? buf.length === 0 : !buf.length)) {
+    if (!doc) {
       return res.status(404).json({ message: 'Supporting file not found at this index.' });
     }
 
     const allowed = await canViewSupportingDocument(req.user, travelOrder);
     if (!allowed) {
       return res.status(403).json({ message: 'Not authorized to view this supporting document.' });
+    }
+
+    if (doc.publicId && String(doc.publicId).trim()) {
+      if (!isCloudinaryForTravelOrdersConfigured()) {
+        return res.status(503).json({ message: 'Cloudinary is not configured; cannot serve this attachment.' });
+      }
+      const rt =
+        doc.resourceType === 'image' || doc.resourceType === 'raw'
+          ? doc.resourceType
+          : resourceTypeForMime(doc.contentType);
+      const url = signedDeliveryUrl(doc.publicId, rt);
+      return res.redirect(302, url);
+    }
+
+    const buf = doc.data;
+    if (!buf || (Buffer.isBuffer(buf) ? buf.length === 0 : !buf.length)) {
+      return res.status(404).json({ message: 'Supporting file not found at this index.' });
     }
 
     const rawName = doc.name || 'attachment';

@@ -53,4 +53,4 @@ function uploadProfileImage(buffer, userId) {
   });
 }
 
-module.exports = { cloudinary, isConfigured, uploadProfileImage };
+module.exports = { cloudinary, isConfigured, applyConfig, uploadProfileImage };

@@ -56,9 +56,28 @@ const travelOrderSchema = new mongoose.Schema({
   longitude: { type: Number },
   routePolyline: { type: String },
   participants: [{ type: String }],
-  /** @deprecated Prefer `documents`; kept for existing records. */
-  document: { data: Buffer, contentType: String, name: String },
-  documents: [{ data: Buffer, contentType: String, name: String }],
+  /**
+   * Legacy single attachment. Either `data` (Buffer, old rows) or `publicId` (Cloudinary).
+   * @deprecated Prefer `documents`.
+   */
+  document: {
+    data: { type: Buffer, required: false },
+    publicId: { type: String, required: false },
+    resourceType: { type: String, enum: ['image', 'raw'], required: false },
+    contentType: String,
+    name: String,
+  },
+  /** Supporting files: legacy `data` Buffer and/or Cloudinary `publicId` + `resourceType`. */
+  documents: [
+    {
+      data: { type: Buffer, required: false },
+      publicId: { type: String, required: false },
+      resourceType: { type: String, enum: ['image', 'raw'], required: false },
+      format: { type: String, required: false },
+      contentType: String,
+      name: String,
+    },
+  ],
   rejectionReason: { type: String },
   createdAt: { type: Date, default: Date.now },
 });

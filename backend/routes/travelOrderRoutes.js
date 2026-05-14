@@ -15,7 +15,7 @@ const mongoose = require('mongoose');
 const {
   isConfigured: isCloudinaryForTravelOrdersConfigured,
   uploadTravelOrderAttachment,
-  assetDeliveryUrl,
+  assetDeliveryUrlsToTry,
   resourceTypeForMime,
   destroyTravelOrderUpload,
 } = require('../lib/cloudinaryTravelOrder');
@@ -1095,24 +1095,32 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
         doc.resourceType === 'image' || doc.resourceType === 'raw'
           ? doc.resourceType
           : resourceTypeForMime(doc.contentType);
-      const url = assetDeliveryUrl(doc.publicId, rt);
+      const urls = assetDeliveryUrlsToTry(doc.publicId, rt);
       const rawName = doc.name || 'attachment';
       const filename = String(rawName).replace(/[^\w.\- ]+/g, '_').slice(0, 200);
-      try {
-        await proxyHttpUrlToExpressResponse(url, res, {
-          filename,
-          fallbackContentType: doc.contentType || 'application/octet-stream',
-        });
-        return;
-      } catch (err) {
-        console.error(
-          'Cloudinary attachment proxy failed:',
-          err?.message || err,
-          err?.statusCode != null ? `(upstream ${err.statusCode})` : ''
-        );
-        if (!res.headersSent) {
-          return res.status(502).json({ message: 'Could not retrieve attachment from storage.' });
+      let lastErr;
+      for (const url of urls) {
+        try {
+          await proxyHttpUrlToExpressResponse(url, res, {
+            filename,
+            fallbackContentType: doc.contentType || 'application/octet-stream',
+          });
+          return;
+        } catch (err) {
+          lastErr = err;
+          if (res.headersSent) {
+            console.error('Cloudinary attachment proxy failed mid-stream:', err?.message || err);
+            return;
+          }
         }
+      }
+      console.error(
+        'Cloudinary attachment proxy failed (all URLs):',
+        lastErr?.message || lastErr,
+        lastErr?.statusCode != null ? `(upstream ${lastErr.statusCode})` : ''
+      );
+      if (!res.headersSent) {
+        return res.status(502).json({ message: 'Could not retrieve attachment from storage.' });
       }
       return;
     }

@@ -60,20 +60,33 @@ function uploadTravelOrderAttachment(buffer, opts) {
 }
 
 /**
- * HTTPS delivery URL for an uploaded asset (used only from this server after auth).
- * Uses unsigned URLs, which match default public Cloudinary uploads and avoid
- * signature / expires_at mismatches that caused upstream 401 and client 502.
+ * Delivery URLs to try when fetching an asset from Cloudinary (server-side only).
+ * Tries signed first (works when unsigned delivery is restricted), then unsigned.
  *
- * @param {string} publicId Full Cloudinary public_id (includes folder path)
+ * @param {string} publicId
  * @param {'image' | 'raw'} resourceType
- * @returns {string}
+ * @returns {string[]}
  */
-function assetDeliveryUrl(publicId, resourceType) {
+function assetDeliveryUrlsToTry(publicId, resourceType) {
   applyConfig();
-  return cloudinary.url(String(publicId || '').trim(), {
+  const id = String(publicId || '').trim();
+  const signed = cloudinary.url(id, {
+    resource_type: resourceType,
+    secure: true,
+    sign_url: true,
+  });
+  const unsigned = cloudinary.url(id, {
     resource_type: resourceType,
     secure: true,
   });
+  return signed === unsigned ? [signed] : [signed, unsigned];
+}
+
+/**
+ * @deprecated Prefer assetDeliveryUrlsToTry; kept for callers that need a single URL.
+ */
+function assetDeliveryUrl(publicId, resourceType) {
+  return assetDeliveryUrlsToTry(publicId, resourceType)[0];
 }
 
 /**
@@ -105,6 +118,7 @@ module.exports = {
   resourceTypeForMime,
   uploadTravelOrderAttachment,
   assetDeliveryUrl,
+  assetDeliveryUrlsToTry,
   signedDeliveryUrl,
   destroyTravelOrderUpload,
 };

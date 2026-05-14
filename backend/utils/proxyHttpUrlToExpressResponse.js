@@ -1,14 +1,15 @@
-const { pipeline } = require('stream/promises');
-const { Readable } = require('stream');
-const http = require('http');
-const https = require('https');
+const http = require('http');const https = require('https');
 const { URL } = require('url');
 
+/** Max bytes to buffer when proxying (travel supporting files are capped at 5 MB each in routes). */
+const PROXY_MAX_BYTES = 12 * 1024 * 1024;
+
 /**
- * GET urlString (following redirects) and stream the final 200 body to an Express response.
- * Used so clients (e.g. WebView / File.downloadFileAsync) get one 200 + bytes from our API.
+ * GET urlString (following redirects) and send the final 200 body to an Express response.
+ * Used so clients (e.g. mobile fetch) get one 200 + bytes from our API.
  *
- * Prefers global fetch (Node 18+) for redirect handling; falls back to https.get loop.
+ * Buffers the upstream body up to PROXY_MAX_BYTES for reliability (avoids stream/pipeline
+ * issues between undici fetch and Express in some Node versions).
  *
  * @param {string} urlString
  * @param {import('express').Response} expressRes
@@ -18,33 +19,41 @@ async function proxyHttpUrlToExpressResponse(urlString, expressRes, opts) {
   const { filename, fallbackContentType } = opts;
 
   if (typeof globalThis.fetch === 'function') {
-    const res = await globalThis.fetch(urlString, {
+    const response = await globalThis.fetch(urlString, {
       redirect: 'follow',
       headers: { 'User-Agent': 'GOPASS-travel-order/1.0', Accept: '*/*' },
     });
 
-    if (!res.ok) {
-      const err = new Error(`Upstream HTTP ${res.status}`);
-      err.statusCode = res.status;
+    if (!response.ok) {
+      const err = new Error(`Upstream HTTP ${response.status}`);
+      err.statusCode = response.status;
       throw err;
     }
 
-    const rawCt = res.headers.get('content-type');
+    const lenHeader = response.headers.get('content-length');
+    if (lenHeader) {
+      const n = parseInt(lenHeader, 10);
+      if (Number.isFinite(n) && n > PROXY_MAX_BYTES) {
+        const err = new Error(`Upstream body too large (${n} bytes)`);
+        err.statusCode = 413;
+        throw err;
+      }
+    }
+
+    const ab = await response.arrayBuffer();
+    if (ab.byteLength > PROXY_MAX_BYTES) {
+      const err = new Error(`Upstream body too large (${ab.byteLength} bytes)`);
+      err.statusCode = 413;
+      throw err;
+    }
+
+    const rawCt = response.headers.get('content-type');
     const ct =
       (rawCt && String(rawCt).split(';')[0].trim()) ||
       fallbackContentType ||
       'application/octet-stream';
     expressRes.setHeader('Content-Type', ct);
     expressRes.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-
-    const body = res.body;
-    if (body && typeof Readable.fromWeb === 'function') {
-      const nodeReadable = Readable.fromWeb(body);
-      await pipeline(nodeReadable, expressRes);
-      return;
-    }
-
-    const ab = await res.arrayBuffer();
     expressRes.send(Buffer.from(ab));
     return;
   }
@@ -52,8 +61,7 @@ async function proxyHttpUrlToExpressResponse(urlString, expressRes, opts) {
   let current = urlString;
   for (let hop = 0; hop < 12; hop += 1) {
     const incoming = await new Promise((resolve, reject) => {
-      const u = new URL(current);
-      const lib = u.protocol === 'https:' ? https : http;
+      const lib = new URL(current).protocol === 'https:' ? https : http;
       const req = lib.get(
         current,
         { headers: { 'User-Agent': 'GOPASS-travel-order/1.0' } },
@@ -86,7 +94,19 @@ async function proxyHttpUrlToExpressResponse(urlString, expressRes, opts) {
     expressRes.setHeader('Content-Type', ct);
     expressRes.setHeader('Content-Disposition', `inline; filename="${filename}"`);
 
-    await pipeline(incoming, expressRes);
+    const chunks = [];
+    for await (const chunk of incoming) {
+      chunks.push(chunk);
+      let total = 0;
+      for (const c of chunks) total += c.length;
+      if (total > PROXY_MAX_BYTES) {
+        incoming.destroy();
+        const err = new Error('Upstream body too large');
+        err.statusCode = 413;
+        throw err;
+      }
+    }
+    expressRes.send(Buffer.concat(chunks));
     return;
   }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import { Buffer } from 'buffer';
 import { WebView } from 'react-native-webview';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -82,6 +84,30 @@ function isWordAttachment(contentType: string | undefined, fileName: string | un
   const ct = (contentType || '').toLowerCase();
   return ct.includes('wordprocessingml') || ct.includes('officedocument') || nameLower.endsWith('.docx');
 }
+
+/** Extension for a cached preview file (max size bounded by API upload limits). */
+function cacheExtFromMeta(contentType: string | undefined, fileName: string | undefined): string {
+  const nameLower = (fileName || '').toLowerCase();
+  const ct = (contentType || '').toLowerCase();
+  if (ct.includes('pdf') || nameLower.endsWith('.pdf')) return 'pdf';
+  if (nameLower.endsWith('.png')) return 'png';
+  if (nameLower.endsWith('.webp')) return 'webp';
+  if (nameLower.endsWith('.gif')) return 'gif';
+  if (ct.includes('jpeg') || ct.includes('jpg') || nameLower.endsWith('.jpg') || nameLower.endsWith('.jpeg'))
+    return 'jpg';
+  return 'bin';
+}
+
+function toFileWebviewUri(localPath: string): string {
+  if (localPath.startsWith('file:')) return localPath;
+  const normalized = localPath.startsWith('/') ? localPath : `/${localPath}`;
+  return `file://${normalized}`;
+}
+
+type SupportingViewerState =
+  | null
+  | { status: 'loading'; title: string }
+  | { status: 'ready'; title: string; filePath: string };
 
 interface TravelOrderFormProps {
   order: TravelOrder;
@@ -158,15 +184,28 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
 
   const [generatedTravelOrderNo, setGeneratedTravelOrderNo] = useState<string>('');
   const [openingSupportingIndex, setOpeningSupportingIndex] = useState<number | null>(null);
-  const [supportingViewer, setSupportingViewer] = useState<{
-    uri: string;
-    headers: Record<string, string>;
-    title: string;
-  } | null>(null);
+  const [supportingViewer, setSupportingViewer] = useState<SupportingViewerState>(null);
 
   const attachmentMeta = useMemo(() => supportingAttachmentMetaList(order), [order]);
 
   const hasSupportingDocument = attachmentMeta.length > 0;
+
+  const supportingFetchAbortRef = useRef<AbortController | null>(null);
+
+  const closeSupportingViewer = useCallback(() => {
+    supportingFetchAbortRef.current?.abort();
+    supportingFetchAbortRef.current = null;
+    setSupportingViewer((prev) => {
+      if (
+        prev?.status === 'ready' &&
+        FileSystem.cacheDirectory &&
+        prev.filePath.startsWith(FileSystem.cacheDirectory)
+      ) {
+        void FileSystem.deleteAsync(prev.filePath, { idempotent: true }).catch(() => {});
+      }
+      return null;
+    });
+  }, []);
 
   const openSupportingDocumentAtIndex = useCallback(
     async (fileIndex: number) => {
@@ -179,27 +218,68 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
         );
         return;
       }
+      const title = meta.name || `Attachment ${fileIndex + 1}`;
+      setSupportingViewer({ status: 'loading', title });
       setOpeningSupportingIndex(fileIndex);
       try {
         const token = await AsyncStorage.getItem('userToken');
         if (!token) {
+          closeSupportingViewer();
           Alert.alert('Session', 'You are not logged in.');
           return;
         }
         const url = `${API_URL}/travel-orders/${order._id}/supporting-document?index=${fileIndex}`;
-        setSupportingViewer({
-          uri: url,
+        const ext = cacheExtFromMeta(meta.contentType, meta.name);
+        const cacheRoot = FileSystem.cacheDirectory;
+        if (!cacheRoot) {
+          closeSupportingViewer();
+          Alert.alert('Preview', 'This device has no cache directory; preview is unavailable.');
+          return;
+        }
+        const filePath = `${cacheRoot}travel-support-${order._id}-${fileIndex}.${ext}`;
+
+        supportingFetchAbortRef.current?.abort();
+        const ac = new AbortController();
+        supportingFetchAbortRef.current = ac;
+
+        const res = await fetch(url, {
           headers: { 'x-auth-token': token },
-          title: meta.name || `Attachment ${fileIndex + 1}`,
+          signal: ac.signal,
         });
-      } catch (e) {
+        if (!res.ok) {
+          let detail = '';
+          try {
+            detail = (await res.text()).trim().slice(0, 240);
+          } catch {
+            /* ignore */
+          }
+          closeSupportingViewer();
+          Alert.alert(
+            'Could not load',
+            detail
+              ? `Server responded (${res.status}): ${detail}`
+              : `HTTP ${res.status}. You may not have permission to view this file, or it may be missing.`
+          );
+          return;
+        }
+
+        const ab = await res.arrayBuffer();
+        const b64 = Buffer.from(new Uint8Array(ab)).toString('base64');
+        await FileSystem.writeAsStringAsync(filePath, b64, { encoding: FileSystem.EncodingType.Base64 });
+        setSupportingViewer({ status: 'ready', title, filePath });
+      } catch (e: unknown) {
+        if (e && typeof e === 'object' && 'name' in e && (e as { name?: string }).name === 'AbortError') {
+          return;
+        }
         console.error(e);
-        Alert.alert('Error', 'Could not open the supporting document.');
+        closeSupportingViewer();
+        Alert.alert('Could not load', 'The file could not be downloaded for preview. Check your connection and try again.');
       } finally {
+        supportingFetchAbortRef.current = null;
         setOpeningSupportingIndex(null);
       }
     },
-    [order._id, attachmentMeta]
+    [order._id, attachmentMeta, closeSupportingViewer]
   );
 
   const dateForNo = useMemo(() => {
@@ -519,29 +599,37 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
       visible={supportingViewer !== null}
       animationType="slide"
       presentationStyle="fullScreen"
-      onRequestClose={() => setSupportingViewer(null)}
+      onRequestClose={closeSupportingViewer}
     >
       <SafeAreaView style={styles.supportingViewerRoot} edges={['top', 'left', 'right']}>
         <View style={styles.supportingViewerToolbar}>
           <Text style={styles.supportingViewerTitle} numberOfLines={1}>
-            {supportingViewer?.title}
+            {supportingViewer?.status === 'loading' || supportingViewer?.status === 'ready'
+              ? supportingViewer.title
+              : ''}
           </Text>
           <Pressable
-            onPress={() => setSupportingViewer(null)}
+            onPress={closeSupportingViewer}
             hitSlop={12}
             style={({ pressed }) => [styles.supportingViewerCloseBtn, pressed && { opacity: 0.75 }]}
           >
             <Text style={styles.supportingViewerCloseText}>Close</Text>
           </Pressable>
         </View>
-        {supportingViewer ? (
+        {supportingViewer?.status === 'loading' ? (
+          <View style={styles.supportingViewerBodyLoading}>
+            <ActivityIndicator size="large" color="#011a6b" />
+            <Text style={styles.supportingLoadingHint}>Loading preview…</Text>
+          </View>
+        ) : supportingViewer?.status === 'ready' ? (
           <WebView
             style={styles.supportingWebView}
-            source={{ uri: supportingViewer.uri, headers: supportingViewer.headers }}
+            source={{ uri: toFileWebviewUri(supportingViewer.filePath) }}
             originWhitelist={['*']}
             startInLoadingState
             allowsInlineMediaPlayback
             mixedContentMode="always"
+            allowingReadAccessToURL={Platform.OS === 'ios' ? FileSystem.cacheDirectory ?? undefined : undefined}
             androidLayerType={Platform.OS === 'android' ? 'hardware' : undefined}
             renderLoading={() => (
               <View style={styles.supportingWebViewLoading}>
@@ -551,16 +639,13 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
             onHttpError={(e) => {
               const code = e.nativeEvent.statusCode;
               if (code >= 400) {
-                Alert.alert(
-                  'Could not load',
-                  `The server returned HTTP ${code}. You may not have permission to view this file, or it may be missing.`
-                );
-                setSupportingViewer(null);
+                Alert.alert('Could not load', `The preview could not be shown (HTTP ${code}).`);
+                closeSupportingViewer();
               }
             }}
             onError={() => {
-              Alert.alert('Could not load', 'The file could not be displayed in the preview.');
-              setSupportingViewer(null);
+              Alert.alert('Could not load', 'The preview could not be displayed. Try opening a PDF or image file.');
+              closeSupportingViewer();
             }}
           />
         ) : null}
@@ -855,11 +940,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
+  supportingViewerBodyLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+  },
   supportingWebViewLoading: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f8fafc',
+  },
+  supportingLoadingHint: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#475569',
   },
   signatureSection: {
     marginTop: 10,

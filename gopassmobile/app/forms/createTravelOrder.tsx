@@ -579,39 +579,74 @@ const CreateTravelOrderScreen = () => {
         return;
       }
 
-      const formData = new FormData();
-      formData.append('employeeAddress', employeeAddress);
-      formData.append('travelOrderNo', travelOrderNo ?? '');
-      formData.append('date', toISOStringAtMinute(date));
-      formData.append('address', address);
-      formData.append('salary', salary ?? '');
-      formData.append('to', address);
-      formData.append('purpose', purpose);
-      formData.append('departureDate', toISOStringAtMinute(departureDate));
-      formData.append('arrivalDate', toISOStringAtMinute(arrivalDate));
-      formData.append('additionalInfo', additionalInfo ?? '');
-      formData.append('recommendedBy', JSON.stringify(recommenders.map(r => r.id).filter(id => id)));
-      formData.append('participants', JSON.stringify(participants.filter(p => p.trim() !== '')));
-      if (location?.latitude != null && location?.longitude != null) {
-        formData.append('latitude', String(location.latitude));
-        formData.append('longitude', String(location.longitude));
-      }
-      if (routePolyline) {
-        formData.append('routePolyline', routePolyline);
-      }
-      for (const f of supportingFiles) {
-        formData.append('documents', {
-          uri: f.uri,
-          name: f.name,
-          type: f.mimeType,
-        } as any);
-      }
+      const recommenderPayload = JSON.stringify(recommenders.map((r) => r.id).filter((id) => id));
+      const participantsPayload = JSON.stringify(participants.filter((p) => p.trim() !== ''));
 
-      await axios.post(`${API_URL}/travel-orders`, formData, {
-        headers: {
-          'x-auth-token': token,
-        },
-      });
+      if (supportingFiles.length === 0) {
+        const body: Record<string, string> = {
+          employeeAddress,
+          travelOrderNo: travelOrderNo ?? '',
+          date: toISOStringAtMinute(date),
+          address,
+          salary: salary ?? '',
+          to: address,
+          purpose,
+          departureDate: toISOStringAtMinute(departureDate),
+          arrivalDate: toISOStringAtMinute(arrivalDate),
+          additionalInfo: additionalInfo ?? '',
+          recommendedBy: recommenderPayload,
+          participants: participantsPayload,
+        };
+        if (location?.latitude != null && location?.longitude != null) {
+          body.latitude = String(location.latitude);
+          body.longitude = String(location.longitude);
+        }
+        if (routePolyline) body.routePolyline = routePolyline;
+
+        await axios.post(`${API_URL}/travel-orders`, body, {
+          headers: {
+            'Content-Type': 'application/json',
+            'x-auth-token': token,
+          },
+          timeout: 60000,
+        });
+      } else {
+        const formData = new FormData();
+        formData.append('employeeAddress', employeeAddress);
+        formData.append('travelOrderNo', travelOrderNo ?? '');
+        formData.append('date', toISOStringAtMinute(date));
+        formData.append('address', address);
+        formData.append('salary', salary ?? '');
+        formData.append('to', address);
+        formData.append('purpose', purpose);
+        formData.append('departureDate', toISOStringAtMinute(departureDate));
+        formData.append('arrivalDate', toISOStringAtMinute(arrivalDate));
+        formData.append('additionalInfo', additionalInfo ?? '');
+        formData.append('recommendedBy', recommenderPayload);
+        formData.append('participants', participantsPayload);
+        if (location?.latitude != null && location?.longitude != null) {
+          formData.append('latitude', String(location.latitude));
+          formData.append('longitude', String(location.longitude));
+        }
+        if (routePolyline) {
+          formData.append('routePolyline', routePolyline);
+        }
+        for (const f of supportingFiles) {
+          formData.append('documents', {
+            uri: f.uri,
+            name: f.name,
+            type: f.mimeType,
+          } as any);
+        }
+
+        await axios.post(`${API_URL}/travel-orders`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            'x-auth-token': token,
+          },
+          timeout: 120000,
+        });
+      }
 
       Alert.alert('Success', 'Travel Order submitted successfully!', [
         { text: 'OK', onPress: () => router.back() },

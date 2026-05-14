@@ -147,24 +147,57 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
     async (fileIndex: number) => {
       if (!order._id || fileIndex < 0 || fileIndex >= supportingMetaList.length) return;
       setSupportingDocLoadingIndex(fileIndex);
+
+      // Browsers block window.open() after an await unless a tab was opened in the same synchronous
+      // user gesture. Open a placeholder first, then navigate it to the blob URL once the file loads.
+      let preOpenedTab: Window | null = null;
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        preOpenedTab = window.open('about:blank', '_blank', 'noopener,noreferrer');
+      }
+
       try {
         const token = await AsyncStorage.getItem('userToken');
+        if (!token) {
+          if (preOpenedTab && !preOpenedTab.closed) preOpenedTab.close();
+          Alert.alert('Session', 'You are not logged in.');
+          return;
+        }
         const res = await fetch(
           `${API_URL}/travel-orders/${order._id}/supporting-document?index=${fileIndex}`,
           {
-            headers: token ? { 'x-auth-token': token } : {},
+            headers: { 'x-auth-token': token },
           }
         );
         if (!res.ok) {
+          if (preOpenedTab && !preOpenedTab.closed) preOpenedTab.close();
           Alert.alert('Could not open', 'The file may be missing or you may not have permission to view it.');
           return;
         }
+        const meta = supportingMetaList[fileIndex];
+        const headerCt = res.headers.get('content-type')?.split(';')[0]?.trim();
         const blob = await res.blob();
-        const objectUrl = URL.createObjectURL(blob);
+        const mime =
+          (blob.type && blob.type !== 'application/octet-stream' ? blob.type : null) ||
+          headerCt ||
+          meta?.contentType ||
+          'application/octet-stream';
+        const typedBlob = blob.type === mime ? blob : new Blob([blob], { type: mime });
+        const objectUrl = URL.createObjectURL(typedBlob);
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.open(objectUrl, '_blank', 'noopener,noreferrer');
+          if (preOpenedTab && !preOpenedTab.closed) {
+            preOpenedTab.location.href = objectUrl;
+          } else if (typeof document !== 'undefined') {
+            const a = document.createElement('a');
+            a.href = objectUrl;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
           setTimeout(() => URL.revokeObjectURL(objectUrl), 120000);
         } else {
+          if (preOpenedTab && !preOpenedTab.closed) preOpenedTab.close();
           const canOpen = await Linking.canOpenURL(objectUrl);
           if (canOpen) {
             await Linking.openURL(objectUrl);
@@ -175,6 +208,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           }
         }
       } catch (e) {
+        if (preOpenedTab && !preOpenedTab.closed) preOpenedTab.close();
         console.error(e);
         Alert.alert('Error', 'Could not open the supporting document.');
       } finally {

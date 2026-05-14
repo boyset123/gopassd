@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, Pressable, useWindowDimensions, ActivityIndicator, Alert } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
 import { API_URL } from '../config/api';
@@ -175,23 +175,22 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
           return;
         }
         const ext = fileExtFromMeta(meta.contentType, meta.name);
-        const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
-        if (!baseDir) {
-          Alert.alert('Storage', 'App storage is not available.');
-          return;
-        }
-        const dest = `${baseDir}to-support-${order._id}-${fileIndex}.${ext}`;
         const url = `${API_URL}/travel-orders/${order._id}/supporting-document?index=${fileIndex}`;
-        const download = await FileSystem.downloadAsync(url, dest, {
-          headers: { 'x-auth-token': token },
-        });
-        if (download.status < 200 || download.status >= 300) {
+        const destFile = new File(Paths.cache, `to-support-${order._id}-${fileIndex}.${ext}`);
+        let localFile: File;
+        try {
+          localFile = await File.downloadFileAsync(url, destFile, {
+            headers: { 'x-auth-token': token },
+            idempotent: true,
+          });
+        } catch {
           Alert.alert('Could not open', 'The file may be missing or you may not have permission to view it.');
           return;
         }
         const mime = mimeFromExt(ext, meta.contentType);
+        // expo-sharing only accepts file:// URIs, not Android content:// (see ExpoSharing.shareAsync).
         if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(download.uri, {
+          await Sharing.shareAsync(localFile.uri, {
             mimeType: mime,
             dialogTitle: meta.name || `Attachment ${fileIndex + 1}`,
           });

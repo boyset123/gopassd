@@ -13,15 +13,28 @@ function travelOrderToClientJson(doc) {
 
   const metaList = [];
 
+  const hasBufferData = (buf) => {
+    if (buf == null) return false;
+    if (Buffer.isBuffer(buf)) return buf.length > 0;
+    if (typeof buf === 'object' && Array.isArray(buf.data)) return buf.data.length > 0;
+    return false;
+  };
+
   if (Array.isArray(o.documents) && o.documents.length > 0) {
     for (const d of o.documents) {
       if (!d) continue;
       const { data: _data, ...meta } = d;
-      if (meta.name || meta.contentType) metaList.push({ name: meta.name, contentType: meta.contentType });
+      const hadBinary = hasBufferData(_data);
+      const name = meta.name || (hadBinary ? 'attachment' : '');
+      const contentType = meta.contentType || (hadBinary ? 'application/octet-stream' : '');
+      if (name || contentType) metaList.push({ name, contentType });
     }
   } else if (o.document) {
     const { data: _data, ...meta } = o.document;
-    if (meta.name || meta.contentType) metaList.push({ name: meta.name, contentType: meta.contentType });
+    const hadBinary = hasBufferData(_data);
+    const name = meta.name || (hadBinary ? 'attachment' : '');
+    const contentType = meta.contentType || (hadBinary ? 'application/octet-stream' : '');
+    if (name || contentType) metaList.push({ name, contentType });
   }
 
   delete o.document;

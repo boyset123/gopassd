@@ -514,6 +514,34 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.
         </Text>
 
+        <View style={styles.signatureSection}>{renderRecommenderSignatures()}</View>
+
+        <View style={styles.signatureSection}>
+          <View style={styles.signatureBlockLeft}>
+            <Text style={styles.signatureHeader}>APPROVED BY:</Text>
+            <View style={styles.docSignatureDisplay}>
+              {order.presidentSignature ? (
+                <View style={styles.signatureImageContainer}>
+                  <Image source={{ uri: order.presidentSignature }} style={styles.docSignatureImage} />
+                </View>
+              ) : null}
+              <View style={[styles.signatureNameContainer, order.presidentSignature ? { marginTop: 44 } : undefined]}>
+                <Text style={styles.signatureName}>{order.presidentApprovedBy?.name || presidentName}</Text>
+              </View>
+            </View>
+            <Text style={styles.signatureTitle}>President</Text>
+            {order.presidentSignedAsOicFor?.name && (
+              <Text style={styles.oicNote}>(OIC for {order.presidentSignedAsOicFor.name})</Text>
+            )}
+          </View>
+        </View>
+      </View>
+
+      <View style={[styles.supportingAttachmentsOutside, { width: a4PageWidth }]}>
+        <Text style={styles.supportingOutsideTitle}>Supporting documents</Text>
+        <Text style={styles.supportingOutsideHint}>
+          Submitted with this request for HR review only — not part of the official printed travel order (FM-DOrSU-HRMO-01).
+        </Text>
         {hasSupportingDocument ? (
           <View style={styles.supportingAttachmentsWeb}>
             {supportingMetaList.map((meta, i) => (
@@ -536,29 +564,9 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
               </Pressable>
             ))}
           </View>
-        ) : null}
-
-        <View style={styles.signatureSection}>{renderRecommenderSignatures()}</View>
-
-        <View style={styles.signatureSection}>
-          <View style={styles.signatureBlockLeft}>
-            <Text style={styles.signatureHeader}>APPROVED BY:</Text>
-            <View style={styles.docSignatureDisplay}>
-              {order.presidentSignature ? (
-                <View style={styles.signatureImageContainer}>
-                  <Image source={{ uri: order.presidentSignature }} style={styles.docSignatureImage} />
-                </View>
-              ) : null}
-              <View style={[styles.signatureNameContainer, order.presidentSignature ? { marginTop: 44 } : undefined]}>
-                <Text style={styles.signatureName}>{order.presidentApprovedBy?.name || presidentName}</Text>
-              </View>
-            </View>
-            <Text style={styles.signatureTitle}>President</Text>
-            {order.presidentSignedAsOicFor?.name && (
-              <Text style={styles.oicNote}>(OIC for {order.presidentSignedAsOicFor.name})</Text>
-            )}
-          </View>
-        </View>
+        ) : (
+          <Text style={styles.supportingOutsideEmpty}>No supporting documents were uploaded for this travel order.</Text>
+        )}
       </View>
     </View>
   );
@@ -765,10 +773,34 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
     textDecorationStyle: 'solid',
   },
+  supportingAttachmentsOutside: {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.28)',
+    backgroundColor: 'rgba(1,26,107,0.06)',
+    alignSelf: 'center',
+  },
+  supportingOutsideTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#011a6b',
+    marginBottom: 6,
+  },
+  supportingOutsideHint: {
+    fontSize: 11,
+    color: 'rgba(1,26,107,0.78)',
+    lineHeight: 16,
+    marginBottom: 10,
+  },
+  supportingOutsideEmpty: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    color: 'rgba(1,26,107,0.55)',
+  },
   supportingAttachmentsWeb: {
     gap: 8,
-    marginTop: 4,
-    marginBottom: 8,
   },
   supportingDocRow: {
     flexDirection: 'row',

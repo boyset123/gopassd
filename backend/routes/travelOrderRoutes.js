@@ -35,9 +35,8 @@ const uploadSupporting = multer({
   { name: 'document', maxCount: 1 },
 ]);
 
-/** Metadata-only (no binary) for list/detail JSON. */
-const DOCUMENT_META_SELECT =
-  'document.name document.contentType documents.name documents.contentType';
+// List routes: exclude only binary fields. Inclusive projections like `documents.name` can yield
+// empty subdocuments in Mongoose, so HR/clients never receive attachment metadata.
 
 function normalizeSupportingMime(file) {
   let mt = (file.mimetype || '').toLowerCase();
@@ -299,9 +298,7 @@ router.get('/for-president-approval', [auth], async (req, res) => {
       .populate('approvedBy', 'name')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select(
-        `employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status signature approverSignature employeeAddress recommenderSignatures recommendersWhoApproved ${DOCUMENT_META_SELECT}`
-      );
+      .select('-document.data -documents.data');
 
     // Resolve the current effective president signer once, since every doc here is "for President".
     const president = await User.findOne({ role: 'President' }).select('_id').lean();
@@ -409,9 +406,7 @@ router.get('/pending', [auth], async (req, res) => {
       .populate('approvedBy', 'name')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select(
-        `employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress recommenderSignatures recommendersWhoApproved participants ${DOCUMENT_META_SELECT}`
-      );
+      .select('-document.data -documents.data');
 
     // Annotate each order with the next expected recommender's effective signer info,
     // so clients can show "Acting as OIC for X" badges and filter to their queue.
@@ -771,9 +766,8 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
       .populate('recommendedBy', 'name')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select(
-        `employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy signature approverSignature latitude longitude routePolyline employeeAddress recommenderSignatures recommendersWhoApproved ${DOCUMENT_META_SELECT}`
-      );
+      .sort({ createdAt: -1 })
+      .select('-document.data -documents.data');
     res.json(travelOrdersToClientJson(recommendedOrders));
   } catch (error) {
     console.error('Error fetching recommended travel orders:', error);
@@ -792,9 +786,7 @@ router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async 
       .populate('presidentSignedAsOicFor', 'name role')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select(
-        `employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress presidentSignature presidentApprovedBy presidentSignedAsOicFor recommenderSignatures recommendersWhoApproved ${DOCUMENT_META_SELECT}`
-      );
+      .select('-document.data -documents.data');
     res.json(travelOrdersToClientJson(hrApprovedOrders));
   } catch (error) {
     console.error('Error fetching HR approved travel orders:', error);
@@ -829,9 +821,7 @@ router.get('/approved', [auth, authorize('Human Resource Personnel')], async (re
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .sort({ createdAt: -1 })
-      .select(
-        `employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress presidentSignature presidentApprovedBy presidentSignedAsOicFor recommenderSignatures recommendersWhoApproved ${DOCUMENT_META_SELECT}`
-      );
+      .select('-document.data -documents.data');
     res.json(travelOrdersToClientJson(approvedOrders));
   } catch (error) {
     console.error('Error fetching approved travel orders:', error);

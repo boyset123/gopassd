@@ -1,11 +1,14 @@
+const { pipeline } = require('stream/promises');
+const { Readable } = require('stream');
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
-const { pipeline } = require('stream/promises');
 
 /**
  * GET urlString (following redirects) and stream the final 200 body to an Express response.
- * Used so clients (e.g. Expo File.downloadFileAsync) get one 200 + bytes instead of a 302 to CDN.
+ * Used so clients (e.g. WebView / File.downloadFileAsync) get one 200 + bytes from our API.
+ *
+ * Prefers global fetch (Node 18+) for redirect handling; falls back to https.get loop.
  *
  * @param {string} urlString
  * @param {import('express').Response} expressRes
@@ -13,8 +16,40 @@ const { pipeline } = require('stream/promises');
  */
 async function proxyHttpUrlToExpressResponse(urlString, expressRes, opts) {
   const { filename, fallbackContentType } = opts;
-  let current = urlString;
 
+  if (typeof globalThis.fetch === 'function') {
+    const res = await globalThis.fetch(urlString, {
+      redirect: 'follow',
+      headers: { 'User-Agent': 'GOPASS-travel-order/1.0', Accept: '*/*' },
+    });
+
+    if (!res.ok) {
+      const err = new Error(`Upstream HTTP ${res.status}`);
+      err.statusCode = res.status;
+      throw err;
+    }
+
+    const rawCt = res.headers.get('content-type');
+    const ct =
+      (rawCt && String(rawCt).split(';')[0].trim()) ||
+      fallbackContentType ||
+      'application/octet-stream';
+    expressRes.setHeader('Content-Type', ct);
+    expressRes.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+
+    const body = res.body;
+    if (body && typeof Readable.fromWeb === 'function') {
+      const nodeReadable = Readable.fromWeb(body);
+      await pipeline(nodeReadable, expressRes);
+      return;
+    }
+
+    const ab = await res.arrayBuffer();
+    expressRes.send(Buffer.from(ab));
+    return;
+  }
+
+  let current = urlString;
   for (let hop = 0; hop < 12; hop += 1) {
     const incoming = await new Promise((resolve, reject) => {
       const u = new URL(current);

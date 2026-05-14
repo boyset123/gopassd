@@ -1,9 +1,20 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Image, Pressable, useWindowDimensions, ActivityIndicator, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  Pressable,
+  useWindowDimensions,
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+} from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { File, Paths } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
+import { WebView } from 'react-native-webview';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { API_URL } from '../config/api';
 
@@ -66,21 +77,10 @@ function supportingAttachmentMetaList(order: Pick<TravelOrder, 'documents' | 'do
   return [];
 }
 
-function fileExtFromMeta(contentType: string | undefined, fileName: string | undefined): string {
+function isWordAttachment(contentType: string | undefined, fileName: string | undefined): boolean {
   const nameLower = (fileName || '').toLowerCase();
   const ct = (contentType || '').toLowerCase();
-  if (ct.includes('pdf') || nameLower.endsWith('.pdf')) return 'pdf';
-  if (ct.includes('wordprocessingml') || ct.includes('officedocument') || nameLower.endsWith('.docx')) return 'docx';
-  if (ct.includes('png') || nameLower.endsWith('.png')) return 'png';
-  if (ct.includes('webp') || nameLower.endsWith('.webp')) return 'webp';
-  return 'jpg';
-}
-
-function mimeFromExt(ext: string, contentType?: string): string {
-  if (contentType) return contentType;
-  if (ext === 'pdf') return 'application/pdf';
-  if (ext === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  return `image/${ext}`;
+  return ct.includes('wordprocessingml') || ct.includes('officedocument') || nameLower.endsWith('.docx');
 }
 
 interface TravelOrderFormProps {
@@ -158,8 +158,13 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
 
   const [generatedTravelOrderNo, setGeneratedTravelOrderNo] = useState<string>('');
   const [openingSupportingIndex, setOpeningSupportingIndex] = useState<number | null>(null);
+  const [supportingViewer, setSupportingViewer] = useState<{
+    uri: string;
+    headers: Record<string, string>;
+    title: string;
+  } | null>(null);
 
-  const attachmentMeta = useMemo(() => supportingAttachmentMetaList(order), [order.documents, order.document]);
+  const attachmentMeta = useMemo(() => supportingAttachmentMetaList(order), [order]);
 
   const hasSupportingDocument = attachmentMeta.length > 0;
 
@@ -167,6 +172,13 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
     async (fileIndex: number) => {
       if (!order._id || fileIndex < 0 || fileIndex >= attachmentMeta.length) return;
       const meta = attachmentMeta[fileIndex];
+      if (isWordAttachment(meta.contentType, meta.name)) {
+        Alert.alert(
+          'Word attachment',
+          'Word (.docx) files cannot be previewed inside the app. Open this travel order on a computer to view the document, or ask HR for a PDF copy.'
+        );
+        return;
+      }
       setOpeningSupportingIndex(fileIndex);
       try {
         const token = await AsyncStorage.getItem('userToken');
@@ -174,29 +186,12 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
           Alert.alert('Session', 'You are not logged in.');
           return;
         }
-        const ext = fileExtFromMeta(meta.contentType, meta.name);
         const url = `${API_URL}/travel-orders/${order._id}/supporting-document?index=${fileIndex}`;
-        const destFile = new File(Paths.cache, `to-support-${order._id}-${fileIndex}.${ext}`);
-        let localFile: File;
-        try {
-          localFile = await File.downloadFileAsync(url, destFile, {
-            headers: { 'x-auth-token': token },
-            idempotent: true,
-          });
-        } catch {
-          Alert.alert('Could not open', 'The file may be missing or you may not have permission to view it.');
-          return;
-        }
-        const mime = mimeFromExt(ext, meta.contentType);
-        // expo-sharing only accepts file:// URIs, not Android content:// (see ExpoSharing.shareAsync).
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(localFile.uri, {
-            mimeType: mime,
-            dialogTitle: meta.name || `Attachment ${fileIndex + 1}`,
-          });
-        } else {
-          Alert.alert('Downloaded', 'Sharing is not available on this device; the file was saved to app cache.');
-        }
+        setSupportingViewer({
+          uri: url,
+          headers: { 'x-auth-token': token },
+          title: meta.name || `Attachment ${fileIndex + 1}`,
+        });
       } catch (e) {
         console.error(e);
         Alert.alert('Error', 'Could not open the supporting document.');
@@ -279,6 +274,7 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
   ];
 
   return (
+    <>
     <View style={styles.a4Stack}>
       <View style={[styles.a4Page, { width: a4PageWidth }]}>
         <View style={styles.docHeader}>
@@ -287,7 +283,7 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
             <Text style={styles.universityName}>
               DAVAO ORIENTAL{'\n'}STATE UNIVERSITY
             </Text>
-            <Text style={styles.universityMotto}>"A University of excellence, innovation, and inclusion"</Text>
+            <Text style={styles.universityMotto}>{'"A University of excellence, innovation, and inclusion"'}</Text>
             <View style={styles.headerRule} />
           </View>
           <Image source={require('../assets/images/dorsulogo.png')} style={styles.logo} />
@@ -389,7 +385,7 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
                 </Text>
                 <Pressable
                   onPress={() => void openSupportingDocumentAtIndex(i)}
-                  disabled={openingSupportingIndex !== null}
+                  disabled={openingSupportingIndex !== null || supportingViewer !== null}
                   style={({ pressed }) => [styles.supportingDocViewBtn, pressed && styles.supportingDocViewBtnPressed]}
                 >
                   {openingSupportingIndex === i ? (
@@ -518,6 +514,59 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
         </View>
       </View>
     </View>
+
+    <Modal
+      visible={supportingViewer !== null}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={() => setSupportingViewer(null)}
+    >
+      <SafeAreaView style={styles.supportingViewerRoot} edges={['top', 'left', 'right']}>
+        <View style={styles.supportingViewerToolbar}>
+          <Text style={styles.supportingViewerTitle} numberOfLines={1}>
+            {supportingViewer?.title}
+          </Text>
+          <Pressable
+            onPress={() => setSupportingViewer(null)}
+            hitSlop={12}
+            style={({ pressed }) => [styles.supportingViewerCloseBtn, pressed && { opacity: 0.75 }]}
+          >
+            <Text style={styles.supportingViewerCloseText}>Close</Text>
+          </Pressable>
+        </View>
+        {supportingViewer ? (
+          <WebView
+            style={styles.supportingWebView}
+            source={{ uri: supportingViewer.uri, headers: supportingViewer.headers }}
+            originWhitelist={['*']}
+            startInLoadingState
+            allowsInlineMediaPlayback
+            mixedContentMode="always"
+            androidLayerType={Platform.OS === 'android' ? 'hardware' : undefined}
+            renderLoading={() => (
+              <View style={styles.supportingWebViewLoading}>
+                <ActivityIndicator size="large" color="#011a6b" />
+              </View>
+            )}
+            onHttpError={(e) => {
+              const code = e.nativeEvent.statusCode;
+              if (code >= 400) {
+                Alert.alert(
+                  'Could not load',
+                  `The server returned HTTP ${code}. You may not have permission to view this file, or it may be missing.`
+                );
+                setSupportingViewer(null);
+              }
+            }}
+            onError={() => {
+              Alert.alert('Could not load', 'The file could not be displayed in the preview.');
+              setSupportingViewer(null);
+            }}
+          />
+        ) : null}
+      </SafeAreaView>
+    </Modal>
+    </>
   );
 };
 
@@ -772,6 +821,45 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 9,
     fontWeight: '700',
+  },
+  supportingViewerRoot: {
+    flex: 1,
+    backgroundColor: '#0f172a',
+  },
+  supportingViewerToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.2)',
+    gap: 12,
+  },
+  supportingViewerTitle: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  supportingViewerCloseBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  supportingViewerCloseText: {
+    color: '#93c5fd',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  supportingWebView: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  supportingWebViewLoading: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
   },
   signatureSection: {
     marginTop: 10,

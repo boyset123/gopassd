@@ -15,7 +15,7 @@ const mongoose = require('mongoose');
 const {
   isConfigured: isCloudinaryForTravelOrdersConfigured,
   uploadTravelOrderAttachment,
-  signedDeliveryUrl,
+  assetDeliveryUrl,
   resourceTypeForMime,
   destroyTravelOrderUpload,
 } = require('../lib/cloudinaryTravelOrder');
@@ -1095,7 +1095,7 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
         doc.resourceType === 'image' || doc.resourceType === 'raw'
           ? doc.resourceType
           : resourceTypeForMime(doc.contentType);
-      const url = signedDeliveryUrl(doc.publicId, rt);
+      const url = assetDeliveryUrl(doc.publicId, rt);
       const rawName = doc.name || 'attachment';
       const filename = String(rawName).replace(/[^\w.\- ]+/g, '_').slice(0, 200);
       try {
@@ -1105,7 +1105,11 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
         });
         return;
       } catch (err) {
-        console.error('Cloudinary attachment proxy failed:', err);
+        console.error(
+          'Cloudinary attachment proxy failed:',
+          err?.message || err,
+          err?.statusCode != null ? `(upstream ${err.statusCode})` : ''
+        );
         if (!res.headersSent) {
           return res.status(502).json({ message: 'Could not retrieve attachment from storage.' });
         }

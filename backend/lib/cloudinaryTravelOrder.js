@@ -60,23 +60,27 @@ function uploadTravelOrderAttachment(buffer, opts) {
 }
 
 /**
- * Signed URL for authorized download (short-lived). Caller must have already checked auth.
+ * HTTPS delivery URL for an uploaded asset (used only from this server after auth).
+ * Uses unsigned URLs, which match default public Cloudinary uploads and avoid
+ * signature / expires_at mismatches that caused upstream 401 and client 502.
  *
  * @param {string} publicId Full Cloudinary public_id (includes folder path)
  * @param {'image' | 'raw'} resourceType
- * @param {number} [ttlSec] default 600 (10 min)
  * @returns {string}
  */
-function signedDeliveryUrl(publicId, resourceType, ttlSec = 600) {
+function assetDeliveryUrl(publicId, resourceType) {
   applyConfig();
-  const expiresAt = Math.floor(Date.now() / 1000) + ttlSec;
-  return cloudinary.url(publicId, {
+  return cloudinary.url(String(publicId || '').trim(), {
     resource_type: resourceType,
     secure: true,
-    sign_url: true,
-    type: 'upload',
-    expires_at: expiresAt,
   });
+}
+
+/**
+ * @deprecated Use assetDeliveryUrl; kept as alias for callers.
+ */
+function signedDeliveryUrl(publicId, resourceType, _ttlSec = 600) {
+  return assetDeliveryUrl(publicId, resourceType);
 }
 
 /**
@@ -100,6 +104,7 @@ module.exports = {
   isConfigured,
   resourceTypeForMime,
   uploadTravelOrderAttachment,
+  assetDeliveryUrl,
   signedDeliveryUrl,
   destroyTravelOrderUpload,
 };

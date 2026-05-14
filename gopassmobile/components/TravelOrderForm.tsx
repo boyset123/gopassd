@@ -1,7 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Image, Pressable, useWindowDimensions } from 'react-native';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, Image, Pressable, useWindowDimensions, ActivityIndicator, Alert } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+
+import { API_URL } from '../config/api';
 
 type SignatureType = 'draw' | 'upload';
 
@@ -43,6 +47,40 @@ interface TravelOrder {
   /** Populated when the President's slot was signed (could be original or OIC). */
   presidentApprovedBy?: { _id: string; name?: string; role?: string } | null;
   participants?: string[];
+  /** Supporting proof (metadata only); API may return this alone or with `documents`. */
+  document?: { name?: string; contentType?: string } | null;
+  /** Multiple supporting files (metadata only). */
+  documents?: { name?: string; contentType?: string }[] | null;
+}
+
+function supportingAttachmentMetaList(order: Pick<TravelOrder, 'documents' | 'document'>): {
+  name?: string;
+  contentType?: string;
+}[] {
+  if (Array.isArray(order.documents) && order.documents.length > 0) {
+    return order.documents.filter((d) => d && (d.name || d.contentType));
+  }
+  if (order.document && (order.document.name || order.document.contentType)) {
+    return [order.document];
+  }
+  return [];
+}
+
+function fileExtFromMeta(contentType: string | undefined, fileName: string | undefined): string {
+  const nameLower = (fileName || '').toLowerCase();
+  const ct = (contentType || '').toLowerCase();
+  if (ct.includes('pdf') || nameLower.endsWith('.pdf')) return 'pdf';
+  if (ct.includes('wordprocessingml') || ct.includes('officedocument') || nameLower.endsWith('.docx')) return 'docx';
+  if (ct.includes('png') || nameLower.endsWith('.png')) return 'png';
+  if (ct.includes('webp') || nameLower.endsWith('.webp')) return 'webp';
+  return 'jpg';
+}
+
+function mimeFromExt(ext: string, contentType?: string): string {
+  if (contentType) return contentType;
+  if (ext === 'pdf') return 'application/pdf';
+  if (ext === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  return `image/${ext}`;
 }
 
 interface TravelOrderFormProps {
@@ -119,6 +157,56 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
   const a4PageWidth = Math.min(windowWidth - 32, 420);
 
   const [generatedTravelOrderNo, setGeneratedTravelOrderNo] = useState<string>('');
+  const [openingSupportingIndex, setOpeningSupportingIndex] = useState<number | null>(null);
+
+  const attachmentMeta = useMemo(() => supportingAttachmentMetaList(order), [order.documents, order.document]);
+
+  const hasSupportingDocument = attachmentMeta.length > 0;
+
+  const openSupportingDocumentAtIndex = useCallback(
+    async (fileIndex: number) => {
+      if (!order._id || fileIndex < 0 || fileIndex >= attachmentMeta.length) return;
+      const meta = attachmentMeta[fileIndex];
+      setOpeningSupportingIndex(fileIndex);
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        if (!token) {
+          Alert.alert('Session', 'You are not logged in.');
+          return;
+        }
+        const ext = fileExtFromMeta(meta.contentType, meta.name);
+        const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+        if (!baseDir) {
+          Alert.alert('Storage', 'App storage is not available.');
+          return;
+        }
+        const dest = `${baseDir}to-support-${order._id}-${fileIndex}.${ext}`;
+        const url = `${API_URL}/travel-orders/${order._id}/supporting-document?index=${fileIndex}`;
+        const download = await FileSystem.downloadAsync(url, dest, {
+          headers: { 'x-auth-token': token },
+        });
+        if (download.status < 200 || download.status >= 300) {
+          Alert.alert('Could not open', 'The file may be missing or you may not have permission to view it.');
+          return;
+        }
+        const mime = mimeFromExt(ext, meta.contentType);
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(download.uri, {
+            mimeType: mime,
+            dialogTitle: meta.name || `Attachment ${fileIndex + 1}`,
+          });
+        } else {
+          Alert.alert('Downloaded', 'Sharing is not available on this device; the file was saved to app cache.');
+        }
+      } catch (e) {
+        console.error(e);
+        Alert.alert('Error', 'Could not open the supporting document.');
+      } finally {
+        setOpeningSupportingIndex(null);
+      }
+    },
+    [order._id, attachmentMeta]
+  );
 
   const dateForNo = useMemo(() => {
     const d = new Date(order.date || '');
@@ -291,6 +379,30 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
         <Text style={styles.infoText}>
           Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.
         </Text>
+
+        {hasSupportingDocument ? (
+          <View style={styles.supportingAttachmentsBlock}>
+            {attachmentMeta.map((meta, i) => (
+              <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBanner}>
+                <FontAwesome name="paperclip" size={12} color="#011a6b" style={{ marginRight: 6 }} />
+                <Text style={styles.supportingDocLabel} numberOfLines={1}>
+                  {meta.name || `Attachment ${i + 1}`}
+                </Text>
+                <Pressable
+                  onPress={() => void openSupportingDocumentAtIndex(i)}
+                  disabled={openingSupportingIndex !== null}
+                  style={({ pressed }) => [styles.supportingDocViewBtn, pressed && styles.supportingDocViewBtnPressed]}
+                >
+                  {openingSupportingIndex === i ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.supportingDocViewBtnText}>View</Text>
+                  )}
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <View style={styles.signatureSection}>
           {(order.recommendedBy || []).map((recommender, index) => {
@@ -623,6 +735,44 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textDecorationLine: 'underline',
     textDecorationStyle: 'solid',
+  },
+  supportingAttachmentsBlock: {
+    gap: 6,
+    marginTop: 6,
+    marginBottom: 6,
+  },
+  supportingDocBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(1,26,107,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.2)',
+  },
+  supportingDocLabel: {
+    flex: 1,
+    fontSize: 8,
+    fontWeight: '600',
+    color: '#011a6b',
+  },
+  supportingDocViewBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: '#011a6b',
+    minWidth: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  supportingDocViewBtnPressed: {
+    opacity: 0.88,
+  },
+  supportingDocViewBtnText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
   },
   signatureSection: {
     marginTop: 10,

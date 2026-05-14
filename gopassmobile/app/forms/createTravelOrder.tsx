@@ -10,6 +10,8 @@ import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { API_URL } from '../../config/api';
 import { Picker } from '@react-native-picker/picker';
 
@@ -47,6 +49,8 @@ interface Suggestion {
   lon: string;
   display_name: string;
 }
+
+const MAX_SUPPORTING_FILES = 15;
 
 const faculties = [
   'Faculty of Agriculture and Life Sciences',
@@ -109,6 +113,7 @@ const CreateTravelOrderScreen = () => {
   const [routeCoordinates, setRouteCoordinates] = useState<Array<{ latitude: number; longitude: number }>>([]);
   const [routePolyline, setRoutePolyline] = useState<string | null>(null);
   const [shouldFitRoute, setShouldFitRoute] = useState(false);
+  const [supportingFiles, setSupportingFiles] = useState<{ id: string; uri: string; name: string; mimeType: string }[]>([]);
   const [mapRegion, setMapRegion] = useState({
     latitude: 7.0731, // Default to a central location in Mati
     longitude: 126.2167,
@@ -475,6 +480,80 @@ const CreateTravelOrderScreen = () => {
     return normalized.toISOString();
   };
 
+  const pickSupportingImage = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert('Permission needed', 'Allow photo library access to attach an image.');
+      return;
+    }
+    const pickerResult = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 0.85,
+      allowsMultipleSelection: true,
+      selectionLimit: MAX_SUPPORTING_FILES,
+    });
+    if (pickerResult.canceled || !pickerResult.assets?.length) return;
+    setSupportingFiles((prev) => {
+      const remaining = MAX_SUPPORTING_FILES - prev.length;
+      if (remaining <= 0) return prev;
+      const seen = new Set(prev.map((p) => p.uri));
+      const next = [...prev];
+      for (const asset of pickerResult.assets) {
+        if (next.length >= MAX_SUPPORTING_FILES) break;
+        const uri = asset.uri;
+        if (seen.has(uri)) continue;
+        seen.add(uri);
+        const mimeType = asset.mimeType || 'image/jpeg';
+        const name = asset.fileName || uri.split('/').pop() || 'photo.jpg';
+        next.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, uri, name, mimeType });
+      }
+      return next;
+    });
+  };
+
+  const DOC_MIME_TYPES = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+
+  const pickSupportingDocument = async () => {
+    try {
+      const pickerResult: any = await DocumentPicker.getDocumentAsync({
+        type: DOC_MIME_TYPES,
+        copyToCacheDirectory: true,
+        multiple: true,
+      });
+      if (pickerResult.canceled) return;
+      const guessMimeFromName = (name: string) => {
+        const lower = name.toLowerCase();
+        if (lower.endsWith('.docx')) {
+          return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        }
+        if (lower.endsWith('.pdf')) return 'application/pdf';
+        return 'application/octet-stream';
+      };
+      const assets: any[] =
+        pickerResult.assets && pickerResult.assets.length > 0 ? pickerResult.assets : pickerResult.uri ? [pickerResult] : [];
+      setSupportingFiles((prev) => {
+        const next = [...prev];
+        for (const asset of assets) {
+          if (next.length >= MAX_SUPPORTING_FILES) break;
+          const uri = asset.uri;
+          if (!uri || next.some((p) => p.uri === uri)) continue;
+          const name = asset.name || 'document.pdf';
+          next.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+            uri,
+            name,
+            mimeType: asset.mimeType || guessMimeFromName(name),
+          });
+        }
+        return next;
+      });
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Picker error', 'Could not open the file picker.');
+    }
+  };
+
   const handleSubmit = async () => {
     setIsPreviewVisible(false);
     setIsSubmitting(true);
@@ -500,35 +579,51 @@ const CreateTravelOrderScreen = () => {
         return;
       }
 
-      const travelOrderData = {
-        employeeAddress,
-        travelOrderNo,
-        date: toISOStringAtMinute(date),
-        address,
-        salary,
-        to: address, // Use address as the 'to' field for submission
-        purpose,
-        departureDate: toISOStringAtMinute(departureDate),
-        arrivalDate: toISOStringAtMinute(arrivalDate),
-        additionalInfo,
-        recommendedBy: JSON.stringify(recommenders.map(r => r.id).filter(id => id)),
-        latitude: location?.latitude,
-        longitude: location?.longitude,
-        routePolyline: routePolyline,
-        participants: JSON.stringify(participants.filter(p => p.trim() !== '')),
-      };
+      const formData = new FormData();
+      formData.append('employeeAddress', employeeAddress);
+      formData.append('travelOrderNo', travelOrderNo ?? '');
+      formData.append('date', toISOStringAtMinute(date));
+      formData.append('address', address);
+      formData.append('salary', salary ?? '');
+      formData.append('to', address);
+      formData.append('purpose', purpose);
+      formData.append('departureDate', toISOStringAtMinute(departureDate));
+      formData.append('arrivalDate', toISOStringAtMinute(arrivalDate));
+      formData.append('additionalInfo', additionalInfo ?? '');
+      formData.append('recommendedBy', JSON.stringify(recommenders.map(r => r.id).filter(id => id)));
+      formData.append('participants', JSON.stringify(participants.filter(p => p.trim() !== '')));
+      if (location?.latitude != null && location?.longitude != null) {
+        formData.append('latitude', String(location.latitude));
+        formData.append('longitude', String(location.longitude));
+      }
+      if (routePolyline) {
+        formData.append('routePolyline', routePolyline);
+      }
+      for (const f of supportingFiles) {
+        formData.append('documents', {
+          uri: f.uri,
+          name: f.name,
+          type: f.mimeType,
+        } as any);
+      }
 
-      await axios.post(`${API_URL}/travel-orders`, travelOrderData, {
-        headers: { 'x-auth-token': token },
+      await axios.post(`${API_URL}/travel-orders`, formData, {
+        headers: {
+          'x-auth-token': token,
+        },
       });
 
       Alert.alert('Success', 'Travel Order submitted successfully!', [
         { text: 'OK', onPress: () => router.back() },
       ]);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Travel order submission error:', error);
-      Alert.alert('Submission Failed', 'Could not submit your travel order. Please try again.');
+      const msg =
+        error?.response?.data?.message ||
+        error?.message ||
+        'Could not submit your travel order. Please try again.';
+      Alert.alert('Submission Failed', msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -1010,6 +1105,35 @@ const CreateTravelOrderScreen = () => {
               <TextInput style={styles.input} value={additionalInfo} onChangeText={setAdditionalInfo} placeholder="Additional instructions" placeholderTextColor={theme.placeholder} />
             </View>
 
+            <View style={[styles.fieldContainer, styles.fieldContainerTight]}>
+              <Text style={styles.label}>Supporting files (optional)</Text>
+              <Text style={styles.supportingDocHint}>
+                Invitation, program, or other proof — up to {MAX_SUPPORTING_FILES} files (PDF, Word .docx, or images; max 5 MB each). Add photos or documents more than once to attach more.
+              </Text>
+              {supportingFiles.map((f) => (
+                <View key={f.id} style={styles.supportingFileRow}>
+                  <Text style={styles.supportingFileName} numberOfLines={2}>{f.name}</Text>
+                  <Pressable
+                    onPress={() => setSupportingFiles((prev) => prev.filter((x) => x.id !== f.id))}
+                    style={styles.supportingFileClear}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.supportingFileClearText}>Remove</Text>
+                  </Pressable>
+                </View>
+              ))}
+              <View style={styles.supportingDocButtons}>
+                <Pressable onPress={pickSupportingImage} style={({ pressed }) => [styles.supportingDocBtn, pressed && styles.supportingDocBtnPressed]}>
+                  <FontAwesome name="image" size={16} color="#fff" style={{ marginRight: 6 }} />
+                  <Text style={styles.supportingDocBtnText}>Photo</Text>
+                </Pressable>
+                <Pressable onPress={pickSupportingDocument} style={({ pressed }) => [styles.supportingDocBtn, styles.supportingDocBtnSecondary, pressed && styles.supportingDocBtnPressed]}>
+                  <FontAwesome name="file-text-o" size={16} color={theme.primary} style={{ marginRight: 6 }} />
+                  <Text style={styles.supportingDocBtnTextSecondary}>PDF / Word</Text>
+                </Pressable>
+              </View>
+            </View>
+
             {location && (
               <View style={[styles.fieldContainer, styles.fieldContainerTight]}>
                 <Text style={styles.label}>Selected Location:</Text>
@@ -1271,6 +1395,11 @@ const CreateTravelOrderScreen = () => {
                 </View>
 
                 <Text style={styles.infoText}>You shall be guided further by the following additional instruction and information on <Text style={{ textDecorationLine: 'underline', textDecorationColor: '#000' }}>{additionalInfo}</Text></Text>
+                {supportingFiles.length > 0 ? (
+                  <Text style={styles.infoText}>
+                    Supporting files attached ({supportingFiles.length}): {supportingFiles.map((f) => f.name).join(', ')}
+                  </Text>
+                ) : null}
                 <Text style={styles.infoText}>Your traveling expenses in the field will be authorized or allowed under Official Business.</Text>
                 <Text style={styles.infoText}>Chargeable against Higher education.</Text>
                 <Text style={styles.infoText}>Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.</Text>
@@ -1779,6 +1908,68 @@ const styles = StyleSheet.create({
   },
   fieldContainerTight: {
     marginBottom: 8,
+  },
+  supportingDocHint: {
+    fontSize: 13,
+    color: theme.textMuted,
+    marginBottom: 8,
+  },
+  supportingFileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(1,26,107,0.06)',
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  supportingFileName: {
+    flex: 1,
+    fontSize: 14,
+    color: theme.text,
+  },
+  supportingFileClear: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  supportingFileClearText: {
+    fontSize: 14,
+    color: theme.danger,
+    fontWeight: '600',
+  },
+  supportingDocButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  supportingDocBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.primary,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  supportingDocBtnSecondary: {
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.primary,
+  },
+  supportingDocBtnPressed: {
+    opacity: 0.85,
+  },
+  supportingDocBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  supportingDocBtnTextSecondary: {
+    color: theme.primary,
+    fontWeight: '600',
+    fontSize: 15,
   },
   sectionGap: {
     marginTop: 22,

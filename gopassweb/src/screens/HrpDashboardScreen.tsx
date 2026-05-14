@@ -18,6 +18,7 @@ import { FEATURE_CTC_ENABLED } from '../config/featureFlags';
 import { useSocket } from '../config/SocketContext';
 import { getTravelOrderPrintHtml } from '../utils/travelOrderPrintHtml';
 import { getPassSlipPrintHtml } from '../utils/passSlipPrintHtml';
+import { stripArrivalStatusDisplaySuffix } from '../utils/arrivalStatusDisplay';
 import TravelOrderFormWeb from '../components/TravelOrderFormWeb';
 import MonitoringApprovedTravelOrdersCard, { ApprovedTravelOrder } from '../components/MonitoringApprovedTravelOrdersCard';
 import HrpReportsAnalytics from '../components/HrpReportsAnalytics';
@@ -97,6 +98,8 @@ interface TravelOrder {
   participants?: string[];
   recommenderSignatures?: { user?: string | { _id?: string; name?: string }; signature?: string; signedAsOicFor?: { _id?: string; name?: string } | null }[];
   recommendersWhoApproved?: string[];
+  document?: { name?: string; contentType?: string } | null;
+  documents?: { name?: string; contentType?: string }[] | null;
 }
 
 type MonitoringPassSlip = PassSlip & { type: 'slip' };
@@ -239,6 +242,8 @@ const buildTravelOrderWebView = (o: TravelOrder) => ({
   approvedBy: o.approvedBy ? { _id: o.approvedBy._id, name: o.approvedBy.name } : undefined,
   latitude: o.latitude,
   longitude: o.longitude,
+  document: o.document,
+  documents: o.documents,
 });
 
 // --- Main Component ---
@@ -1173,7 +1178,16 @@ const HrpDashboardScreen = () => {
                         </View>
                       </ScrollView>
 
-                      {paginatedRecords.map((item, index) => (
+                      {paginatedRecords.map((item, index) => {
+                        const arrivalRaw =
+                          'arrivalStatus' in item && item.arrivalStatus ? String(item.arrivalStatus) : '';
+                        const arrivalLabel = arrivalRaw ? stripArrivalStatusDisplaySuffix(arrivalRaw) : '';
+                        const isPositiveArrival =
+                          arrivalLabel === 'Returned' ||
+                          arrivalLabel === 'On Time' ||
+                          arrivalLabel === 'Completed';
+
+                        return (
                         <ScrollView
                           key={item._id}
                           horizontal
@@ -1200,11 +1214,11 @@ const HrpDashboardScreen = () => {
                             </View>
                             <Text style={[styles.recordsTableCell, styles.recordsColDate]}>{formatDate(item.date)}</Text>
                             <View style={[styles.recordsColStatus]}>
-                              {('arrivalStatus' in item && item.arrivalStatus) ? (
-                                <View style={(item as any).arrivalStatus === 'Returned' || (item as any).arrivalStatus === 'On Time' || (item as any).arrivalStatus === 'Completed' ? (styles as any).recordsBadgeSuccess : (styles as any).recordsBadgeNeutral}>
-                                  <View style={(item as any).arrivalStatus === 'Returned' || (item as any).arrivalStatus === 'On Time' || (item as any).arrivalStatus === 'Completed' ? (styles as any).recordsBadgeSuccessDot : (styles as any).recordsBadgeNeutralDot} />
-                                  <Text style={(item as any).arrivalStatus === 'Returned' || (item as any).arrivalStatus === 'On Time' || (item as any).arrivalStatus === 'Completed' ? (styles as any).recordsBadgeSuccessText : (styles as any).recordsBadgeNeutralText} numberOfLines={1}>
-                                    {(item as any).arrivalStatus}
+                              {arrivalRaw ? (
+                                <View style={isPositiveArrival ? (styles as any).recordsBadgeSuccess : (styles as any).recordsBadgeNeutral}>
+                                  <View style={isPositiveArrival ? (styles as any).recordsBadgeSuccessDot : (styles as any).recordsBadgeNeutralDot} />
+                                  <Text style={isPositiveArrival ? (styles as any).recordsBadgeSuccessText : (styles as any).recordsBadgeNeutralText} numberOfLines={1}>
+                                    {arrivalLabel}
                                   </Text>
                                 </View>
                               ) : (
@@ -1236,7 +1250,8 @@ const HrpDashboardScreen = () => {
                             </View>
                           </View>
                         </ScrollView>
-                      ))}
+                        );
+                      })}
                       <View style={(styles as any).recordsPaginationRow}>
                         <Pressable
                           style={[(styles as any).recordsPaginationButton, safeRecordsCurrentPage === 1 && (styles as any).recordsPaginationButtonDisabled]}
@@ -1522,11 +1537,6 @@ const HrpDashboardScreen = () => {
                           </Pressable>
                         )}
 
-                        {selectedItem.arrivalStatus === 'On Time' && (
-                          <View style={styles.onTimeContainer}>
-                            <Text style={styles.onTimeText}>ON TIME</Text>
-                          </View>
-                        )}
                         {selectedItem.arrivalStatus && selectedItem.arrivalStatus.includes('Overdue') && (
                           <View style={styles.overdueContainer}>
                             <Text style={styles.overdueStampText}>OVERDUE</Text>

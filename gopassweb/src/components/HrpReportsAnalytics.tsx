@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platf
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FontAwesome } from '@expo/vector-icons';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { stripArrivalStatusDisplaySuffix } from '../utils/arrivalStatusDisplay';
 
 type Employee = {
   _id?: string;
@@ -269,11 +270,11 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
     const passSlips = appliedFilteredRecords.filter((r) => getRecordTypeLabel(r) === 'Pass Slip').length;
     const travelOrders = total - passSlips;
 
-    const onTime = appliedFilteredRecords.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('on time')).length;
-    const overdue = appliedFilteredRecords.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('overdue')).length;
-    const arrivalOther = Math.max(0, total - onTime - overdue);
+    const passSlipRows = appliedFilteredRecords.filter((r) => getRecordTypeLabel(r) === 'Pass Slip');
+    const onTime = passSlipRows.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('on time')).length;
+    const overdue = passSlipRows.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('overdue')).length;
 
-    return { total, passSlips, travelOrders, onTime, overdue, arrivalOther };
+    return { total, passSlips, travelOrders, onTime, overdue };
   }, [appliedFilteredRecords]);
 
   const recordsByDay = useMemo(() => {
@@ -297,7 +298,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start();
-  }, [graphAnim, kpis.total, kpis.passSlips, kpis.travelOrders, kpis.onTime, kpis.overdue, kpis.arrivalOther, recordsByDay.length, maxDayCount]);
+  }, [graphAnim, kpis.total, kpis.passSlips, kpis.travelOrders, kpis.onTime, kpis.overdue, recordsByDay.length, maxDayCount]);
 
   const topByCampus = useMemo(() => {
     const map = new Map<string, number>();
@@ -377,7 +378,8 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
             const campus = r.employee?.campus || '—';
             const employee = r.employee?.name || '—';
             const status = r.status || '—';
-            const arrival = r.arrivalStatus || '—';
+            const arrivalRaw = r.arrivalStatus;
+            const arrival = arrivalRaw ? stripArrivalStatusDisplaySuffix(arrivalRaw) : '—';
             const arrivalLower = arrival.toLowerCase();
             const arrivalVariant = arrivalLower.includes('overdue')
               ? 'overdue'
@@ -499,7 +501,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
       const campus = r.employee?.campus || '—';
       const office = r.employee?.faculty || r.employee?.department || '—';
       const status = r.status || '—';
-      const arrivalStatus = r.arrivalStatus || '—';
+      const arrivalStatus = r.arrivalStatus ? stripArrivalStatusDisplaySuffix(r.arrivalStatus) : '—';
       const trackingNo = getTrackingNo(r);
 
       return [
@@ -694,7 +696,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
           <View style={styles.summaryChartsHeaderText}>
             <Text style={styles.summaryChartsTitle}>Visual summary</Text>
             <Text style={styles.summaryChartsSubtitle}>
-              Document mix, arrival outcomes, and daily volume for the filtered set.
+              Document mix, pass slip arrival status, and daily volume for the filtered set.
             </Text>
           </View>
           <View style={styles.summaryTotalPill}>
@@ -752,7 +754,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
               isVeryNarrow && styles.summaryChartColStacked,
             ]}
           >
-            <Text style={styles.donutBlockTitle}>By arrival status</Text>
+            <Text style={styles.donutBlockTitle}>By arrival status (pass slips)</Text>
             <View style={styles.summaryColBody}>
               <Animated.View
                 style={{
@@ -772,7 +774,6 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
                   segments={[
                     { label: 'On time', value: kpis.onTime, color: '#16a34a' },
                     { label: 'Overdue', value: kpis.overdue, color: '#dc3545' },
-                    { label: 'Other / unset', value: kpis.arrivalOther, color: '#94a3b8' },
                   ]}
                 />
               </Animated.View>
@@ -787,12 +788,6 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
                   <View style={[styles.legendSwatch, { backgroundColor: '#dc3545' }]} />
                   <Text style={styles.legendText} numberOfLines={2}>
                     Overdue · {kpis.overdue}
-                  </Text>
-                </View>
-                <View style={styles.legendRow}>
-                  <View style={[styles.legendSwatch, { backgroundColor: '#94a3b8' }]} />
-                  <Text style={styles.legendText} numberOfLines={2}>
-                    Other / unset · {kpis.arrivalOther}
                   </Text>
                 </View>
               </View>
@@ -1633,15 +1628,15 @@ const styles = StyleSheet.create({
   /**
    * Responsive: stretch to fill on wide screens; columns clamp to their minWidths
    * on narrow ones and the wrapper above provides horizontal scroll.
-   * 1140 = sum of column minWidths (180+130+110+100+130+200+120+170).
+   * 790 = sum of column minWidths (128+92+84+82+100+96+88+120).
    */
   tableInner: {
     flexGrow: 1,
     flexShrink: 0,
-    minWidth: 1140,
+    minWidth: 790,
   },
   tableInnerNarrow: {
-    minWidth: 1140,
+    minWidth: 790,
   },
   tableHeadRow: {
     flexDirection: 'row',
@@ -1747,14 +1742,14 @@ const styles = StyleSheet.create({
   },
 
   /** Flex-based columns: ratios + minWidths so the table fills wide screens and clamps on narrow */
-  cEmployee: { flex: 2, minWidth: 180, flexBasis: 0 as any },
-  cTracking: { flex: 1.2, minWidth: 130, flexBasis: 0 as any },
-  cType: { flex: 1, minWidth: 110, flexBasis: 0 as any },
-  cDate: { flex: 1, minWidth: 100, flexBasis: 0 as any },
-  cStatus: { flex: 1.2, minWidth: 130, flexBasis: 0 as any },
-  cArrival: { flex: 1.6, minWidth: 200, flexBasis: 0 as any, overflow: 'hidden' as any },
-  cCampus: { flex: 1.2, minWidth: 120, flexBasis: 0 as any },
-  cOffice: { flex: 1.6, minWidth: 170, flexBasis: 0 as any },
+  cEmployee: { flex: 2, minWidth: 128, flexBasis: 0 as any },
+  cTracking: { flex: 1.2, minWidth: 92, flexBasis: 0 as any },
+  cType: { flex: 1, minWidth: 84, flexBasis: 0 as any },
+  cDate: { flex: 1, minWidth: 82, flexBasis: 0 as any },
+  cStatus: { flex: 1.2, minWidth: 100, flexBasis: 0 as any },
+  cArrival: { flex: 1.4, minWidth: 96, flexBasis: 0 as any, overflow: 'hidden' as any },
+  cCampus: { flex: 1.2, minWidth: 88, flexBasis: 0 as any },
+  cOffice: { flex: 1.6, minWidth: 120, flexBasis: 0 as any },
 
   /** Type badge — "BadgeWithDot modern" */
   typeBadge: {

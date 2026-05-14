@@ -8,9 +8,86 @@ const TravelOrderCounter = require('../models/TravelOrderCounter');
 const QRCode = require('qrcode');
 const { parseLocalDate, parseMeridiemTimeToDate } = require('../utils/dateTime');
 const { getEffectiveSigner, toIdString } = require('../utils/oic');
+const { travelOrderToClientJson, travelOrdersToClientJson } = require('../utils/travelOrderSerialize');
 const multer = require('multer');
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+
+const ALLOWED_SUPPORTING_MIMES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/pjpeg',
+  'image/heic',
+  'image/heif',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
+const MAX_SUPPORTING_FILES = 15;
+
+const uploadSupporting = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024, files: MAX_SUPPORTING_FILES + 1 },
+}).fields([
+  { name: 'documents', maxCount: MAX_SUPPORTING_FILES },
+  { name: 'document', maxCount: 1 },
+]);
+
+/** Metadata-only (no binary) for list/detail JSON. */
+const DOCUMENT_META_SELECT =
+  'document.name document.contentType documents.name documents.contentType';
+
+function normalizeSupportingMime(file) {
+  let mt = (file.mimetype || '').toLowerCase();
+  const orig = (file.originalname || '').toLowerCase();
+  if (!ALLOWED_SUPPORTING_MIMES.has(mt)) {
+    if (orig.endsWith('.docx')) {
+      mt = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    } else if (orig.endsWith('.pdf')) {
+      mt = 'application/pdf';
+    }
+  }
+  return mt;
+}
+
+async function canViewSupportingDocument(reqUser, travelOrderLean) {
+  if (!reqUser || !travelOrderLean) return false;
+  const uid = toIdString(reqUser.userId || reqUser.id);
+  if (!uid) return false;
+
+  const empId = toIdString(travelOrderLean.employee?._id || travelOrderLean.employee);
+  if (empId && empId === uid) return true;
+
+  const role = reqUser.role;
+  if (role === 'Admin') return true;
+  if (role === 'Human Resource Personnel') return true;
+  if (role === 'Security Personnel') return true;
+
+  const recs = travelOrderLean.recommendedBy || [];
+  for (const r of recs) {
+    const rid = toIdString(r?._id || r);
+    if (!rid) continue;
+    if (rid === uid) return true;
+    const resolution = await getEffectiveSigner(rid);
+    if (resolution && toIdString(resolution.signerId) === uid) return true;
+  }
+
+  const president = await User.findOne({ role: 'President' }).select('_id').lean();
+  if (president?._id) {
+    const resolution = await getEffectiveSigner(president._id);
+    if (resolution && toIdString(resolution.signerId) === uid) return true;
+  }
+
+  const sigs = travelOrderLean.recommenderSignatures || [];
+  for (const s of sigs) {
+    const signerId = toIdString(s.user?._id || s.user);
+    if (signerId && signerId === uid) return true;
+  }
+
+  return false;
+}
 
 // Build QR payload with full document details for guard (no base64 signatures)
 function buildTravelOrderQrPayload(doc) {
@@ -82,7 +159,23 @@ async function notifyUsersWithRole(io, role, { message, type, relatedId }) {
 }
 
 // Create a new travel order
-router.post('/', [auth, upload.single('document')], async (req, res) => {
+router.post(
+  '/',
+  auth,
+  (req, res, next) => {
+    uploadSupporting(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ message: 'Each supporting file must be 5 MB or smaller.' });
+        }
+        if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+          return res.status(400).json({ message: 'Too many supporting files attached.' });
+        }
+      }
+      next(err);
+    });
+  },
+  async (req, res) => {
   try {
     const { date, address, salary, to, purpose, departureDate, arrivalDate, additionalInfo, timeOut, recommendedBy, participants, employeeAddress } = req.body;
 
@@ -123,12 +216,35 @@ router.post('/', [auth, upload.single('document')], async (req, res) => {
       employeeAddress,
     };
 
-    if (req.file) {
-      travelOrderData.document = {
-        data: req.file.buffer,
-        contentType: req.file.mimetype,
-        name: req.file.originalname
-      };
+    const fileList = [];
+    if (req.files && Array.isArray(req.files.documents)) {
+      fileList.push(...req.files.documents);
+    }
+    if (req.files && Array.isArray(req.files.document)) {
+      fileList.push(...req.files.document);
+    }
+
+    if (fileList.length > MAX_SUPPORTING_FILES) {
+      return res.status(400).json({
+        message: `You can attach at most ${MAX_SUPPORTING_FILES} supporting files.`,
+      });
+    }
+
+    if (fileList.length > 0) {
+      travelOrderData.documents = [];
+      for (const file of fileList) {
+        const mt = normalizeSupportingMime(file);
+        if (!ALLOWED_SUPPORTING_MIMES.has(mt)) {
+          return res.status(400).json({
+            message: 'Only PDF, Word (.docx), and image files are allowed for supporting documents.',
+          });
+        }
+        travelOrderData.documents.push({
+          data: file.buffer,
+          contentType: mt,
+          name: file.originalname,
+        });
+      }
     }
 
     if (recommendedBy) {
@@ -163,14 +279,15 @@ router.post('/', [auth, upload.single('document')], async (req, res) => {
     }
 
     // --- Real-time Update via Socket.IO ---
-    req.io.emit('travelOrderDataChanged', travelOrder);
+    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
 
-    res.status(201).json(travelOrder);
+    res.status(201).json(travelOrderToClientJson(travelOrder));
   } catch (error) {
     console.error('Error creating travel order:', error);
     res.status(500).json({ message: 'Server error' });
   }
-});
+  }
+);
 
 
 // Get all travel orders for president approval (also accessible to anyone acting as OIC for the President)
@@ -182,7 +299,9 @@ router.get('/for-president-approval', [auth], async (req, res) => {
       .populate('approvedBy', 'name')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status signature approverSignature employeeAddress recommenderSignatures recommendersWhoApproved');
+      .select(
+        `employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status signature approverSignature employeeAddress recommenderSignatures recommendersWhoApproved ${DOCUMENT_META_SELECT}`
+      );
 
     // Resolve the current effective president signer once, since every doc here is "for President".
     const president = await User.findOne({ role: 'President' }).select('_id').lean();
@@ -204,7 +323,7 @@ router.get('/for-president-approval', [auth], async (req, res) => {
     const annotated = forPresidentApprovalOrders.map((o) => {
       const obj = o.toObject ? o.toObject() : o;
       if (presidentSigner) obj.nextSigner = presidentSigner;
-      return obj;
+      return travelOrderToClientJson(obj);
     });
 
     res.json(annotated);
@@ -272,9 +391,9 @@ router.put('/:id/approve-president', [auth], async (req, res) => {
     }
 
     // --- Real-time Update via Socket.IO ---
-    req.io.emit('travelOrderDataChanged', travelOrder);
+    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
 
-    res.json(travelOrder);
+    res.json(travelOrderToClientJson(travelOrder));
   } catch (error) {
     console.error('Error approving travel order by president:', error);
     res.status(500).json({ message: 'Server error' });
@@ -290,7 +409,9 @@ router.get('/pending', [auth], async (req, res) => {
       .populate('approvedBy', 'name')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress recommenderSignatures recommendersWhoApproved participants');
+      .select(
+        `employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress recommenderSignatures recommendersWhoApproved participants ${DOCUMENT_META_SELECT}`
+      );
 
     // Annotate each order with the next expected recommender's effective signer info,
     // so clients can show "Acting as OIC for X" badges and filter to their queue.
@@ -312,7 +433,7 @@ router.get('/pending', [auth], async (req, res) => {
             };
           }
         }
-        return obj;
+        return travelOrderToClientJson(obj);
       })
     );
 
@@ -545,9 +666,9 @@ router.put('/:id/status', [auth], async (req, res) => {
     }
 
     // --- Real-time Update via Socket.IO ---
-    req.io.emit('travelOrderDataChanged', travelOrder);
+    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
 
-    res.json(travelOrder);
+    res.json(travelOrderToClientJson(travelOrder));
   } catch (error) {
     console.error('Error updating travel order status:', error);
     res.status(500).json({ message: 'Server error' });
@@ -558,6 +679,7 @@ router.put('/:id/status', [auth], async (req, res) => {
 router.get('/my-orders', auth, async (req, res) => {
   try {
     const userOrders = await TravelOrder.find({ employee: req.user.userId })
+      .select('-document.data -documents.data')
       .populate('employee', 'name profilePicture role employeeAddress')
       .populate('approvedBy', 'name')
       .populate('presidentApprovedBy', 'name')
@@ -567,7 +689,7 @@ router.get('/my-orders', auth, async (req, res) => {
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .sort({ createdAt: -1 })
       .lean();
-    res.json(userOrders);
+    res.json(travelOrdersToClientJson(userOrders));
   } catch (error) {
     console.error('Error fetching user travel orders:', error);
     res.status(500).json({ message: 'Server error' });
@@ -640,7 +762,7 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
           const payload = hrUser.notifications[hrUser.notifications.length - 1].toObject ? hrUser.notifications[hrUser.notifications.length - 1].toObject() : hrUser.notifications[hrUser.notifications.length - 1];
           req.io.emit('newNotification', { userId: hrUser._id.toString(), notification: payload });
         }
-        req.io.emit('travelOrderDataChanged', order);
+        req.io.emit('travelOrderDataChanged', travelOrderToClientJson(order));
       }
     }
 
@@ -649,8 +771,10 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
       .populate('recommendedBy', 'name')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy signature approverSignature latitude longitude routePolyline employeeAddress recommenderSignatures recommendersWhoApproved');
-    res.json(recommendedOrders);
+      .select(
+        `employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy signature approverSignature latitude longitude routePolyline employeeAddress recommenderSignatures recommendersWhoApproved ${DOCUMENT_META_SELECT}`
+      );
+    res.json(travelOrdersToClientJson(recommendedOrders));
   } catch (error) {
     console.error('Error fetching recommended travel orders:', error);
     res.status(500).json({ message: 'Server error' });
@@ -668,8 +792,10 @@ router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async 
       .populate('presidentSignedAsOicFor', 'name role')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress presidentSignature presidentApprovedBy presidentSignedAsOicFor recommenderSignatures recommendersWhoApproved');
-    res.json(hrApprovedOrders);
+      .select(
+        `employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress presidentSignature presidentApprovedBy presidentSignedAsOicFor recommenderSignatures recommendersWhoApproved ${DOCUMENT_META_SELECT}`
+      );
+    res.json(travelOrdersToClientJson(hrApprovedOrders));
   } catch (error) {
     console.error('Error fetching HR approved travel orders:', error);
     res.status(500).json({ message: 'Server error' });
@@ -703,8 +829,10 @@ router.get('/approved', [auth, authorize('Human Resource Personnel')], async (re
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .sort({ createdAt: -1 })
-      .select('employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress presidentSignature presidentApprovedBy presidentSignedAsOicFor recommenderSignatures recommendersWhoApproved');
-    res.json(approvedOrders);
+      .select(
+        `employee travelOrderNo date address salary to purpose departureDate arrivalDate additionalInfo status recommendedBy approvedBy signature approverSignature employeeAddress presidentSignature presidentApprovedBy presidentSignedAsOicFor recommenderSignatures recommendersWhoApproved ${DOCUMENT_META_SELECT}`
+      );
+    res.json(travelOrdersToClientJson(approvedOrders));
   } catch (error) {
     console.error('Error fetching approved travel orders:', error);
     res.status(500).json({ message: 'Server error' });
@@ -722,8 +850,10 @@ router.get('/returned', [auth, authorize('Human Resource Personnel')], async (re
       .populate('presidentSignedAsOicFor', 'name role')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .sort({ arrivalTime: -1, createdAt: -1 });
-    res.json(returnedOrders);
+      .select('-document.data -documents.data')
+      .sort({ arrivalTime: -1, createdAt: -1 })
+      .lean();
+    res.json(travelOrdersToClientJson(returnedOrders));
   } catch (error) {
     console.error('Error fetching returned travel orders:', error);
     res.status(500).json({ message: 'Server error' });
@@ -741,8 +871,10 @@ router.get('/verified', [auth, authorize('Security Personnel')], async (req, res
       .populate('presidentSignedAsOicFor', 'name role')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .sort({ departureTime: -1, createdAt: -1 });
-    res.json(verifiedOrders);
+      .select('-document.data -documents.data')
+      .sort({ departureTime: -1, createdAt: -1 })
+      .lean();
+    res.json(travelOrdersToClientJson(verifiedOrders));
   } catch (error) {
     console.error('Error fetching verified travel orders:', error);
     res.status(500).json({ message: 'Server error' });
@@ -783,8 +915,8 @@ router.put('/:id/verify', [auth, authorize('Security Personnel')], async (req, r
     travelOrder.departureTime = new Date();
     await travelOrder.save();
 
-    req.io.emit('travelOrderDataChanged', travelOrder);
-    res.json(travelOrder);
+    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
+    res.json(travelOrderToClientJson(travelOrder));
   } catch (error) {
     console.error('Error verifying travel order:', error);
     res.status(500).json({ message: 'Server error' });
@@ -829,8 +961,8 @@ router.put('/return/:id', auth, async (req, res) => {
       req.io.emit('newNotification', { userId: hrUser._id.toString(), notification: payload });
     }
 
-    req.io.emit('travelOrderDataChanged', travelOrder);
-    res.json(travelOrder);
+    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
+    res.json(travelOrderToClientJson(travelOrder));
   } catch (error) {
     console.error('Error marking travel order as returned:', error);
     res.status(500).json({ message: 'Server error' });
@@ -861,10 +993,61 @@ router.put('/:id/return', auth, async (req, res) => {
     travelOrder.arrivalTime = new Date();
     await travelOrder.save();
 
-    req.io.emit('travelOrderDataChanged', travelOrder);
-    res.json(travelOrder);
+    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
+    res.json(travelOrderToClientJson(travelOrder));
   } catch (error) {
     console.error('Error marking travel order as returned:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Supporting document (PDF / Word / image). Authorized for employee, signatory chain, HR, security, admin.
+router.get('/:id/supporting-document', auth, async (req, res) => {
+  try {
+    const rawIndex = parseInt(String(req.query.index ?? '0'), 10);
+    const index = Number.isFinite(rawIndex) && rawIndex >= 0 ? rawIndex : 0;
+
+    const travelOrder = await TravelOrder.findById(req.params.id)
+      .select('document documents employee recommendedBy recommenderSignatures')
+      .populate('recommendedBy', '_id')
+      .populate({ path: 'recommenderSignatures.user', select: '_id' })
+      .lean();
+
+    if (!travelOrder) {
+      return res.status(404).json({ message: 'Travel order not found.' });
+    }
+
+    const fileSlots = [];
+    if (Array.isArray(travelOrder.documents) && travelOrder.documents.length > 0) {
+      for (const d of travelOrder.documents) {
+        if (d) fileSlots.push(d);
+      }
+    } else if (travelOrder.document && travelOrder.document.data) {
+      fileSlots.push(travelOrder.document);
+    }
+
+    if (fileSlots.length === 0) {
+      return res.status(404).json({ message: 'No supporting document on this travel order.' });
+    }
+
+    const doc = fileSlots[index];
+    const buf = doc && doc.data;
+    if (!buf || (Buffer.isBuffer(buf) ? buf.length === 0 : !buf.length)) {
+      return res.status(404).json({ message: 'Supporting file not found at this index.' });
+    }
+
+    const allowed = await canViewSupportingDocument(req.user, travelOrder);
+    if (!allowed) {
+      return res.status(403).json({ message: 'Not authorized to view this supporting document.' });
+    }
+
+    const rawName = doc.name || 'attachment';
+    const filename = String(rawName).replace(/[^\w.\- ]+/g, '_').slice(0, 200);
+    res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.send(Buffer.isBuffer(buf) ? buf : Buffer.from(buf.data || buf));
+  } catch (error) {
+    console.error('Error serving travel order supporting document:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -873,6 +1056,7 @@ router.put('/:id/return', auth, async (req, res) => {
 router.get('/:id', [auth, authorize('Security Personnel')], async (req, res) => {
   try {
     const travelOrder = await TravelOrder.findById(req.params.id)
+      .select('-document.data -documents.data')
       .populate('employee', 'name email profilePicture role')
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
@@ -885,7 +1069,7 @@ router.get('/:id', [auth, authorize('Security Personnel')], async (req, res) => 
       return res.status(404).json({ message: 'Travel order not found.' });
     }
 
-    res.json(travelOrder);
+    res.json(travelOrderToClientJson(travelOrder));
   } catch (error) {
     console.error('Error fetching travel order:', error);
     res.status(500).json({ message: 'Server error' });

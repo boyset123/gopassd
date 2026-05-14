@@ -4,6 +4,7 @@ const PassSlip = require('../models/PassSlip');
 const TravelOrder = require('../models/TravelOrder');
 const auth = require('../middleware/auth');
 const authorize = require('../middleware/authorize');
+const { parseMeridiemTimeToDate } = require('../utils/dateTime');
 
 router.get('/', [auth, authorize('Human Resource Personnel')], async (req, res) => {
   try {
@@ -32,41 +33,26 @@ router.get('/', [auth, authorize('Human Resource Personnel')], async (req, res) 
       .populate('approvedBy', 'name')
       .populate('presidentApprovedBy', 'name');
 
-    const parseTime = (timeStr, date) => {
-      const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-      if (!match) return null;
-
-      let hours = parseInt(match[1], 10);
-      const minutes = parseInt(match[2], 10);
-      const ampm = match[3].toUpperCase();
-
-      if (ampm === 'PM' && hours < 12) hours += 12;
-      if (ampm === 'AM' && hours === 12) hours = 0;
-
-      const newDate = new Date(date);
-      newDate.setHours(hours, minutes, 0, 0);
-      return newDate;
-    };
-
     const passSlipsWithStatus = passSlips
       .filter(p => p.employee)
       .map(p => {
         const slip = p.toObject();
         if (slip.status === 'Returned' && slip.arrivalTime && slip.estimatedTimeBack) {
-          const estimatedTime = parseTime(slip.estimatedTimeBack, slip.arrivalTime);
-          if (estimatedTime) {
+          const scheduledReturn = parseMeridiemTimeToDate(slip.estimatedTimeBack, slip.date);
+          if (scheduledReturn) {
             const arrivalTime = new Date(slip.arrivalTime);
-            const diffMinutes = Math.round((arrivalTime - estimatedTime) / 60000);
+            const diffMs = arrivalTime.getTime() - scheduledReturn.getTime();
             const formattedArrivalTime = arrivalTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 
-            if (diffMinutes > 0) {
-              slip.arrivalStatus = `Overdue by ${diffMinutes} min (${formattedArrivalTime})`
+            if (diffMs > 0) {
+              const diffMinutes = Math.ceil(diffMs / 60000);
+              slip.arrivalStatus = `Overdue by ${diffMinutes} min (${formattedArrivalTime})`;
             } else {
-              slip.arrivalStatus = `On Time (${formattedArrivalTime})`
+              slip.arrivalStatus = `On Time (${formattedArrivalTime})`;
             }
           }
         } else if (slip.status === 'Completed') {
-            slip.arrivalStatus = 'Completed';
+          slip.arrivalStatus = 'Completed';
         }
         return slip;
       });

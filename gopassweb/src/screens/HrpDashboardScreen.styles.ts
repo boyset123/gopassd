@@ -864,7 +864,7 @@ export const styles = StyleSheet.create({
       }),
     },
     recordsTableMeta: {
-      paddingHorizontal: 20,
+      paddingHorizontal: 14,
       paddingTop: 16,
       paddingBottom: 14,
       borderBottomWidth: 1,
@@ -899,7 +899,7 @@ export const styles = StyleSheet.create({
     },
     /**
      * Responsive: flex to fill the host container width; only h-scroll below the minWidth
-     * (which matches the sum of column minWidths + 40px of row padding so columns never
+     * (which matches the sum of column minWidths + 28px of row padding so columns never
      * compress below readable size). `flexGrow: 1` ensures it stretches to fill the
      * horizontal ScrollView's visible area when the viewport is wider than minWidth.
      */
@@ -907,7 +907,7 @@ export const styles = StyleSheet.create({
       flexGrow: 1,
       flexShrink: 0,
       flexBasis: 'auto' as any,
-      minWidth: 1180,
+      minWidth: 910,
     },
     recordsTableHeader: {
       flexDirection: 'row',
@@ -915,7 +915,7 @@ export const styles = StyleSheet.create({
       borderBottomColor: '#EAECF0',
       paddingVertical: 12,
       backgroundColor: '#F9FAFB',
-      paddingHorizontal: 20,
+      paddingHorizontal: 14,
       alignItems: 'center',
     },
     recordsTableHeaderCell: {
@@ -929,23 +929,23 @@ export const styles = StyleSheet.create({
      * and never compress below a readable size on narrow ones. flexBasis: 0 forces the flex
      * ratios to be respected even when text content varies.
      */
-    recordsColEmployee: { flex: 2.2, minWidth: 180, flexBasis: 0 as any, paddingRight: 14 },
-    recordsColTracking: { flex: 1.2, minWidth: 120, flexBasis: 0 as any, paddingRight: 14 },
-    recordsColType: { flex: 1, minWidth: 110, flexBasis: 0 as any, paddingRight: 14 },
-    recordsColDate: { flex: 1, minWidth: 100, flexBasis: 0 as any, paddingRight: 14 },
-    /** Arrival status — wider ratio + clip so long badge text never bleeds into Campus */
+    recordsColEmployee: { flex: 2.2, minWidth: 140, flexBasis: 0 as any, paddingRight: 10 },
+    recordsColTracking: { flex: 1.2, minWidth: 96, flexBasis: 0 as any, paddingRight: 10 },
+    recordsColType: { flex: 1, minWidth: 90, flexBasis: 0 as any, paddingRight: 10 },
+    recordsColDate: { flex: 1, minWidth: 88, flexBasis: 0 as any, paddingRight: 10 },
+    /** Arrival status — ratio + clip; label is short without parenthetical time */
     recordsColStatus: {
-      flex: 1.8,
-      minWidth: 200,
+      flex: 1.5,
+      minWidth: 112,
       flexBasis: 0 as any,
-      paddingRight: 14,
+      paddingRight: 10,
       overflow: 'hidden',
     },
-    recordsColCampus: { flex: 1.2, minWidth: 120, flexBasis: 0 as any, paddingRight: 14 },
-    recordsColFaculty: { flex: 2, minWidth: 180, flexBasis: 0 as any, paddingRight: 14 },
+    recordsColCampus: { flex: 1.2, minWidth: 96, flexBasis: 0 as any, paddingRight: 10 },
+    recordsColFaculty: { flex: 2, minWidth: 140, flexBasis: 0 as any, paddingRight: 10 },
     recordsColActions: {
       flex: 1,
-      minWidth: 130,
+      minWidth: 112,
       flexBasis: 0 as any,
       flexDirection: 'row',
       alignItems: 'center',
@@ -954,7 +954,7 @@ export const styles = StyleSheet.create({
     recordsTableRow: {
       flexDirection: 'row',
       paddingVertical: 14,
-      paddingHorizontal: 20,
+      paddingHorizontal: 14,
       borderBottomWidth: 1,
       borderBottomColor: '#EAECF0',
       alignItems: 'center',

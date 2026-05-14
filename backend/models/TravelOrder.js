@@ -56,7 +56,9 @@ const travelOrderSchema = new mongoose.Schema({
   longitude: { type: Number },
   routePolyline: { type: String },
   participants: [{ type: String }],
+  /** @deprecated Prefer `documents`; kept for existing records. */
   document: { data: Buffer, contentType: String, name: String },
+  documents: [{ data: Buffer, contentType: String, name: String }],
   rejectionReason: { type: String },
   createdAt: { type: Date, default: Date.now },
 });

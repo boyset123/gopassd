@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Image, Pressable, useWindowDimensions } from 'react-native';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, Image, Pressable, useWindowDimensions, ActivityIndicator, Alert, Platform, Linking } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { API_URL } from '../config/api';
 
 type SignatureType = 'draw' | 'upload';
 
@@ -44,6 +46,8 @@ export interface TravelOrderWebOrder {
   approvedBy?: { _id?: string; name?: string };
   latitude?: number;
   longitude?: number;
+  document?: { name?: string; contentType?: string } | null;
+  documents?: { name?: string; contentType?: string }[] | null;
 }
 
 export interface TravelOrderFormWebProps {
@@ -125,6 +129,60 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
   const a4PageWidth = Math.min(Math.max(windowWidth - 48, 280), 440);
 
   const [generatedTravelOrderNo, setGeneratedTravelOrderNo] = useState<string>('');
+  const [supportingDocLoadingIndex, setSupportingDocLoadingIndex] = useState<number | null>(null);
+
+  const supportingMetaList = useMemo(() => {
+    if (order.documents && order.documents.length > 0) {
+      return order.documents.filter((d) => d && (d.name || d.contentType));
+    }
+    if (order.document?.name || order.document?.contentType) {
+      return [order.document];
+    }
+    return [];
+  }, [order.documents, order.document]);
+
+  const hasSupportingDocument = supportingMetaList.length > 0;
+
+  const openSupportingDocumentAtIndex = useCallback(
+    async (fileIndex: number) => {
+      if (!order._id || fileIndex < 0 || fileIndex >= supportingMetaList.length) return;
+      setSupportingDocLoadingIndex(fileIndex);
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        const res = await fetch(
+          `${API_URL}/travel-orders/${order._id}/supporting-document?index=${fileIndex}`,
+          {
+            headers: token ? { 'x-auth-token': token } : {},
+          }
+        );
+        if (!res.ok) {
+          Alert.alert('Could not open', 'The file may be missing or you may not have permission to view it.');
+          return;
+        }
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.open(objectUrl, '_blank', 'noopener,noreferrer');
+          setTimeout(() => URL.revokeObjectURL(objectUrl), 120000);
+        } else {
+          const canOpen = await Linking.canOpenURL(objectUrl);
+          if (canOpen) {
+            await Linking.openURL(objectUrl);
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 120000);
+          } else {
+            URL.revokeObjectURL(objectUrl);
+            Alert.alert('Open file', 'Unable to open the file on this device.');
+          }
+        }
+      } catch (e) {
+        console.error(e);
+        Alert.alert('Error', 'Could not open the supporting document.');
+      } finally {
+        setSupportingDocLoadingIndex(null);
+      }
+    },
+    [order._id, supportingMetaList]
+  );
 
   const dateForNo = useMemo(() => {
     const d = new Date(order.date || '');
@@ -422,6 +480,30 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.
         </Text>
 
+        {hasSupportingDocument ? (
+          <View style={styles.supportingAttachmentsWeb}>
+            {supportingMetaList.map((meta, i) => (
+              <Pressable
+                key={`${meta.name || 'file'}-${i}`}
+                onPress={() => void openSupportingDocumentAtIndex(i)}
+                disabled={supportingDocLoadingIndex !== null}
+                style={({ pressed }) => [styles.supportingDocRow, pressed && styles.supportingDocRowPressed]}
+              >
+                <FontAwesome name="paperclip" size={12} color="#011a6b" style={{ marginRight: 8 }} />
+                <Text style={styles.supportingDocText} numberOfLines={1}>
+                  {supportingMetaList.length > 1 ? `File ${i + 1}: ` : ''}
+                  {meta.name || 'Attachment'}
+                </Text>
+                {supportingDocLoadingIndex === i ? (
+                  <ActivityIndicator size="small" color="#011a6b" />
+                ) : (
+                  <Text style={styles.supportingDocAction}>View</Text>
+                )}
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+
         <View style={styles.signatureSection}>{renderRecommenderSignatures()}</View>
 
         <View style={styles.signatureSection}>
@@ -648,6 +730,38 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textDecorationLine: 'underline',
     textDecorationStyle: 'solid',
+  },
+  supportingAttachmentsWeb: {
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  supportingDocRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(1,26,107,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.2)',
+  },
+  supportingDocRowPressed: {
+    opacity: 0.9,
+  },
+  supportingDocText: {
+    flex: 1,
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#011a6b',
+  },
+  supportingDocAction: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#011a6b',
+    textDecorationLine: 'underline',
   },
   viewMapBtn: {
     alignSelf: 'flex-start',

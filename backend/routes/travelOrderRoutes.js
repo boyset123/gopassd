@@ -19,6 +19,7 @@ const {
   resourceTypeForMime,
   destroyTravelOrderUpload,
 } = require('../lib/cloudinaryTravelOrder');
+const { proxyHttpUrlToExpressResponse } = require('../utils/proxyHttpUrlToExpressResponse');
 
 const ALLOWED_SUPPORTING_MIMES = new Set([
   'image/jpeg',
@@ -1095,7 +1096,21 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
           ? doc.resourceType
           : resourceTypeForMime(doc.contentType);
       const url = signedDeliveryUrl(doc.publicId, rt);
-      return res.redirect(302, url);
+      const rawName = doc.name || 'attachment';
+      const filename = String(rawName).replace(/[^\w.\- ]+/g, '_').slice(0, 200);
+      try {
+        await proxyHttpUrlToExpressResponse(url, res, {
+          filename,
+          fallbackContentType: doc.contentType || 'application/octet-stream',
+        });
+        return;
+      } catch (err) {
+        console.error('Cloudinary attachment proxy failed:', err);
+        if (!res.headersSent) {
+          return res.status(502).json({ message: 'Could not retrieve attachment from storage.' });
+        }
+      }
+      return;
     }
 
     const buf = doc.data;

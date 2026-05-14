@@ -20,14 +20,24 @@ function travelOrderToClientJson(doc) {
     return false;
   };
 
-  if (Array.isArray(o.documents) && o.documents.length > 0) {
-    for (const d of o.documents) {
+  const rawDocuments = Array.isArray(o.documents) ? o.documents : [];
+
+  if (rawDocuments.length > 0) {
+    for (const d of rawDocuments) {
       if (!d) continue;
       const { data: _data, ...meta } = d;
       const hadBinary = hasBufferData(_data);
       const name = meta.name || (hadBinary ? 'attachment' : '');
       const contentType = meta.contentType || (hadBinary ? 'application/octet-stream' : '');
       if (name || contentType) metaList.push({ name, contentType });
+    }
+    // If list queries stripped subdoc fields but slots still exist, keep one client row per file
+    // so HR can call GET .../supporting-document?index=i (indices must match fileSlots on server).
+    for (let i = metaList.length; i < rawDocuments.length; i++) {
+      metaList.push({
+        name: `Attachment ${i + 1}`,
+        contentType: 'application/octet-stream',
+      });
     }
   } else if (o.document) {
     const { data: _data, ...meta } = o.document;

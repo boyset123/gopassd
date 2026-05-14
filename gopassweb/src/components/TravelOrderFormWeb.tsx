@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Image, Pressable, useWindowDimensions, ActivityIndicator, Alert, Platform, Linking } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -130,18 +130,81 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
 
   const [generatedTravelOrderNo, setGeneratedTravelOrderNo] = useState<string>('');
   const [supportingDocLoadingIndex, setSupportingDocLoadingIndex] = useState<number | null>(null);
+  /** Web-only: blob URLs for image attachment previews */
+  const [supportingThumbUris, setSupportingThumbUris] = useState<string[]>([]);
+  const supportingThumbBlobsRef = useRef<string[]>([]);
 
   const supportingMetaList = useMemo(() => {
-    if (order.documents && order.documents.length > 0) {
-      return order.documents.filter((d) => d && (d.name || d.contentType));
+    const docs = order.documents;
+    if (Array.isArray(docs) && docs.length > 0) {
+      return docs.map((d, i) => ({
+        name: normalizeInline(d?.name) || normalizeInline((d as { filename?: string })?.filename) || `Attachment ${i + 1}`,
+        contentType: d?.contentType || (d as { type?: string })?.type,
+      }));
     }
-    if (order.document?.name || order.document?.contentType) {
-      return [order.document];
+    if (order.document && (order.document.name || order.document.contentType)) {
+      return [
+        {
+          name: normalizeInline(order.document.name) || 'Attachment',
+          contentType: order.document.contentType,
+        },
+      ];
     }
     return [];
   }, [order.documents, order.document]);
 
   const hasSupportingDocument = supportingMetaList.length > 0;
+
+  useEffect(() => {
+    supportingThumbBlobsRef.current.forEach((u) => URL.revokeObjectURL(u));
+    supportingThumbBlobsRef.current = [];
+    setSupportingThumbUris([]);
+
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !order._id || supportingMetaList.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        if (!token || cancelled) return;
+        const uris: string[] = [];
+        for (let i = 0; i < supportingMetaList.length; i++) {
+          const ct = (supportingMetaList[i].contentType || '').toLowerCase();
+          if (!ct.startsWith('image/')) {
+            uris.push('');
+            continue;
+          }
+          try {
+            const res = await fetch(
+              `${API_URL}/travel-orders/${order._id}/supporting-document?index=${i}`,
+              { headers: { 'x-auth-token': token } }
+            );
+            if (!res.ok || cancelled) {
+              uris.push('');
+              continue;
+            }
+            const blob = await res.blob();
+            const u = URL.createObjectURL(blob);
+            supportingThumbBlobsRef.current.push(u);
+            uris.push(u);
+          } catch {
+            uris.push('');
+          }
+        }
+        if (!cancelled) setSupportingThumbUris(uris);
+      } catch {
+        if (!cancelled) setSupportingThumbUris([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      supportingThumbBlobsRef.current.forEach((u) => URL.revokeObjectURL(u));
+      supportingThumbBlobsRef.current = [];
+    };
+  }, [order._id, supportingMetaList]);
 
   const openSupportingDocumentAtIndex = useCallback(
     async (fileIndex: number) => {
@@ -170,7 +233,18 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
         );
         if (!res.ok) {
           if (preOpenedTab && !preOpenedTab.closed) preOpenedTab.close();
-          Alert.alert('Could not open', 'The file may be missing or you may not have permission to view it.');
+          let detail = '';
+          try {
+            detail = (await res.text()).trim().slice(0, 240);
+          } catch {
+            /* ignore */
+          }
+          Alert.alert(
+            'Could not open',
+            detail
+              ? `Server responded (${res.status}): ${detail}`
+              : `HTTP ${res.status}. The file may be missing or you may not have permission to view it.`
+          );
           return;
         }
         const meta = supportingMetaList[fileIndex];
@@ -410,6 +484,46 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
 
   return (
     <View style={styles.a4Stack}>
+      <View style={[styles.supportingAttachmentsOutside, { width: a4PageWidth }]}>
+        <Text style={styles.supportingOutsideTitle}>Supporting documents</Text>
+        <Text style={styles.supportingOutsideHint}>
+          Submitted with this request for HR review only — not part of the official printed travel order (FM-DOrSU-HRMO-01).
+        </Text>
+        {hasSupportingDocument ? (
+          <View style={styles.supportingAttachmentsWeb}>
+            {supportingMetaList.map((meta, i) => (
+              <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBlock}>
+                <Pressable
+                  onPress={() => void openSupportingDocumentAtIndex(i)}
+                  disabled={supportingDocLoadingIndex !== null}
+                  style={({ pressed }) => [styles.supportingDocRow, pressed && styles.supportingDocRowPressed]}
+                >
+                  <FontAwesome name="paperclip" size={12} color="#011a6b" style={{ marginRight: 8 }} />
+                  <Text style={styles.supportingDocText} numberOfLines={1}>
+                    {supportingMetaList.length > 1 ? `File ${i + 1}: ` : ''}
+                    {meta.name || 'Attachment'}
+                  </Text>
+                  {supportingDocLoadingIndex === i ? (
+                    <ActivityIndicator size="small" color="#011a6b" />
+                  ) : (
+                    <Text style={styles.supportingDocAction}>View</Text>
+                  )}
+                </Pressable>
+                {Platform.OS === 'web' && supportingThumbUris[i] ? (
+                  <Image
+                    source={{ uri: supportingThumbUris[i] }}
+                    style={styles.supportingThumbImage}
+                    resizeMode="contain"
+                  />
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.supportingOutsideEmpty}>No supporting documents were uploaded for this travel order.</Text>
+        )}
+      </View>
+
       <View style={[styles.a4Page, { width: a4PageWidth }]}>
         <View style={styles.docHeader}>
           <View style={styles.universityNameContainer}>
@@ -535,38 +649,6 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
             )}
           </View>
         </View>
-      </View>
-
-      <View style={[styles.supportingAttachmentsOutside, { width: a4PageWidth }]}>
-        <Text style={styles.supportingOutsideTitle}>Supporting documents</Text>
-        <Text style={styles.supportingOutsideHint}>
-          Submitted with this request for HR review only — not part of the official printed travel order (FM-DOrSU-HRMO-01).
-        </Text>
-        {hasSupportingDocument ? (
-          <View style={styles.supportingAttachmentsWeb}>
-            {supportingMetaList.map((meta, i) => (
-              <Pressable
-                key={`${meta.name || 'file'}-${i}`}
-                onPress={() => void openSupportingDocumentAtIndex(i)}
-                disabled={supportingDocLoadingIndex !== null}
-                style={({ pressed }) => [styles.supportingDocRow, pressed && styles.supportingDocRowPressed]}
-              >
-                <FontAwesome name="paperclip" size={12} color="#011a6b" style={{ marginRight: 8 }} />
-                <Text style={styles.supportingDocText} numberOfLines={1}>
-                  {supportingMetaList.length > 1 ? `File ${i + 1}: ` : ''}
-                  {meta.name || 'Attachment'}
-                </Text>
-                {supportingDocLoadingIndex === i ? (
-                  <ActivityIndicator size="small" color="#011a6b" />
-                ) : (
-                  <Text style={styles.supportingDocAction}>View</Text>
-                )}
-              </Pressable>
-            ))}
-          </View>
-        ) : (
-          <Text style={styles.supportingOutsideEmpty}>No supporting documents were uploaded for this travel order.</Text>
-        )}
       </View>
     </View>
   );
@@ -774,7 +856,8 @@ const styles = StyleSheet.create({
     textDecorationStyle: 'solid',
   },
   supportingAttachmentsOutside: {
-    marginTop: 16,
+    marginTop: 0,
+    marginBottom: 16,
     padding: 14,
     borderRadius: 10,
     borderWidth: 1,
@@ -801,6 +884,16 @@ const styles = StyleSheet.create({
   },
   supportingAttachmentsWeb: {
     gap: 8,
+  },
+  supportingDocBlock: {
+    marginBottom: 4,
+  },
+  supportingThumbImage: {
+    width: '100%' as const,
+    maxHeight: 160,
+    marginTop: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.9)',
   },
   supportingDocRow: {
     flexDirection: 'row',

@@ -298,7 +298,8 @@ router.get('/for-president-approval', [auth], async (req, res) => {
       .populate('approvedBy', 'name')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select('-document.data -documents.data');
+      .select('-document.data -documents.data')
+      .lean();
 
     // Resolve the current effective president signer once, since every doc here is "for President".
     const president = await User.findOne({ role: 'President' }).select('_id').lean();
@@ -318,7 +319,7 @@ router.get('/for-president-approval', [auth], async (req, res) => {
     }
 
     const annotated = forPresidentApprovalOrders.map((o) => {
-      const obj = o.toObject ? o.toObject() : o;
+      const obj = o && typeof o === 'object' ? { ...o } : o;
       if (presidentSigner) obj.nextSigner = presidentSigner;
       return travelOrderToClientJson(obj);
     });
@@ -406,13 +407,14 @@ router.get('/pending', [auth], async (req, res) => {
       .populate('approvedBy', 'name')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select('-document.data -documents.data');
+      .select('-document.data -documents.data')
+      .lean();
 
     // Annotate each order with the next expected recommender's effective signer info,
     // so clients can show "Acting as OIC for X" badges and filter to their queue.
     const annotated = await Promise.all(
       pendingOrders.map(async (order) => {
-        const obj = order.toObject ? order.toObject() : order;
+        const obj = { ...order };
         const approvedCount = Array.isArray(obj.recommendersWhoApproved) ? obj.recommendersWhoApproved.length : 0;
         const expectedNext = Array.isArray(obj.recommendedBy) ? obj.recommendedBy[approvedCount] : null;
         if (expectedNext && expectedNext._id) {
@@ -767,7 +769,8 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .sort({ createdAt: -1 })
-      .select('-document.data -documents.data');
+      .select('-document.data -documents.data')
+      .lean();
     res.json(travelOrdersToClientJson(recommendedOrders));
   } catch (error) {
     console.error('Error fetching recommended travel orders:', error);
@@ -786,7 +789,8 @@ router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async 
       .populate('presidentSignedAsOicFor', 'name role')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
-      .select('-document.data -documents.data');
+      .select('-document.data -documents.data')
+      .lean();
     res.json(travelOrdersToClientJson(hrApprovedOrders));
   } catch (error) {
     console.error('Error fetching HR approved travel orders:', error);
@@ -821,7 +825,8 @@ router.get('/approved', [auth, authorize('Human Resource Personnel')], async (re
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .sort({ createdAt: -1 })
-      .select('-document.data -documents.data');
+      .select('-document.data -documents.data')
+      .lean();
     res.json(travelOrdersToClientJson(approvedOrders));
   } catch (error) {
     console.error('Error fetching approved travel orders:', error);

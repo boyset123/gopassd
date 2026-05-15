@@ -155,6 +155,20 @@ async function getEffectiveSigner(originalUserId) {
 }
 
 /**
+ * The President account for signing / attachment access.
+ * Prefer the logged-in user when their JWT role is President (avoids findOne picking the wrong user).
+ */
+async function resolvePresidentAccount(reqUser) {
+  if (!reqUser) return null;
+  const uid = toIdString(reqUser.userId || reqUser.id);
+  if (uid && reqUser.role === 'President') {
+    const self = await User.findById(uid).select('_id name role').lean();
+    if (self?.role === 'President') return self;
+  }
+  return User.findOne({ role: 'President' }).select('_id name role').lean();
+}
+
+/**
  * Validates that `actingUserId` is allowed to sign in place of `originalUserId`.
  * Returns the resolution object if allowed; throws an Error with .status otherwise.
  */
@@ -252,6 +266,7 @@ module.exports = {
   isUserOnTravel,
   hasActiveApprovedTravelOrder,
   getEffectiveSigner,
+  resolvePresidentAccount,
   assertCanSignFor,
   buildPrimaryCandidateFilter,
   buildFallbackCandidateFilter,

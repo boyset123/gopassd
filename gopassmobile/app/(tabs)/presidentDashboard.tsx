@@ -338,8 +338,16 @@ export default function PresidentDashboard() {
       setSelectedItem(null);
       setSelectedItemType(null);
       fetchData(); // Refresh the list
-    } catch (err) {
-      Alert.alert('Error', `Failed to update the ${selectedItemType === 'slip' ? 'pass slip' : 'travel order'}.`);
+    } catch (err: unknown) {
+      const axiosMsg =
+        axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object'
+          ? (err.response.data as { message?: string }).message
+          : undefined;
+      Alert.alert(
+        'Error',
+        axiosMsg ||
+          `Failed to update the ${selectedItemType === 'slip' ? 'pass slip' : 'travel order'}.`
+      );
       console.error(err);
     }
   };

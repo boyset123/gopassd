@@ -7,7 +7,7 @@ const User = require('../models/User');
 const TravelOrderCounter = require('../models/TravelOrderCounter');
 const QRCode = require('qrcode');
 const { parseLocalDate, parseMeridiemTimeToDate } = require('../utils/dateTime');
-const { getEffectiveSigner, toIdString } = require('../utils/oic');
+const { getEffectiveSigner, assertCanSignFor, resolvePresidentAccount, toIdString } = require('../utils/oic');
 const { travelOrderToClientJson, travelOrdersToClientJson, attachEmployeeRoleFallback } = require('../utils/travelOrderSerialize');
 
 /** Populate employee before JSON so clients always receive `employee.role` (socket/POST often omitted it). */
@@ -96,9 +96,8 @@ async function canViewSupportingDocument(reqUser, travelOrderLean) {
     if (resolution && toIdString(resolution.signerId) === uid) return true;
   }
 
-  // President role, the configured President user, their OIC, or the President while on travel (OIC signs).
   if (role === 'President') return true;
-  const president = await User.findOne({ role: 'President' }).select('_id').lean();
+  const president = await resolvePresidentAccount(reqUser);
   if (president?._id) {
     const presidentId = toIdString(president._id);
     if (presidentId === uid) return true;
@@ -421,22 +420,22 @@ router.put('/:id/approve-president', [auth], async (req, res) => {
       return res.status(400).json({ message: 'Only travel orders submitted for president approval can be approved.' });
     }
 
-    // Resolve the effective signer (President or their current OIC) and authorize.
-    const president = await User.findOne({ role: 'President' }).select('_id').lean();
+    const president = await resolvePresidentAccount(req.user);
     if (!president) {
       return res.status(500).json({ message: 'No President configured in the system.' });
     }
-    const resolution = await getEffectiveSigner(president._id);
-    if (!resolution) {
-      return res.status(500).json({ message: 'Unable to resolve effective signer for the President.' });
-    }
-    const expectedSignerId = toIdString(resolution.signerId);
-    if (toIdString(req.user.userId) !== expectedSignerId) {
-      return res.status(403).json({
-        message: resolution.viaOic
+
+    let resolution;
+    try {
+      resolution = await assertCanSignFor(req.user.userId, president._id);
+    } catch (signErr) {
+      const fallback = await getEffectiveSigner(president._id);
+      const message =
+        signErr.message ||
+        (fallback?.viaOic
           ? 'Only the assigned OIC for the President can sign while the President is on travel.'
-          : 'Only the President can sign this travel order.',
-      });
+          : 'Only the President can sign this travel order.');
+      return res.status(signErr.status || 403).json({ message });
     }
 
     travelOrder.status = 'President Approved';

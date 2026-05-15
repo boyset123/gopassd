@@ -5,7 +5,7 @@ const TravelOrder = require('../models/TravelOrder');
 const auth = require('../middleware/auth');
 const authorize = require('../middleware/authorize');
 const { parseMeridiemTimeToDate } = require('../utils/dateTime');
-const { travelOrderToClientJson } = require('../utils/travelOrderSerialize');
+const { travelOrderToClientJson, attachEmployeeRoleFallback } = require('../utils/travelOrderSerialize');
 
 router.get('/', [auth, authorize('Human Resource Personnel')], async (req, res) => {
   try {
@@ -35,6 +35,8 @@ router.get('/', [auth, authorize('Human Resource Personnel')], async (req, res) 
       .populate('presidentApprovedBy', 'name')
       // Same as other HR list routes: never send binary over JSON; keep attachment metadata for the web UI.
       .select('-document.data -documents.data');
+
+    await attachEmployeeRoleFallback(travelOrders);
 
     const passSlipsWithStatus = passSlips
       .filter(p => p.employee)

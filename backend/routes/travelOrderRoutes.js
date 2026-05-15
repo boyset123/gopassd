@@ -8,7 +8,7 @@ const TravelOrderCounter = require('../models/TravelOrderCounter');
 const QRCode = require('qrcode');
 const { parseLocalDate, parseMeridiemTimeToDate } = require('../utils/dateTime');
 const { getEffectiveSigner, toIdString } = require('../utils/oic');
-const { travelOrderToClientJson, travelOrdersToClientJson } = require('../utils/travelOrderSerialize');
+const { travelOrderToClientJson, travelOrdersToClientJson, attachEmployeeRoleFallback } = require('../utils/travelOrderSerialize');
 
 /** Populate employee before JSON so clients always receive `employee.role` (socket/POST often omitted it). */
 async function travelOrderToClientJsonWithEmployee(travelOrderDoc) {
@@ -19,6 +19,7 @@ async function travelOrderToClientJsonWithEmployee(travelOrderDoc) {
       console.warn('travelOrder employee populate failed:', err?.message || err);
     }
   }
+  await attachEmployeeRoleFallback([travelOrderDoc]);
   return travelOrderToClientJson(travelOrderDoc);
 }
 const multer = require('multer');
@@ -384,6 +385,8 @@ router.get('/for-president-approval', [auth], async (req, res) => {
       }
     }
 
+    await attachEmployeeRoleFallback(forPresidentApprovalOrders);
+
     const annotated = forPresidentApprovalOrders.map((o) => {
       const obj = o && typeof o === 'object' ? { ...o } : o;
       if (presidentSigner) obj.nextSigner = presidentSigner;
@@ -478,6 +481,8 @@ router.get('/pending', [auth], async (req, res) => {
 
     // Annotate each order with the next expected recommender's effective signer info,
     // so clients can show "Acting as OIC for X" badges and filter to their queue.
+    await attachEmployeeRoleFallback(pendingOrders);
+
     const annotated = await Promise.all(
       pendingOrders.map(async (order) => {
         const obj = { ...order };
@@ -752,6 +757,7 @@ router.get('/my-orders', auth, async (req, res) => {
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .sort({ createdAt: -1 })
       .lean();
+    await attachEmployeeRoleFallback(userOrders);
     res.json(travelOrdersToClientJson(userOrders));
   } catch (error) {
     console.error('Error fetching user travel orders:', error);
@@ -837,6 +843,7 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
       .sort({ createdAt: -1 })
       .select('-document.data -documents.data')
       .lean();
+    await attachEmployeeRoleFallback(recommendedOrders);
     res.json(travelOrdersToClientJson(recommendedOrders));
   } catch (error) {
     console.error('Error fetching recommended travel orders:', error);
@@ -857,6 +864,7 @@ router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async 
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
       .select('-document.data -documents.data')
       .lean();
+    await attachEmployeeRoleFallback(hrApprovedOrders);
     res.json(travelOrdersToClientJson(hrApprovedOrders));
   } catch (error) {
     console.error('Error fetching HR approved travel orders:', error);
@@ -893,6 +901,7 @@ router.get('/approved', [auth, authorize('Human Resource Personnel')], async (re
       .sort({ createdAt: -1 })
       .select('-document.data -documents.data')
       .lean();
+    await attachEmployeeRoleFallback(approvedOrders);
     res.json(travelOrdersToClientJson(approvedOrders));
   } catch (error) {
     console.error('Error fetching approved travel orders:', error);
@@ -914,6 +923,7 @@ router.get('/returned', [auth, authorize('Human Resource Personnel')], async (re
       .select('-document.data -documents.data')
       .sort({ arrivalTime: -1, createdAt: -1 })
       .lean();
+    await attachEmployeeRoleFallback(returnedOrders);
     res.json(travelOrdersToClientJson(returnedOrders));
   } catch (error) {
     console.error('Error fetching returned travel orders:', error);
@@ -935,6 +945,7 @@ router.get('/verified', [auth, authorize('Security Personnel')], async (req, res
       .select('-document.data -documents.data')
       .sort({ departureTime: -1, createdAt: -1 })
       .lean();
+    await attachEmployeeRoleFallback(verifiedOrders);
     res.json(travelOrdersToClientJson(verifiedOrders));
   } catch (error) {
     console.error('Error fetching verified travel orders:', error);

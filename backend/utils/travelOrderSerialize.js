@@ -1,3 +1,77 @@
+const User = require('../models/User');
+
+function travelOrderEmployeeId(employee) {
+  if (employee == null) return null;
+  if (typeof employee === 'string') return employee;
+  if (typeof employee === 'object') {
+    if (employee._id != null) return String(employee._id);
+    if (employee.constructor && employee.constructor.name === 'ObjectId') return String(employee);
+  }
+  return null;
+}
+
+function travelOrderEmployeeRoleMissing(employee) {
+  if (employee == null) return false;
+  if (typeof employee === 'string') return true;
+  if (typeof employee === 'object') {
+    if (employee.constructor && employee.constructor.name === 'ObjectId') return true;
+    if (employee.role == null) return true;
+    if (typeof employee.role === 'string' && employee.role.trim() === '') return true;
+  }
+  return false;
+}
+
+/**
+ * Ensures each order's `employee.role` and `employeeRole` are set when populate omitted role
+ * or `employee` is still an ObjectId (mutates Mongoose docs or plain lean objects in place).
+ */
+async function attachEmployeeRoleFallback(orders) {
+  if (!Array.isArray(orders) || orders.length === 0) return;
+
+  const ids = new Set();
+  for (const order of orders) {
+    if (!order || typeof order !== 'object') continue;
+    const e = order.employee;
+    const id = travelOrderEmployeeId(e);
+    if (!id || !travelOrderEmployeeRoleMissing(e)) continue;
+    ids.add(id);
+  }
+  if (ids.size === 0) return;
+
+  const users = await User.find({ _id: { $in: [...ids] } })
+    .select('name email profilePicture role')
+    .lean();
+  const byId = new Map(users.map((u) => [String(u._id), u]));
+
+  for (const order of orders) {
+    if (!order || typeof order !== 'object') continue;
+    const e = order.employee;
+    const id = travelOrderEmployeeId(e);
+    if (!id || !travelOrderEmployeeRoleMissing(e)) continue;
+    const u = byId.get(id);
+    if (!u || u.role == null || String(u.role).trim() === '') continue;
+
+    if (typeof e === 'string' || (e && e.constructor && e.constructor.name === 'ObjectId')) {
+      order.employee = {
+        _id: u._id,
+        name: u.name,
+        email: u.email,
+        profilePicture: u.profilePicture,
+        role: u.role,
+      };
+    } else if (typeof e === 'object') {
+      e.role = u.role;
+      if (!e.name && u.name) e.name = u.name;
+      if (!e.email && u.email) e.email = u.email;
+      if (e.profilePicture == null && u.profilePicture != null) e.profilePicture = u.profilePicture;
+    }
+
+    if (order.employeeRole == null || String(order.employeeRole).trim() === '') {
+      order.employeeRole = u.role;
+    }
+  }
+}
+
 /**
  * Strip binary from travel order `document` / `documents` before JSON serialization.
  * Normalizes API to `documents: [{ name, contentType }]` (legacy single `document` when no array).
@@ -66,4 +140,4 @@ function travelOrdersToClientJson(docs) {
   return docs.map((d) => travelOrderToClientJson(d));
 }
 
-module.exports = { travelOrderToClientJson, travelOrdersToClientJson };
+module.exports = { travelOrderToClientJson, travelOrdersToClientJson, attachEmployeeRoleFallback };

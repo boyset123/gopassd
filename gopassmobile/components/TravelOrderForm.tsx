@@ -75,6 +75,19 @@ function trimSupportingMetaName(s: string | undefined): string {
 }
 
 /**
+ * Multipart / clients often store `originalname` URL-encoded (`%20` for space). Show a normal filename in UI.
+ */
+function decodeFilenameForDisplay(name: string | undefined): string {
+  const raw = trimSupportingMetaName(name);
+  if (!raw) return '';
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, ' '));
+  } catch {
+    return raw;
+  }
+}
+
+/**
  * One entry per `documents[]` slot (same order / length as MongoDB) so `?index=` matches the API.
  * Do not filter by name/contentType — that skewed indices vs `GET …/supporting-document?index=`.
  */
@@ -84,12 +97,17 @@ function supportingAttachmentMetaList(order: Pick<TravelOrder, 'documents' | 'do
 }[] {
   if (Array.isArray(order.documents) && order.documents.length > 0) {
     return order.documents.map((d, i) => ({
-      name: trimSupportingMetaName(d?.name) || `Attachment ${i + 1}`,
+      name: decodeFilenameForDisplay(d?.name) || `Attachment ${i + 1}`,
       contentType: d?.contentType,
     }));
   }
   if (order.document && (order.document.name || order.document.contentType)) {
-    return [order.document];
+    return [
+      {
+        name: decodeFilenameForDisplay(order.document.name) || 'Attachment',
+        contentType: order.document.contentType,
+      },
+    ];
   }
   return [];
 }
@@ -125,6 +143,25 @@ function previewKindFromMeta(contentType: string | undefined, fileName: string |
   if (ct.startsWith('image/')) return 'image';
   if (ct.includes('pdf') || name.endsWith('.pdf')) return 'pdf';
   return 'other';
+}
+
+function supportingAttachmentIconName(meta: {
+  contentType?: string;
+  name?: string;
+}): 'file-image-o' | 'file-pdf-o' | 'file-o' {
+  if (isWordAttachment(meta.contentType, meta.name)) return 'file-o';
+  const k = previewKindFromMeta(meta.contentType, meta.name);
+  if (k === 'image') return 'file-image-o';
+  if (k === 'pdf') return 'file-pdf-o';
+  return 'file-o';
+}
+
+function supportingAttachmentKindLabel(meta: { contentType?: string; name?: string }): string {
+  if (isWordAttachment(meta.contentType, meta.name)) return 'Word document';
+  const k = previewKindFromMeta(meta.contentType, meta.name);
+  if (k === 'pdf') return 'PDF document';
+  if (k === 'image') return 'Image';
+  return 'Attachment';
 }
 
 type SupportingViewerState =
@@ -391,25 +428,54 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
   ];
 
   const supportingAttachmentBanners = hasSupportingDocument
-    ? attachmentMeta.map((meta, i) => (
-        <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBanner}>
-          <FontAwesome name="paperclip" size={12} color="#011a6b" style={{ marginRight: 6 }} />
-          <Text style={styles.supportingDocLabel} numberOfLines={1}>
-            {meta.name || `Attachment ${i + 1}`}
-          </Text>
-          <Pressable
-            onPress={() => void openSupportingDocumentAtIndex(i)}
-            disabled={openingSupportingIndex !== null || supportingViewer !== null}
-            style={({ pressed }) => [styles.supportingDocViewBtn, pressed && styles.supportingDocViewBtnPressed]}
-          >
-            {openingSupportingIndex === i ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.supportingDocViewBtnText}>View</Text>
-            )}
-          </Pressable>
-        </View>
-      ))
+    ? attachmentMeta.map((meta, i) => {
+        const previewBusy = openingSupportingIndex !== null || supportingViewer !== null;
+        const loadingHere = openingSupportingIndex === i;
+        const iconName = supportingAttachmentIconName(meta);
+        const kindLabel = supportingAttachmentKindLabel(meta);
+        return (
+          <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBanner}>
+            <View style={styles.supportingDocIconWrap}>
+              <FontAwesome name={iconName} size={16} color="#0d4f8c" />
+            </View>
+            <View style={styles.supportingDocTextCol}>
+              <Text style={styles.supportingDocLabel} numberOfLines={2}>
+                {meta.name || `Attachment ${i + 1}`}
+              </Text>
+              <Text style={styles.supportingDocKind} numberOfLines={1}>
+                {kindLabel}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => void openSupportingDocumentAtIndex(i)}
+              disabled={previewBusy}
+              accessibilityRole="button"
+              accessibilityLabel={`Preview ${meta.name || `attachment ${i + 1}`}`}
+              style={({ pressed }) => [
+                styles.supportingDocViewBtnWrap,
+                pressed && !previewBusy && styles.supportingDocViewBtnWrapPressed,
+                previewBusy && !loadingHere && styles.supportingDocViewBtnWrapDisabled,
+              ]}
+            >
+              <View
+                style={[
+                  styles.supportingDocViewBtnInner,
+                  loadingHere ? styles.supportingDocViewBtnInnerMuted : styles.supportingDocViewBtnInnerPrimary,
+                ]}
+              >
+                {loadingHere ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <FontAwesome name="eye" size={13} color="#ffffff" style={styles.supportingDocViewBtnIcon} />
+                    <Text style={styles.supportingDocViewBtnText}>Preview</Text>
+                  </>
+                )}
+              </View>
+            </Pressable>
+          </View>
+        );
+      })
     : null;
 
   return (
@@ -954,35 +1020,85 @@ const styles = StyleSheet.create({
   supportingDocBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(1,26,107,0.08)',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: '#f0f7ff',
     borderWidth: 1,
-    borderColor: 'rgba(1,26,107,0.2)',
+    borderColor: 'rgba(13, 79, 140, 0.16)',
+    shadowColor: '#0d4f8c',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  supportingDocLabel: {
-    flex: 1,
-    fontSize: 8,
-    fontWeight: '600',
-    color: '#011a6b',
-  },
-  supportingDocViewBtn: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    backgroundColor: '#011a6b',
-    minWidth: 56,
+  supportingDocIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#d9e9fb',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(13, 79, 140, 0.12)',
   },
-  supportingDocViewBtnPressed: {
-    opacity: 0.88,
+  supportingDocTextCol: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 8,
+  },
+  supportingDocLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#082654',
+    lineHeight: 15,
+  },
+  supportingDocKind: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#3d6ea8',
+    marginTop: 3,
+    letterSpacing: 0.2,
+  },
+  supportingDocViewBtnWrap: {
+    borderRadius: 999,
+    overflow: 'hidden',
+    minWidth: 102,
+    shadowColor: '#082654',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.28,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  supportingDocViewBtnWrapPressed: {
+    transform: [{ scale: 0.97 }],
+    opacity: 0.94,
+  },
+  supportingDocViewBtnWrapDisabled: {
+    opacity: 0.42,
+  },
+  supportingDocViewBtnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+  },
+  supportingDocViewBtnInnerPrimary: {
+    backgroundColor: '#0d4f8c',
+  },
+  supportingDocViewBtnInnerMuted: {
+    backgroundColor: '#64748b',
+  },
+  supportingDocViewBtnIcon: {
+    marginRight: 6,
   },
   supportingDocViewBtnText: {
     color: '#fff',
-    fontSize: 9,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.4,
   },
   supportingViewerRoot: {
     flex: 1,

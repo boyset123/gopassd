@@ -12,6 +12,7 @@ import axios from 'axios';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { API_URL } from '../../config/api';
 import { Picker } from '@react-native-picker/picker';
 
@@ -34,6 +35,10 @@ const theme = {
   disabledBg: 'rgba(1,26,107,0.1)',
   border: 'rgba(1,26,107,0.22)',
   danger: '#dc3545',
+  success: '#16a34a',
+  uploadAccent: '#4f46e5',
+  warning: '#b45309',
+  warningBg: 'rgba(180, 83, 9, 0.12)',
 };
 
 interface User {
@@ -51,6 +56,12 @@ interface Suggestion {
 }
 
 const MAX_SUPPORTING_FILES = 15;
+/** Matches backend multer `fileSize` in travelOrderRoutes.js */
+const MAX_SUPPORTING_FILE_BYTES = 5 * 1024 * 1024;
+
+function isSupportingFileOversized(sizeBytes: number | undefined): boolean {
+  return sizeBytes != null && Number.isFinite(sizeBytes) && sizeBytes > MAX_SUPPORTING_FILE_BYTES;
+}
 
 const faculties = [
   'Faculty of Agriculture and Life Sciences',
@@ -70,6 +81,50 @@ const campuses = [
   'San Isidro Campus',
   'Tarragona Campus',
 ];
+
+type SupportingFilePhase = 'preparing' | 'ready' | 'uploading';
+
+type SupportingFileItem = {
+  id: string;
+  uri: string;
+  name: string;
+  mimeType: string;
+  sizeBytes?: number;
+  /** 0–100: preparing locally, then server upload on submit */
+  progress: number;
+  phase: SupportingFilePhase;
+};
+
+function decodeFilenameForDisplay(name: string): string {
+  const raw = name.trim();
+  if (!raw) return '';
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, ' '))
+      .replace(/\s+/g, ' ')
+      .trim();
+  } catch {
+    return raw.replace(/\s+/g, ' ').trim();
+  }
+}
+
+function formatFileSize(bytes: number | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function supportingTypeBadge(mimeType: string, name: string): { label: string; color: string } {
+  const mt = (mimeType || '').toLowerCase();
+  const n = name.toLowerCase();
+  if (mt.includes('pdf') || n.endsWith('.pdf')) return { label: 'PDF', color: '#dc2626' };
+  if (n.endsWith('.docx') || mt.includes('wordprocessingml')) return { label: 'DOC', color: '#2563eb' };
+  if (mt.includes('png') || n.endsWith('.png')) return { label: 'PNG', color: '#0d9488' };
+  if (mt.includes('gif') || n.endsWith('.gif')) return { label: 'GIF', color: '#7c3aed' };
+  if (mt.includes('webp') || n.endsWith('.webp')) return { label: 'WEBP', color: '#0284c7' };
+  if (mt.includes('jpeg') || mt.includes('jpg') || n.endsWith('.jpg') || n.endsWith('.jpeg')) return { label: 'JPG', color: theme.uploadAccent };
+  return { label: 'FILE', color: '#64748b' };
+}
 
 const CreateTravelOrderScreen = () => {
   const router = useRouter();
@@ -113,7 +168,8 @@ const CreateTravelOrderScreen = () => {
   const [routeCoordinates, setRouteCoordinates] = useState<Array<{ latitude: number; longitude: number }>>([]);
   const [routePolyline, setRoutePolyline] = useState<string | null>(null);
   const [shouldFitRoute, setShouldFitRoute] = useState(false);
-  const [supportingFiles, setSupportingFiles] = useState<{ id: string; uri: string; name: string; mimeType: string }[]>([]);
+  const [supportingFiles, setSupportingFiles] = useState<SupportingFileItem[]>([]);
+  const [supportingUploadProgress, setSupportingUploadProgress] = useState<number | null>(null);
   const [mapRegion, setMapRegion] = useState({
     latitude: 7.0731, // Default to a central location in Mati
     longitude: 126.2167,
@@ -386,6 +442,19 @@ const CreateTravelOrderScreen = () => {
     setRecommenders(newRecommenders);
   };
 
+  const alertOversizedSupportingFiles = useCallback(() => {
+    const oversized = supportingFiles.filter((f) => isSupportingFileOversized(f.sizeBytes));
+    if (oversized.length === 0) return false;
+    const names = oversized.map((f) => f.name).join(', ');
+    Alert.alert(
+      'File too large',
+      oversized.length === 1
+        ? `"${oversized[0].name}" is over 5 MB. Remove it or choose a smaller file before continuing.`
+        : `These files are over 5 MB each: ${names}. Remove them or choose smaller files before continuing.`
+    );
+    return true;
+  }, [supportingFiles]);
+
   const handlePreview = () => {
     if (!address || !purpose || !recommenders[0]?.name || !employeeAddress) {
       Alert.alert('Validation Error', 'Please fill out all required fields and ensure at least one recommender is set.');
@@ -396,6 +465,11 @@ const CreateTravelOrderScreen = () => {
       Alert.alert('Validation Error', 'Please select recommenders using the search icon. Manual entry is not supported for recommendations.');
       return;
     }
+    if (supportingFiles.some((f) => f.phase === 'preparing')) {
+      Alert.alert('Please wait', 'Files are still being added. Wait until each file shows Ready or a size warning.');
+      return;
+    }
+    if (alertOversizedSupportingFiles()) return;
     setIsPreviewVisible(true);
   };
 
@@ -480,6 +554,66 @@ const CreateTravelOrderScreen = () => {
     return normalized.toISOString();
   };
 
+  /** Show card at 0% immediately, then animate while file metadata is read. */
+  const prepareSupportingFile = useCallback(
+    async (id: string, uri: string) => {
+      const tickMs = 45;
+      for (const pct of [12, 28, 45, 62, 78, 92]) {
+        await new Promise((r) => setTimeout(r, tickMs));
+        setSupportingFiles((prev) =>
+          prev.map((p) =>
+            p.id === id && p.phase === 'preparing' ? { ...p, progress: pct } : p
+          )
+        );
+      }
+      try {
+        const info = await FileSystem.getInfoAsync(uri);
+        setSupportingFiles((prev) =>
+          prev.map((p) =>
+            p.id === id
+              ? {
+                  ...p,
+                  progress: 100,
+                  phase: 'ready',
+                  sizeBytes:
+                    info.exists && typeof info.size === 'number' ? info.size : p.sizeBytes,
+                }
+              : p
+          )
+        );
+      } catch {
+        setSupportingFiles((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, progress: 100, phase: 'ready' } : p))
+        );
+      }
+    },
+    []
+  );
+
+  const enqueueSupportingFiles = useCallback(
+    (items: Omit<SupportingFileItem, 'progress' | 'phase'>[]) => {
+      if (items.length === 0) return;
+      setSupportingFiles((prev) => {
+        const seen = new Set(prev.map((p) => p.uri));
+        const room = MAX_SUPPORTING_FILES - prev.length;
+        if (room <= 0) return prev;
+        const staged: SupportingFileItem[] = [];
+        for (const item of items) {
+          if (staged.length >= room) break;
+          if (seen.has(item.uri)) continue;
+          seen.add(item.uri);
+          staged.push({ ...item, progress: 0, phase: 'preparing' });
+        }
+        if (staged.length === 0) return prev;
+        for (const s of staged) {
+          void prepareSupportingFile(s.id, s.uri);
+        }
+        return [...prev, ...staged];
+      });
+    },
+    [prepareSupportingFile]
+  );
+
   const pickSupportingImage = async () => {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permissionResult.granted) {
@@ -494,22 +628,20 @@ const CreateTravelOrderScreen = () => {
       selectionLimit: MAX_SUPPORTING_FILES,
     });
     if (pickerResult.canceled || !pickerResult.assets?.length) return;
-    setSupportingFiles((prev) => {
-      const remaining = MAX_SUPPORTING_FILES - prev.length;
-      if (remaining <= 0) return prev;
-      const seen = new Set(prev.map((p) => p.uri));
-      const next = [...prev];
-      for (const asset of pickerResult.assets) {
-        if (next.length >= MAX_SUPPORTING_FILES) break;
-        const uri = asset.uri;
-        if (seen.has(uri)) continue;
-        seen.add(uri);
-        const mimeType = asset.mimeType || 'image/jpeg';
-        const name = asset.fileName || uri.split('/').pop() || 'photo.jpg';
-        next.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, uri, name, mimeType });
-      }
-      return next;
-    });
+    const added: Omit<SupportingFileItem, 'progress' | 'phase'>[] = [];
+    for (const asset of pickerResult.assets) {
+      const uri = asset.uri;
+      const mimeType = asset.mimeType || 'image/jpeg';
+      const rawName = asset.fileName || uri.split('/').pop() || 'photo.jpg';
+      added.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        uri,
+        name: decodeFilenameForDisplay(rawName) || rawName,
+        mimeType,
+        sizeBytes: typeof asset.fileSize === 'number' ? asset.fileSize : undefined,
+      });
+    }
+    enqueueSupportingFiles(added);
   };
 
   const DOC_MIME_TYPES = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
@@ -532,26 +664,37 @@ const CreateTravelOrderScreen = () => {
       };
       const assets: any[] =
         pickerResult.assets && pickerResult.assets.length > 0 ? pickerResult.assets : pickerResult.uri ? [pickerResult] : [];
-      setSupportingFiles((prev) => {
-        const next = [...prev];
-        for (const asset of assets) {
-          if (next.length >= MAX_SUPPORTING_FILES) break;
-          const uri = asset.uri;
-          if (!uri || next.some((p) => p.uri === uri)) continue;
-          const name = asset.name || 'document.pdf';
-          next.push({
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-            uri,
-            name,
-            mimeType: asset.mimeType || guessMimeFromName(name),
-          });
-        }
-        return next;
-      });
+      const added: Omit<SupportingFileItem, 'progress' | 'phase'>[] = [];
+      for (const asset of assets) {
+        const uri = asset.uri;
+        if (!uri) continue;
+        const rawName = asset.name || 'document.pdf';
+        added.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          uri,
+          name: decodeFilenameForDisplay(rawName) || rawName,
+          mimeType: asset.mimeType || guessMimeFromName(rawName),
+          sizeBytes: typeof asset.size === 'number' ? asset.size : undefined,
+        });
+      }
+      enqueueSupportingFiles(added);
     } catch (e) {
       console.error(e);
       Alert.alert('Picker error', 'Could not open the file picker.');
     }
+  };
+
+  const openSupportingAddMenu = () => {
+    const remaining = MAX_SUPPORTING_FILES - supportingFiles.length;
+    if (remaining <= 0) {
+      Alert.alert('Limit reached', `You can attach at most ${MAX_SUPPORTING_FILES} files.`);
+      return;
+    }
+    Alert.alert('Add files', 'Choose photos or PDF / Word.', [
+      { text: 'Photo library', onPress: () => void pickSupportingImage() },
+      { text: 'PDF or Word', onPress: () => void pickSupportingDocument() },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const handleSubmit = async () => {
@@ -571,6 +714,11 @@ const CreateTravelOrderScreen = () => {
         Alert.alert('Invalid Arrival Date', 'Arrival date cannot be earlier than departure date.');
         return;
       }
+      if (supportingFiles.some((f) => f.phase === 'preparing')) {
+        Alert.alert('Please wait', 'Files are still being added. Wait until each file shows Ready or a size warning.');
+        return;
+      }
+      if (alertOversizedSupportingFiles()) return;
 
       const token = await AsyncStorage.getItem('userToken');
       if (!token) {
@@ -639,13 +787,37 @@ const CreateTravelOrderScreen = () => {
           } as any);
         }
 
-        await axios.post(`${API_URL}/travel-orders`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-            'x-auth-token': token,
-          },
-          timeout: 120000,
-        });
+        setSupportingFiles((prev) =>
+          prev.map((f) => ({ ...f, phase: 'uploading' as const, progress: 0 }))
+        );
+        setSupportingUploadProgress(0);
+        try {
+          await axios.post(`${API_URL}/travel-orders`, formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+              'x-auth-token': token,
+            },
+            timeout: 120000,
+            onUploadProgress: (ev) => {
+              if (ev.total && ev.total > 0) {
+                const pct = Math.min(100, Math.round((ev.loaded * 100) / ev.total));
+                setSupportingUploadProgress(pct);
+                setSupportingFiles((prev) =>
+                  prev.map((f) =>
+                    f.phase === 'uploading' ? { ...f, progress: pct } : f
+                  )
+                );
+              }
+            },
+          });
+          setSupportingFiles((prev) =>
+            prev.map((f) =>
+              f.phase === 'uploading' ? { ...f, progress: 100 } : f
+            )
+          );
+        } finally {
+          setSupportingUploadProgress(null);
+        }
       }
 
       Alert.alert('Success', 'Travel Order submitted successfully!', [
@@ -654,6 +826,11 @@ const CreateTravelOrderScreen = () => {
 
     } catch (error: any) {
       console.error('Travel order submission error:', error);
+      setSupportingFiles((prev) =>
+        prev.map((f) =>
+          f.phase === 'uploading' ? { ...f, phase: 'ready', progress: 100 } : f
+        )
+      );
       const msg =
         error?.response?.data?.message ||
         error?.message ||
@@ -1143,30 +1320,157 @@ const CreateTravelOrderScreen = () => {
             <View style={[styles.fieldContainer, styles.fieldContainerTight]}>
               <Text style={styles.label}>Supporting files (optional)</Text>
               <Text style={styles.supportingDocHint}>
-                Invitation, program, or other proof — up to {MAX_SUPPORTING_FILES} files (PDF, Word .docx, or images; max 5 MB each). Add photos or documents more than once to attach more.
+                Invitation, program, or other proof — up to {MAX_SUPPORTING_FILES} files (PDF, Word .docx, or images; max 5 MB each).
               </Text>
-              {supportingFiles.map((f) => (
-                <View key={f.id} style={styles.supportingFileRow}>
-                  <Text style={styles.supportingFileName} numberOfLines={2}>{f.name}</Text>
+
+              <View
+                style={[
+                  styles.supportingUploadZone,
+                  (isSubmitting || supportingFiles.length >= MAX_SUPPORTING_FILES) && styles.supportingUploadZoneDisabled,
+                ]}
+              >
+                <Pressable
+                  onPress={openSupportingAddMenu}
+                  disabled={isSubmitting || supportingFiles.length >= MAX_SUPPORTING_FILES}
+                  style={({ pressed }) => [
+                    styles.supportingUploadTapArea,
+                    pressed && !isSubmitting && supportingFiles.length < MAX_SUPPORTING_FILES && styles.supportingUploadZonePressed,
+                  ]}
+                >
+                  <View style={styles.supportingUploadIconWrap}>
+                    <FontAwesome name="cloud-upload" size={22} color={theme.uploadAccent} />
+                  </View>
+                  <Text style={styles.supportingUploadTitle}>
+                    <Text style={styles.supportingUploadTitleAccent}>Tap to add files</Text>
+                    {' '}or use the shortcuts below
+                  </Text>
+                  <Text style={styles.supportingUploadSub}>
+                    PDF, Word (.docx), PNG, JPG — max 5 MB each
+                  </Text>
+                </Pressable>
+                <View style={styles.supportingUploadShortcutRow}>
                   <Pressable
-                    onPress={() => setSupportingFiles((prev) => prev.filter((x) => x.id !== f.id))}
-                    style={styles.supportingFileClear}
-                    hitSlop={8}
+                    onPress={() => {
+                      if (supportingFiles.length >= MAX_SUPPORTING_FILES) return;
+                      void pickSupportingImage();
+                    }}
+                    disabled={isSubmitting || supportingFiles.length >= MAX_SUPPORTING_FILES}
+                    style={({ pressed }) => [
+                      styles.supportingUploadShortcut,
+                      pressed && styles.supportingUploadShortcutPressed,
+                    ]}
                   >
-                    <Text style={styles.supportingFileClearText}>Remove</Text>
+                    <FontAwesome name="image" size={14} color={theme.primary} style={{ marginRight: 6 }} />
+                    <Text style={styles.supportingUploadShortcutText}>Photos</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      if (supportingFiles.length >= MAX_SUPPORTING_FILES) return;
+                      void pickSupportingDocument();
+                    }}
+                    disabled={isSubmitting || supportingFiles.length >= MAX_SUPPORTING_FILES}
+                    style={({ pressed }) => [
+                      styles.supportingUploadShortcut,
+                      styles.supportingUploadShortcutOutline,
+                      pressed && styles.supportingUploadShortcutPressed,
+                    ]}
+                  >
+                    <FontAwesome name="file-text-o" size={14} color={theme.primary} style={{ marginRight: 6 }} />
+                    <Text style={styles.supportingUploadShortcutText}>PDF / Word</Text>
                   </Pressable>
                 </View>
-              ))}
-              <View style={styles.supportingDocButtons}>
-                <Pressable onPress={pickSupportingImage} style={({ pressed }) => [styles.supportingDocBtn, pressed && styles.supportingDocBtnPressed]}>
-                  <FontAwesome name="image" size={16} color="#fff" style={{ marginRight: 6 }} />
-                  <Text style={styles.supportingDocBtnText}>Photo</Text>
-                </Pressable>
-                <Pressable onPress={pickSupportingDocument} style={({ pressed }) => [styles.supportingDocBtn, styles.supportingDocBtnSecondary, pressed && styles.supportingDocBtnPressed]}>
-                  <FontAwesome name="file-text-o" size={16} color={theme.primary} style={{ marginRight: 6 }} />
-                  <Text style={styles.supportingDocBtnTextSecondary}>PDF / Word</Text>
-                </Pressable>
               </View>
+
+              {supportingFiles.map((f) => {
+                const badge = supportingTypeBadge(f.mimeType, f.name);
+                const sizeStr = formatFileSize(f.sizeBytes);
+                const oversized = isSupportingFileOversized(f.sizeBytes);
+                const pct = Math.min(100, Math.max(0, f.progress));
+                const statusLabel =
+                  f.phase === 'preparing'
+                    ? 'Adding…'
+                    : f.phase === 'uploading'
+                      ? 'Uploading…'
+                      : 'Ready';
+                const showSpinner = !oversized && (f.phase === 'preparing' || f.phase === 'uploading');
+                const showReadyCheck = !oversized && f.phase === 'ready' && pct >= 100;
+                return (
+                  <View
+                    key={f.id}
+                    style={[
+                      styles.supportingFileCardOuter,
+                      oversized && styles.supportingFileCardOuterOversized,
+                    ]}
+                  >
+                    <View style={[styles.supportingFileCard, oversized && styles.supportingFileCardInnerOversized]}>
+                    <Pressable
+                      onPress={() => setSupportingFiles((prev) => prev.filter((x) => x.id !== f.id))}
+                      style={styles.supportingFileTrash}
+                      hitSlop={10}
+                      disabled={isSubmitting || f.phase === 'uploading'}
+                      accessibilityLabel={`Remove ${f.name}`}
+                    >
+                      <FontAwesome name="trash-o" size={18} color="#94a3b8" />
+                    </Pressable>
+                    <View style={styles.supportingFileCardBody}>
+                      <View style={styles.supportingFileIconBlock}>
+                        <FontAwesome name="file-o" size={26} color="#64748b" />
+                        <View style={[styles.supportingFileBadge, { backgroundColor: badge.color }]}>
+                          <Text style={styles.supportingFileBadgeText}>{badge.label}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.supportingFileMeta}>
+                        <View style={styles.supportingFileTitleRow}>
+                          <Text style={styles.supportingFileTitle} numberOfLines={2}>
+                            {f.name}
+                          </Text>
+                          {oversized ? (
+                            <View style={styles.supportingFileLimitPill}>
+                              <Text style={styles.supportingFileLimitPillText}>Over 5 MB</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        {oversized ? (
+                          <Text style={styles.supportingFileOversizedHint} numberOfLines={1}>
+                            {sizeStr ? `${sizeStr}. ` : ''}
+                            Remove or choose a smaller file.
+                          </Text>
+                        ) : (
+                          <>
+                            <View style={styles.supportingFileStatusRow}>
+                              {sizeStr ? <Text style={styles.supportingFileMetaMuted}>{sizeStr}</Text> : null}
+                              {sizeStr ? <Text style={styles.supportingFileMetaMuted}> · </Text> : null}
+                              <View style={styles.supportingFileReadyRow}>
+                                {showSpinner ? (
+                                  <ActivityIndicator size="small" color={theme.uploadAccent} style={{ marginRight: 6 }} />
+                                ) : showReadyCheck ? (
+                                  <FontAwesome name="check-circle" size={12} color={theme.success} style={{ marginRight: 4 }} />
+                                ) : null}
+                                <Text
+                                  style={
+                                    f.phase === 'ready'
+                                      ? styles.supportingFileReadyText
+                                      : styles.supportingFileMetaUploading
+                                  }
+                                >
+                                  {statusLabel}
+                                </Text>
+                              </View>
+                            </View>
+                            <View style={styles.supportingFileProgressTrack}>
+                              <View
+                                style={[styles.supportingFileProgressFill, { width: `${pct}%` }]}
+                              />
+                            </View>
+                            <Text style={styles.supportingFileProgressPct}>{pct}%</Text>
+                          </>
+                        )}
+                      </View>
+                    </View>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
 
             {location && (
@@ -1432,7 +1736,8 @@ const CreateTravelOrderScreen = () => {
                 <Text style={styles.infoText}>You shall be guided further by the following additional instruction and information on <Text style={{ textDecorationLine: 'underline', textDecorationColor: '#000' }}>{additionalInfo}</Text></Text>
                 {supportingFiles.length > 0 ? (
                   <Text style={styles.infoText}>
-                    Supporting files attached ({supportingFiles.length}): {supportingFiles.map((f) => f.name).join(', ')}
+                    Supporting files attached ({supportingFiles.length}):{' '}
+                    {supportingFiles.map((f) => f.name).join(', ')}
                   </Text>
                 ) : null}
                 <Text style={styles.infoText}>Your traveling expenses in the field will be authorized or allowed under Official Business.</Text>
@@ -1949,62 +2254,248 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
     marginBottom: 8,
   },
-  supportingFileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 8,
-    padding: 10,
-    borderRadius: 10,
-    backgroundColor: 'rgba(1,26,107,0.06)',
+  supportingUploadZone: {
     borderWidth: 1,
-    borderColor: theme.border,
+    borderColor: '#cbd5e1',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    marginBottom: 12,
+    backgroundColor: '#f8fafc',
+    overflow: 'hidden',
   },
-  supportingFileName: {
-    flex: 1,
+  supportingUploadZoneDisabled: {
+    opacity: 0.55,
+  },
+  supportingUploadZonePressed: {
+    backgroundColor: '#f1f5f9',
+  },
+  supportingUploadTapArea: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+  },
+  supportingUploadIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.surface,
+    marginBottom: 8,
+  },
+  supportingUploadTitle: {
     fontSize: 14,
-    color: theme.text,
+    color: theme.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 4,
   },
-  supportingFileClear: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+  supportingUploadTitleAccent: {
+    fontWeight: '700',
+    color: theme.uploadAccent,
+    textDecorationLine: 'underline',
   },
-  supportingFileClearText: {
-    fontSize: 14,
-    color: theme.danger,
-    fontWeight: '600',
+  supportingUploadSub: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textAlign: 'center',
   },
-  supportingDocButtons: {
+  supportingUploadShortcutRow: {
     flexDirection: 'row',
+    justifyContent: 'center',
     flexWrap: 'wrap',
     gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e2e8f0',
+    backgroundColor: 'rgba(255,255,255,0.65)',
   },
-  supportingDocBtn: {
+  supportingUploadShortcut: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.primary,
     paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    backgroundColor: 'rgba(79, 70, 229, 0.12)',
   },
-  supportingDocBtnSecondary: {
+  supportingUploadShortcutOutline: {
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.primary,
   },
-  supportingDocBtnPressed: {
+  supportingUploadShortcutPressed: {
     opacity: 0.85,
   },
-  supportingDocBtnText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-  supportingDocBtnTextSecondary: {
+  supportingUploadShortcutText: {
+    fontSize: 14,
+    fontWeight: '700',
     color: theme.primary,
-    fontWeight: '600',
+  },
+  supportingFileCardOuter: {
+    marginBottom: 10,
+  },
+  supportingFileCardOuterOversized: {
+    padding: 1,
+    borderRadius: 13,
+    backgroundColor: '#f1aeb5',
+  },
+  supportingFileCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: theme.surface,
+    padding: 12,
+    position: 'relative',
+  },
+  supportingFileCardInnerOversized: {
+    borderWidth: 0,
+  },
+  supportingFileTrash: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 2,
+    padding: 4,
+  },
+  supportingFileCardBody: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingRight: 28,
+  },
+  supportingFileIconBlock: {
+    marginRight: 12,
+    position: 'relative',
+    width: 40,
+    alignItems: 'center',
+  },
+  supportingFileBadge: {
+    position: 'absolute',
+    bottom: -4,
+    left: -2,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  supportingFileBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  supportingFileMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  supportingFileTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 4,
+  },
+  supportingFileTitle: {
+    flex: 1,
     fontSize: 15,
+    fontWeight: '700',
+    color: '#0f172a',
+    minWidth: 0,
+  },
+  supportingFileLimitPill: {
+    flexShrink: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: theme.warningBg,
+  },
+  supportingFileLimitPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: theme.warning,
+    letterSpacing: 0.2,
+  },
+  supportingFileOversizedHint: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: theme.textMuted,
+    marginBottom: 2,
+  },
+  supportingFileStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 8,
+  },
+  supportingFileMetaMuted: {
+    fontSize: 13,
+    color: '#64748b',
+  },
+  supportingFileMetaUploading: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.uploadAccent,
+  },
+  supportingFileReadyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  supportingFileReadyText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: theme.success,
+  },
+  supportingFileProgressTrack: {
+    width: '100%',
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: '#e2e8f0',
+    overflow: 'hidden',
+    marginTop: 2,
+  },
+  supportingFileProgressFill: {
+    height: 6,
+    minWidth: 0,
+    borderRadius: 999,
+    backgroundColor: theme.uploadAccent,
+  },
+  supportingFileProgressPct: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748b',
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+  supportingOverallProgress: {
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(79, 70, 229, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(79, 70, 229, 0.2)',
+  },
+  supportingOverallProgressLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: theme.primary,
+    marginBottom: 8,
+  },
+  supportingOverallTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#e2e8f0',
+    overflow: 'hidden',
+  },
+  supportingOverallFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: theme.uploadAccent,
+  },
+  supportingOverallPct: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: theme.uploadAccent,
+    marginTop: 6,
+    textAlign: 'right',
   },
   sectionGap: {
     marginTop: 22,

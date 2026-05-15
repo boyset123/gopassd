@@ -1477,6 +1477,12 @@ export const styles = StyleSheet.create({
       backgroundColor: colors.background,
       ...Platform.select({ web: { cursor: 'pointer' } }),
     },
+    reviewModalTopBar: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
     modalContent: {
       paddingBottom: 20, // Ensure there's space for the buttons
     },

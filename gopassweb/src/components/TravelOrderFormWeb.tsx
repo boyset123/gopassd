@@ -93,6 +93,38 @@ const formatSalary = (salary: string | undefined) =>
 const normalizeInline = (value: string | undefined | null) =>
   (value ?? '').replace(/\s+/g, ' ').trim();
 
+/** Stored names are often URL-encoded (`%20` for space). */
+function decodeFilenameForDisplay(name: string | undefined): string {
+  const raw = normalizeInline(name);
+  if (!raw) return '';
+  try {
+    return normalizeInline(decodeURIComponent(raw.replace(/\+/g, ' ')));
+  } catch {
+    return raw;
+  }
+}
+
+function supportingWebAttachmentIconName(meta: {
+  contentType?: string;
+  name?: string;
+}): 'file-image-o' | 'file-pdf-o' | 'file-o' {
+  const ct = (meta.contentType || '').toLowerCase();
+  const name = (meta.name || '').toLowerCase();
+  if (ct.includes('wordprocessingml') || name.endsWith('.docx')) return 'file-o';
+  if (ct.startsWith('image/')) return 'file-image-o';
+  if (ct.includes('pdf') || name.endsWith('.pdf')) return 'file-pdf-o';
+  return 'file-o';
+}
+
+function supportingWebFileKindLabel(meta: { contentType?: string; name?: string }): string {
+  const ct = (meta.contentType || '').toLowerCase();
+  const name = (meta.name || '').toLowerCase();
+  if (ct.includes('wordprocessingml') || name.endsWith('.docx')) return 'Word document';
+  if (ct.includes('pdf') || name.endsWith('.pdf')) return 'PDF document';
+  if (ct.startsWith('image/')) return 'Image';
+  return 'Attachment';
+}
+
 const travelOrderPositionLabel = (order: TravelOrderWebOrder) =>
   normalizeInline(order.employeeRole) || normalizeInline(order.employee?.role) || 'N/A';
 
@@ -131,7 +163,16 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
   onChooseSignature = () => {},
 }) => {
   const { width: windowWidth } = useWindowDimensions();
-  const a4PageWidth = Math.min(Math.max(windowWidth - 48, 280), 440);
+  /** Wide HR modal: travel order (left) + supporting files (right). */
+  const sideBySideLayout = windowWidth >= 720;
+  const layoutMaxWidth = Math.min(Math.max(windowWidth - 80, 280), 880);
+  const layoutGap = 16;
+  const supportingPanelWidth = sideBySideLayout
+    ? Math.min(340, Math.max(260, Math.floor(layoutMaxWidth * 0.34)))
+    : Math.min(Math.max(windowWidth - 48, 280), 440);
+  const a4PageWidth = sideBySideLayout
+    ? Math.min(440, layoutMaxWidth - supportingPanelWidth - layoutGap)
+    : Math.min(Math.max(windowWidth - 48, 280), 440);
 
   const [generatedTravelOrderNo, setGeneratedTravelOrderNo] = useState<string>('');
   const [supportingDocLoadingIndex, setSupportingDocLoadingIndex] = useState<number | null>(null);
@@ -143,14 +184,17 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
     const docs = order.documents;
     if (Array.isArray(docs) && docs.length > 0) {
       return docs.map((d, i) => ({
-        name: normalizeInline(d?.name) || normalizeInline((d as { filename?: string })?.filename) || `Attachment ${i + 1}`,
+        name:
+          decodeFilenameForDisplay(d?.name) ||
+          decodeFilenameForDisplay((d as { filename?: string })?.filename) ||
+          `Attachment ${i + 1}`,
         contentType: d?.contentType || (d as { type?: string })?.type,
       }));
     }
     if (order.document && (order.document.name || order.document.contentType)) {
       return [
         {
-          name: normalizeInline(order.document.name) || 'Attachment',
+          name: decodeFilenameForDisplay(order.document.name) || 'Attachment',
           contentType: order.document.contentType,
         },
       ];
@@ -488,47 +532,74 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
     });
 
   return (
-    <View style={styles.a4Stack}>
-      <View style={[styles.supportingAttachmentsOutside, { width: a4PageWidth }]}>
-        <Text style={styles.supportingOutsideTitle}>Supporting documents</Text>
-        <Text style={styles.supportingOutsideHint}>
-          Submitted with this request for HR review only — not part of the official printed travel order (FM-DOrSU-HRMO-01).
-        </Text>
-        {hasSupportingDocument ? (
-          <View style={styles.supportingAttachmentsWeb}>
-            {supportingMetaList.map((meta, i) => (
-              <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBlock}>
-                <Pressable
-                  onPress={() => void openSupportingDocumentAtIndex(i)}
-                  disabled={supportingDocLoadingIndex !== null}
-                  style={({ pressed }) => [styles.supportingDocRow, pressed && styles.supportingDocRowPressed]}
-                >
-                  <FontAwesome name="paperclip" size={12} color="#011a6b" style={{ marginRight: 8 }} />
-                  <Text style={styles.supportingDocText} numberOfLines={1}>
-                    {supportingMetaList.length > 1 ? `File ${i + 1}: ` : ''}
-                    {meta.name || 'Attachment'}
-                  </Text>
-                  {supportingDocLoadingIndex === i ? (
-                    <ActivityIndicator size="small" color="#011a6b" />
-                  ) : (
-                    <Text style={styles.supportingDocAction}>View</Text>
-                  )}
-                </Pressable>
-                {Platform.OS === 'web' && supportingThumbUris[i] ? (
-                  <Image
-                    source={{ uri: supportingThumbUris[i] }}
-                    style={styles.supportingThumbImage}
-                    resizeMode="contain"
-                  />
-                ) : null}
-              </View>
-            ))}
-          </View>
-        ) : (
-          <Text style={styles.supportingOutsideEmpty}>No supporting documents were uploaded for this travel order.</Text>
-        )}
-      </View>
+    <View style={[styles.a4Stack, sideBySideLayout ? styles.a4LayoutRow : styles.a4LayoutColumn]}>
+      {!sideBySideLayout ? (
+        <View style={[styles.supportingAttachmentsOutside, { width: supportingPanelWidth }]}>
+          <Text style={styles.supportingOutsideTitle}>Supporting documents</Text>
+          <Text style={styles.supportingOutsideHint}>
+            Submitted with this request for HR review only — not part of the official printed travel order (FM-DOrSU-HRMO-01).
+          </Text>
+          {hasSupportingDocument ? (
+            <View style={styles.supportingAttachmentsWeb}>
+              {supportingMetaList.map((meta, i) => (
+                <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBlock}>
+                  <View style={styles.supportingDocCard}>
+                    <View style={styles.supportingDocIconWrap}>
+                      <FontAwesome
+                        name={supportingWebAttachmentIconName(meta)}
+                        size={15}
+                        color="#0d4f8c"
+                      />
+                    </View>
+                    <View style={styles.supportingDocTextCol}>
+                      <Text style={styles.supportingDocTitle} numberOfLines={2}>
+                        {supportingMetaList.length > 1 ? `File ${i + 1}: ` : ''}
+                        {meta.name || 'Attachment'}
+                      </Text>
+                      <Text style={styles.supportingDocKind} numberOfLines={1}>
+                        {supportingWebFileKindLabel(meta)}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => void openSupportingDocumentAtIndex(i)}
+                      disabled={supportingDocLoadingIndex !== null}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Preview ${meta.name || `attachment ${i + 1}`}`}
+                      style={({ pressed }) => [
+                        styles.supportingDocPreviewBtn,
+                        pressed && supportingDocLoadingIndex === null && styles.supportingDocPreviewBtnPressed,
+                        supportingDocLoadingIndex !== null &&
+                          supportingDocLoadingIndex !== i &&
+                          styles.supportingDocPreviewBtnDisabled,
+                      ]}
+                    >
+                      {supportingDocLoadingIndex === i ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <FontAwesome name="eye" size={12} color="#fff" style={styles.supportingDocPreviewBtnIcon} />
+                          <Text style={styles.supportingDocPreviewBtnText}>Preview</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                  {Platform.OS === 'web' && supportingThumbUris[i] ? (
+                    <Image
+                      source={{ uri: supportingThumbUris[i] }}
+                      style={styles.supportingThumbImage}
+                      resizeMode="contain"
+                    />
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.supportingOutsideEmpty}>No supporting documents were uploaded for this travel order.</Text>
+          )}
+        </View>
+      ) : null}
 
+      <View style={[styles.a4PageWrap, sideBySideLayout && styles.a4PageWrapSide]}>
       <View style={[styles.a4Page, { width: a4PageWidth }]}>
         <View style={styles.docHeader}>
           <View style={styles.universityNameContainer}>
@@ -655,6 +726,82 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           </View>
         </View>
       </View>
+      </View>
+
+      {sideBySideLayout ? (
+        <View
+          style={[
+            styles.supportingAttachmentsOutside,
+            styles.supportingAttachmentsSidebar,
+            { width: supportingPanelWidth },
+          ]}
+        >
+          <Text style={styles.supportingOutsideTitle}>Supporting documents</Text>
+          <Text style={styles.supportingOutsideHint}>
+            Submitted with this request for HR review only — not part of the official printed travel order (FM-DOrSU-HRMO-01).
+          </Text>
+          {hasSupportingDocument ? (
+            <View style={styles.supportingAttachmentsWeb}>
+              {supportingMetaList.map((meta, i) => (
+                <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBlock}>
+                  <View style={[styles.supportingDocCard, styles.supportingDocCardSidebar]}>
+                    <View style={styles.supportingDocCardSidebarTop}>
+                      <View style={styles.supportingDocIconWrap}>
+                        <FontAwesome
+                          name={supportingWebAttachmentIconName(meta)}
+                          size={15}
+                          color="#0d4f8c"
+                        />
+                      </View>
+                      <View style={styles.supportingDocTextCol}>
+                        <Text style={styles.supportingDocTitle} numberOfLines={3}>
+                          {supportingMetaList.length > 1 ? `File ${i + 1}: ` : ''}
+                          {meta.name || 'Attachment'}
+                        </Text>
+                        <Text style={styles.supportingDocKind} numberOfLines={1}>
+                          {supportingWebFileKindLabel(meta)}
+                        </Text>
+                      </View>
+                    </View>
+                    <Pressable
+                      onPress={() => void openSupportingDocumentAtIndex(i)}
+                      disabled={supportingDocLoadingIndex !== null}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Preview ${meta.name || `attachment ${i + 1}`}`}
+                      style={({ pressed }) => [
+                        styles.supportingDocPreviewBtn,
+                        styles.supportingDocPreviewBtnSidebar,
+                        pressed && supportingDocLoadingIndex === null && styles.supportingDocPreviewBtnPressed,
+                        supportingDocLoadingIndex !== null &&
+                          supportingDocLoadingIndex !== i &&
+                          styles.supportingDocPreviewBtnDisabled,
+                      ]}
+                    >
+                      {supportingDocLoadingIndex === i ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <FontAwesome name="eye" size={12} color="#fff" style={styles.supportingDocPreviewBtnIcon} />
+                          <Text style={styles.supportingDocPreviewBtnText}>Preview</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                  {Platform.OS === 'web' && supportingThumbUris[i] ? (
+                    <Image
+                      source={{ uri: supportingThumbUris[i] }}
+                      style={styles.supportingThumbImage}
+                      resizeMode="contain"
+                    />
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.supportingOutsideEmpty}>No supporting documents were uploaded for this travel order.</Text>
+          )}
+        </View>
+      ) : null}
     </View>
   );
 };
@@ -663,6 +810,25 @@ const styles = StyleSheet.create({
   a4Stack: {
     alignItems: 'center',
     width: '100%',
+  },
+  a4LayoutRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: 16,
+  },
+  a4LayoutColumn: {
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  a4PageWrap: {
+    flexShrink: 0,
+    alignItems: 'center',
+  },
+  a4PageWrapSide: {
+    flex: 1,
+    maxWidth: 440,
+    minWidth: 0,
   },
   a4Page: {
     backgroundColor: '#fff',
@@ -870,6 +1036,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(1,26,107,0.06)',
     alignSelf: 'center',
   },
+  supportingAttachmentsSidebar: {
+    marginBottom: 0,
+    alignSelf: 'flex-start',
+    flexShrink: 0,
+  },
   supportingOutsideTitle: {
     fontSize: 13,
     fontWeight: '700',
@@ -888,10 +1059,10 @@ const styles = StyleSheet.create({
     color: 'rgba(1,26,107,0.55)',
   },
   supportingAttachmentsWeb: {
-    gap: 8,
+    gap: 10,
   },
   supportingDocBlock: {
-    marginBottom: 4,
+    marginBottom: 2,
   },
   supportingThumbImage: {
     width: '100%' as const,
@@ -900,32 +1071,92 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: 'rgba(255,255,255,0.9)',
   },
-  supportingDocRow: {
+  supportingDocCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
-    marginBottom: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: 'rgba(1,26,107,0.08)',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#f0f7ff',
     borderWidth: 1,
-    borderColor: 'rgba(1,26,107,0.2)',
+    borderColor: 'rgba(13, 79, 140, 0.16)',
+    shadowColor: '#0d4f8c',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  supportingDocRowPressed: {
-    opacity: 0.9,
+  supportingDocCardSidebar: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
-  supportingDocText: {
+  supportingDocCardSidebarTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  supportingDocIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#d9e9fb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(13, 79, 140, 0.12)',
+  },
+  supportingDocTextCol: {
     flex: 1,
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#011a6b',
+    minWidth: 0,
+    marginRight: 10,
   },
-  supportingDocAction: {
-    fontSize: 11,
+  supportingDocTitle: {
+    fontSize: 13,
     fontWeight: '700',
-    color: '#011a6b',
-    textDecorationLine: 'underline',
+    color: '#082654',
+    lineHeight: 18,
+  },
+  supportingDocKind: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#3d6ea8',
+    marginTop: 3,
+  },
+  supportingDocPreviewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: '#0d4f8c',
+    minWidth: 102,
+    shadowColor: '#082654',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  supportingDocPreviewBtnPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.98 }],
+  },
+  supportingDocPreviewBtnDisabled: {
+    opacity: 0.45,
+  },
+  supportingDocPreviewBtnSidebar: {
+    alignSelf: 'stretch',
+    minWidth: 0,
+  },
+  supportingDocPreviewBtnIcon: {
+    marginRight: 6,
+  },
+  supportingDocPreviewBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   viewMapBtn: {
     alignSelf: 'flex-start',

@@ -621,7 +621,7 @@ const HrpDashboardScreen = () => {
           fetchData();
         }, 2000);
       } else {
-        Alert.alert('Success', status === 'For President Approval' ? 'Sent to President for approval.' : status === 'Rejected' ? 'Request has been rejected.' : `Request has been ${status.toLowerCase()}.`);
+        Alert.alert('Success', status === 'For President Approval' ? 'Sent to President for approval.' : status === 'Rejected' ? 'Request has been returned to the employee.' : `Request has been ${status.toLowerCase()}.`);
         setHrSignatureForPresident(null);
         setRejectModalVisible(false);
         setRejectComment('');
@@ -1445,8 +1445,28 @@ const HrpDashboardScreen = () => {
           visible={isModalVisible}
           onRequestClose={() => setIsModalVisible(false)}
         >
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalView, isNarrow && styles.modalViewNarrow]}>
+          <Pressable
+            style={styles.modalOverlay}
+            onPress={() => {
+              if (!isSignatureModalVisible) setIsModalVisible(false);
+            }}
+          >
+            <Pressable
+              style={[styles.modalView, isNarrow && styles.modalViewNarrow]}
+              onPress={(e) => {
+                if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+              }}
+            >
+              <View style={styles.reviewModalTopBar}>
+                <Pressable
+                  onPress={() => setIsModalVisible(false)}
+                  style={styles.closeModalButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                >
+                  <FontAwesome name="times" size={20} color="#011a6b" />
+                </Pressable>
+              </View>
               {isSignatureModalVisible && (
                 <View style={[styles.signatureModalOverlay, isNarrow && (styles as any).signatureModalOverlayNarrow]}>
                   <View style={[styles.signatureModalView, isNarrow && (styles as any).signatureModalViewNarrow]}>
@@ -1655,7 +1675,7 @@ const HrpDashboardScreen = () => {
                         );
                       })()}
                       <Pressable style={[styles.button, styles.rejectButton, styles.modalButton]} onPress={() => { setRejectComment(''); setRejectModalVisible(true); }}>
-                        <Text style={styles.buttonText}>Reject</Text>
+                        <Text style={styles.buttonText}>Return</Text>
                       </Pressable>
                     </>
                   ) : null}
@@ -1664,13 +1684,10 @@ const HrpDashboardScreen = () => {
                       <Text style={styles.buttonText}>Print</Text>
                     </Pressable>
                   )}
-                  <Pressable style={[styles.button, styles.cancelButton, styles.modalButton]} onPress={() => setIsModalVisible(false)}>
-                    <Text style={styles.buttonText}>{forReviewItems.includes(selectedItem) ? 'Cancel' : 'Close'}</Text>
-                  </Pressable>
                 </View>
               )}
-            </View>
-          </View>
+            </Pressable>
+          </Pressable>
         </Modal>
 
         {/* CTC Modal — enable via FEATURE_CTC_ENABLED in src/config/featureFlags.ts */}
@@ -1891,12 +1908,12 @@ const HrpDashboardScreen = () => {
           </View>
         </Modal>
 
-        {/* Reject confirmation modal with optional comment */}
+        {/* Return confirmation modal with optional comment */}
         <Modal animationType="fade" transparent visible={rejectModalVisible} onRequestClose={() => setRejectModalVisible(false)}>
           <View style={styles.rejectModalOverlay}>
             <View style={styles.rejectModalContent}>
-              <Text style={styles.rejectModalTitle}>Reject request</Text>
-              <Text style={styles.rejectModalSubtitle}>Add an optional comment for the employee (e.g. reason for rejection).</Text>
+              <Text style={styles.rejectModalTitle}>Return request</Text>
+              <Text style={styles.rejectModalSubtitle}>Add an optional comment for the employee (e.g. reason for return).</Text>
               <TextInput
                 style={styles.rejectCommentInput}
                 placeholder="Comment (optional)"
@@ -1911,7 +1928,7 @@ const HrpDashboardScreen = () => {
                   <Text style={styles.rejectModalCancelText}>Cancel</Text>
                 </Pressable>
                 <Pressable style={[styles.rejectModalButton, styles.rejectModalConfirm]} onPress={() => selectedItem && selectedItemType && handleUpdateStatus(selectedItemType, selectedItem._id, 'Rejected', rejectComment)}>
-                  <Text style={styles.rejectModalConfirmText}>Confirm Rejection</Text>
+                  <Text style={styles.rejectModalConfirmText}>Confirm Return</Text>
                 </Pressable>
               </View>
             </View>

@@ -68,12 +68,23 @@ interface TravelOrder {
   documents?: { name?: string; contentType?: string }[] | null;
 }
 
+function trimSupportingMetaName(s: string | undefined): string {
+  return (s ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * One entry per `documents[]` slot (same order / length as MongoDB) so `?index=` matches the API.
+ * Do not filter by name/contentType — that skewed indices vs `GET …/supporting-document?index=`.
+ */
 function supportingAttachmentMetaList(order: Pick<TravelOrder, 'documents' | 'document'>): {
   name?: string;
   contentType?: string;
 }[] {
   if (Array.isArray(order.documents) && order.documents.length > 0) {
-    return order.documents.filter((d) => d && (d.name || d.contentType));
+    return order.documents.map((d, i) => ({
+      name: trimSupportingMetaName(d?.name) || `Attachment ${i + 1}`,
+      contentType: d?.contentType,
+    }));
   }
   if (order.document && (order.document.name || order.document.contentType)) {
     return [order.document];

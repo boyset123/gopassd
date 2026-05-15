@@ -1101,6 +1101,7 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
       };
       let lastErr;
       const adminUrls = await adminDeliveryUrlsToTry(String(doc.publicId).trim(), rtList);
+      const adminUrlCount = adminUrls.length;
       for (const url of adminUrls) {
         try {
           await proxyHttpUrlToExpressResponse(url, res, proxyOpts);
@@ -1137,6 +1138,7 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
           attachmentIndex: index,
           publicIdSnippet,
           resourceTypesTried: rtList,
+          adminDeliveryUrlCount: adminUrlCount,
           lastError: String(lastErr?.message || lastErr || ''),
           upstreamStatus: lastErr?.statusCode != null ? lastErr.statusCode : null,
         })

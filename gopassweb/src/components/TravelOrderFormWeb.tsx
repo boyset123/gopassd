@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, Image, Pressable, useWindowDimensions, ActivityIndicator, Alert, Platform, Linking } from 'react-native';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, Image, Pressable, useWindowDimensions, Alert, Platform, Linking } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_URL } from '../config/api';
+import SupportingAttachmentFileCard from './SupportingAttachmentFileCard';
 
 type SignatureType = 'draw' | 'upload';
 
@@ -104,18 +105,6 @@ function decodeFilenameForDisplay(name: string | undefined): string {
   }
 }
 
-function supportingWebAttachmentIconName(meta: {
-  contentType?: string;
-  name?: string;
-}): 'file-image-o' | 'file-pdf-o' | 'file-o' {
-  const ct = (meta.contentType || '').toLowerCase();
-  const name = (meta.name || '').toLowerCase();
-  if (ct.includes('wordprocessingml') || name.endsWith('.docx')) return 'file-o';
-  if (ct.startsWith('image/')) return 'file-image-o';
-  if (ct.includes('pdf') || name.endsWith('.pdf')) return 'file-pdf-o';
-  return 'file-o';
-}
-
 function supportingWebFileKindLabel(meta: { contentType?: string; name?: string }): string {
   const ct = (meta.contentType || '').toLowerCase();
   const name = (meta.name || '').toLowerCase();
@@ -176,9 +165,6 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
 
   const [generatedTravelOrderNo, setGeneratedTravelOrderNo] = useState<string>('');
   const [supportingDocLoadingIndex, setSupportingDocLoadingIndex] = useState<number | null>(null);
-  /** Web-only: blob URLs for image attachment previews */
-  const [supportingThumbUris, setSupportingThumbUris] = useState<string[]>([]);
-  const supportingThumbBlobsRef = useRef<string[]>([]);
 
   const supportingMetaList = useMemo(() => {
     const docs = order.documents;
@@ -203,74 +189,16 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
   }, [order.documents, order.document]);
 
   const hasSupportingDocument = supportingMetaList.length > 0;
-
-  useEffect(() => {
-    supportingThumbBlobsRef.current.forEach((u) => URL.revokeObjectURL(u));
-    supportingThumbBlobsRef.current = [];
-    setSupportingThumbUris([]);
-
-    if (Platform.OS !== 'web' || typeof window === 'undefined' || !order._id || supportingMetaList.length === 0) {
-      return;
-    }
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const token = await AsyncStorage.getItem('userToken');
-        if (!token || cancelled) return;
-        const uris: string[] = [];
-        for (let i = 0; i < supportingMetaList.length; i++) {
-          const ct = (supportingMetaList[i].contentType || '').toLowerCase();
-          if (!ct.startsWith('image/')) {
-            uris.push('');
-            continue;
-          }
-          try {
-            const res = await fetch(
-              `${API_URL}/travel-orders/${order._id}/supporting-document?index=${i}`,
-              { headers: { 'x-auth-token': token } }
-            );
-            if (!res.ok || cancelled) {
-              uris.push('');
-              continue;
-            }
-            const blob = await res.blob();
-            const u = URL.createObjectURL(blob);
-            supportingThumbBlobsRef.current.push(u);
-            uris.push(u);
-          } catch {
-            uris.push('');
-          }
-        }
-        if (!cancelled) setSupportingThumbUris(uris);
-      } catch {
-        if (!cancelled) setSupportingThumbUris([]);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      supportingThumbBlobsRef.current.forEach((u) => URL.revokeObjectURL(u));
-      supportingThumbBlobsRef.current = [];
-    };
-  }, [order._id, supportingMetaList]);
+  const supportingDocBusy = supportingDocLoadingIndex !== null;
 
   const openSupportingDocumentAtIndex = useCallback(
     async (fileIndex: number) => {
       if (!order._id || fileIndex < 0 || fileIndex >= supportingMetaList.length) return;
       setSupportingDocLoadingIndex(fileIndex);
 
-      // Browsers block window.open() after an await unless a tab was opened in the same synchronous
-      // user gesture. Open a placeholder first, then navigate it to the blob URL once the file loads.
-      let preOpenedTab: Window | null = null;
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        preOpenedTab = window.open('about:blank', '_blank', 'noopener,noreferrer');
-      }
-
       try {
         const token = await AsyncStorage.getItem('userToken');
         if (!token) {
-          if (preOpenedTab && !preOpenedTab.closed) preOpenedTab.close();
           Alert.alert('Session', 'You are not logged in.');
           return;
         }
@@ -281,7 +209,6 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           }
         );
         if (!res.ok) {
-          if (preOpenedTab && !preOpenedTab.closed) preOpenedTab.close();
           let detail = '';
           try {
             detail = (await res.text()).trim().slice(0, 240);
@@ -307,9 +234,12 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
         const typedBlob = blob.type === mime ? blob : new Blob([blob], { type: mime });
         const objectUrl = URL.createObjectURL(typedBlob);
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          if (preOpenedTab && !preOpenedTab.closed) {
-            preOpenedTab.location.href = objectUrl;
-          } else if (typeof document !== 'undefined') {
+          // Single open after fetch — avoid pre-opening about:blank (leaves an extra empty tab).
+          const opened =
+            typeof window.open === 'function'
+              ? window.open(objectUrl, '_blank', 'noopener,noreferrer')
+              : null;
+          if (!opened && typeof document !== 'undefined') {
             const a = document.createElement('a');
             a.href = objectUrl;
             a.target = '_blank';
@@ -317,10 +247,16 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+          } else if (!opened) {
+            URL.revokeObjectURL(objectUrl);
+            Alert.alert(
+              'Pop-up blocked',
+              'Allow pop-ups for this site to preview attachments, or try again.'
+            );
+            return;
           }
           setTimeout(() => URL.revokeObjectURL(objectUrl), 120000);
         } else {
-          if (preOpenedTab && !preOpenedTab.closed) preOpenedTab.close();
           const canOpen = await Linking.canOpenURL(objectUrl);
           if (canOpen) {
             await Linking.openURL(objectUrl);
@@ -331,7 +267,6 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           }
         }
       } catch (e) {
-        if (preOpenedTab && !preOpenedTab.closed) preOpenedTab.close();
         console.error(e);
         Alert.alert('Error', 'Could not open the supporting document.');
       } finally {
@@ -340,6 +275,19 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
     },
     [order._id, supportingMetaList]
   );
+
+  const renderSupportingAttachmentCards = () =>
+    supportingMetaList.map((meta, i) => (
+      <SupportingAttachmentFileCard
+        key={`${meta.name || 'file'}-${i}`}
+        name={meta.name || `Attachment ${i + 1}`}
+        contentType={meta.contentType}
+        subtitle={supportingWebFileKindLabel(meta)}
+        onPress={() => void openSupportingDocumentAtIndex(i)}
+        disabled={supportingDocBusy}
+        loading={supportingDocLoadingIndex === i}
+      />
+    ));
 
   const dateForNo = useMemo(() => {
     const d = new Date(order.date || '');
@@ -540,59 +488,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
             Submitted with this request for HR review only — not part of the official printed travel order (FM-DOrSU-HRMO-01).
           </Text>
           {hasSupportingDocument ? (
-            <View style={styles.supportingAttachmentsWeb}>
-              {supportingMetaList.map((meta, i) => (
-                <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBlock}>
-                  <View style={styles.supportingDocCard}>
-                    <View style={styles.supportingDocIconWrap}>
-                      <FontAwesome
-                        name={supportingWebAttachmentIconName(meta)}
-                        size={15}
-                        color="#0d4f8c"
-                      />
-                    </View>
-                    <View style={styles.supportingDocTextCol}>
-                      <Text style={styles.supportingDocTitle} numberOfLines={2}>
-                        {supportingMetaList.length > 1 ? `File ${i + 1}: ` : ''}
-                        {meta.name || 'Attachment'}
-                      </Text>
-                      <Text style={styles.supportingDocKind} numberOfLines={1}>
-                        {supportingWebFileKindLabel(meta)}
-                      </Text>
-                    </View>
-                    <Pressable
-                      onPress={() => void openSupportingDocumentAtIndex(i)}
-                      disabled={supportingDocLoadingIndex !== null}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Preview ${meta.name || `attachment ${i + 1}`}`}
-                      style={({ pressed }) => [
-                        styles.supportingDocPreviewBtn,
-                        pressed && supportingDocLoadingIndex === null && styles.supportingDocPreviewBtnPressed,
-                        supportingDocLoadingIndex !== null &&
-                          supportingDocLoadingIndex !== i &&
-                          styles.supportingDocPreviewBtnDisabled,
-                      ]}
-                    >
-                      {supportingDocLoadingIndex === i ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : (
-                        <>
-                          <FontAwesome name="eye" size={12} color="#fff" style={styles.supportingDocPreviewBtnIcon} />
-                          <Text style={styles.supportingDocPreviewBtnText}>Preview</Text>
-                        </>
-                      )}
-                    </Pressable>
-                  </View>
-                  {Platform.OS === 'web' && supportingThumbUris[i] ? (
-                    <Image
-                      source={{ uri: supportingThumbUris[i] }}
-                      style={styles.supportingThumbImage}
-                      resizeMode="contain"
-                    />
-                  ) : null}
-                </View>
-              ))}
-            </View>
+            <View style={styles.supportingAttachmentsWeb}>{renderSupportingAttachmentCards()}</View>
           ) : (
             <Text style={styles.supportingOutsideEmpty}>No supporting documents were uploaded for this travel order.</Text>
           )}
@@ -741,62 +637,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
             Submitted with this request for HR review only — not part of the official printed travel order (FM-DOrSU-HRMO-01).
           </Text>
           {hasSupportingDocument ? (
-            <View style={styles.supportingAttachmentsWeb}>
-              {supportingMetaList.map((meta, i) => (
-                <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBlock}>
-                  <View style={[styles.supportingDocCard, styles.supportingDocCardSidebar]}>
-                    <View style={styles.supportingDocCardSidebarTop}>
-                      <View style={styles.supportingDocIconWrap}>
-                        <FontAwesome
-                          name={supportingWebAttachmentIconName(meta)}
-                          size={15}
-                          color="#0d4f8c"
-                        />
-                      </View>
-                      <View style={styles.supportingDocTextCol}>
-                        <Text style={styles.supportingDocTitle} numberOfLines={3}>
-                          {supportingMetaList.length > 1 ? `File ${i + 1}: ` : ''}
-                          {meta.name || 'Attachment'}
-                        </Text>
-                        <Text style={styles.supportingDocKind} numberOfLines={1}>
-                          {supportingWebFileKindLabel(meta)}
-                        </Text>
-                      </View>
-                    </View>
-                    <Pressable
-                      onPress={() => void openSupportingDocumentAtIndex(i)}
-                      disabled={supportingDocLoadingIndex !== null}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Preview ${meta.name || `attachment ${i + 1}`}`}
-                      style={({ pressed }) => [
-                        styles.supportingDocPreviewBtn,
-                        styles.supportingDocPreviewBtnSidebar,
-                        pressed && supportingDocLoadingIndex === null && styles.supportingDocPreviewBtnPressed,
-                        supportingDocLoadingIndex !== null &&
-                          supportingDocLoadingIndex !== i &&
-                          styles.supportingDocPreviewBtnDisabled,
-                      ]}
-                    >
-                      {supportingDocLoadingIndex === i ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : (
-                        <>
-                          <FontAwesome name="eye" size={12} color="#fff" style={styles.supportingDocPreviewBtnIcon} />
-                          <Text style={styles.supportingDocPreviewBtnText}>Preview</Text>
-                        </>
-                      )}
-                    </Pressable>
-                  </View>
-                  {Platform.OS === 'web' && supportingThumbUris[i] ? (
-                    <Image
-                      source={{ uri: supportingThumbUris[i] }}
-                      style={styles.supportingThumbImage}
-                      resizeMode="contain"
-                    />
-                  ) : null}
-                </View>
-              ))}
-            </View>
+            <View style={styles.supportingAttachmentsWeb}>{renderSupportingAttachmentCards()}</View>
           ) : (
             <Text style={styles.supportingOutsideEmpty}>No supporting documents were uploaded for this travel order.</Text>
           )}
@@ -1060,103 +901,6 @@ const styles = StyleSheet.create({
   },
   supportingAttachmentsWeb: {
     gap: 10,
-  },
-  supportingDocBlock: {
-    marginBottom: 2,
-  },
-  supportingThumbImage: {
-    width: '100%' as const,
-    maxHeight: 160,
-    marginTop: 8,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-  },
-  supportingDocCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#f0f7ff',
-    borderWidth: 1,
-    borderColor: 'rgba(13, 79, 140, 0.16)',
-    shadowColor: '#0d4f8c',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  supportingDocCardSidebar: {
-    flexDirection: 'column',
-    alignItems: 'stretch',
-  },
-  supportingDocCardSidebarTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 10,
-  },
-  supportingDocIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#d9e9fb',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(13, 79, 140, 0.12)',
-  },
-  supportingDocTextCol: {
-    flex: 1,
-    minWidth: 0,
-    marginRight: 10,
-  },
-  supportingDocTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#082654',
-    lineHeight: 18,
-  },
-  supportingDocKind: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#3d6ea8',
-    marginTop: 3,
-  },
-  supportingDocPreviewBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: '#0d4f8c',
-    minWidth: 102,
-    shadowColor: '#082654',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  supportingDocPreviewBtnPressed: {
-    opacity: 0.92,
-    transform: [{ scale: 0.98 }],
-  },
-  supportingDocPreviewBtnDisabled: {
-    opacity: 0.45,
-  },
-  supportingDocPreviewBtnSidebar: {
-    alignSelf: 'stretch',
-    minWidth: 0,
-  },
-  supportingDocPreviewBtnIcon: {
-    marginRight: 6,
-  },
-  supportingDocPreviewBtnText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.3,
   },
   viewMapBtn: {
     alignSelf: 'flex-start',

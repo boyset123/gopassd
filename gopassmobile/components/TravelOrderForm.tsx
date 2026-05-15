@@ -21,6 +21,7 @@ import { WebView } from 'react-native-webview';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { API_URL } from '../config/api';
+import SupportingAttachmentFileCard from './SupportingAttachmentFileCard';
 
 type SignatureType = 'draw' | 'upload';
 
@@ -143,17 +144,6 @@ function previewKindFromMeta(contentType: string | undefined, fileName: string |
   if (ct.startsWith('image/')) return 'image';
   if (ct.includes('pdf') || name.endsWith('.pdf')) return 'pdf';
   return 'other';
-}
-
-function supportingAttachmentIconName(meta: {
-  contentType?: string;
-  name?: string;
-}): 'file-image-o' | 'file-pdf-o' | 'file-o' {
-  if (isWordAttachment(meta.contentType, meta.name)) return 'file-o';
-  const k = previewKindFromMeta(meta.contentType, meta.name);
-  if (k === 'image') return 'file-image-o';
-  if (k === 'pdf') return 'file-pdf-o';
-  return 'file-o';
 }
 
 function supportingAttachmentKindLabel(meta: { contentType?: string; name?: string }): string {
@@ -427,55 +417,20 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
     ...(order.participants || []).filter((p) => !!p),
   ];
 
-  const supportingAttachmentBanners = hasSupportingDocument
-    ? attachmentMeta.map((meta, i) => {
-        const previewBusy = openingSupportingIndex !== null || supportingViewer !== null;
-        const loadingHere = openingSupportingIndex === i;
-        const iconName = supportingAttachmentIconName(meta);
-        const kindLabel = supportingAttachmentKindLabel(meta);
-        return (
-          <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBanner}>
-            <View style={styles.supportingDocIconWrap}>
-              <FontAwesome name={iconName} size={16} color="#0d4f8c" />
-            </View>
-            <View style={styles.supportingDocTextCol}>
-              <Text style={styles.supportingDocLabel} numberOfLines={2}>
-                {meta.name || `Attachment ${i + 1}`}
-              </Text>
-              <Text style={styles.supportingDocKind} numberOfLines={1}>
-                {kindLabel}
-              </Text>
-            </View>
-            <Pressable
-              onPress={() => void openSupportingDocumentAtIndex(i)}
-              disabled={previewBusy}
-              accessibilityRole="button"
-              accessibilityLabel={`Preview ${meta.name || `attachment ${i + 1}`}`}
-              style={({ pressed }) => [
-                styles.supportingDocViewBtnWrap,
-                pressed && !previewBusy && styles.supportingDocViewBtnWrapPressed,
-                previewBusy && !loadingHere && styles.supportingDocViewBtnWrapDisabled,
-              ]}
-            >
-              <View
-                style={[
-                  styles.supportingDocViewBtnInner,
-                  loadingHere ? styles.supportingDocViewBtnInnerMuted : styles.supportingDocViewBtnInnerPrimary,
-                ]}
-              >
-                {loadingHere ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <FontAwesome name="eye" size={13} color="#ffffff" style={styles.supportingDocViewBtnIcon} />
-                    <Text style={styles.supportingDocViewBtnText}>Preview</Text>
-                  </>
-                )}
-              </View>
-            </Pressable>
-          </View>
-        );
-      })
+  const previewBusy = openingSupportingIndex !== null || supportingViewer !== null;
+  const supportingAttachmentCards = hasSupportingDocument
+    ? attachmentMeta.map((meta, i) => (
+        <SupportingAttachmentFileCard
+          key={`${meta.name || 'file'}-${i}`}
+          name={meta.name || `Attachment ${i + 1}`}
+          contentType={meta.contentType}
+          subtitle={supportingAttachmentKindLabel(meta)}
+          onPress={() => void openSupportingDocumentAtIndex(i)}
+          disabled={previewBusy}
+          loading={openingSupportingIndex === i}
+          compact={!supportingAttachmentsOutsidePaper}
+        />
+      ))
     : null;
 
   return (
@@ -581,7 +536,7 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
         </Text>
 
         {hasSupportingDocument && !supportingAttachmentsOutsidePaper ? (
-          <View style={styles.supportingAttachmentsBlock}>{supportingAttachmentBanners}</View>
+          <View style={styles.supportingAttachmentsBlock}>{supportingAttachmentCards}</View>
         ) : null}
 
         <View style={styles.signatureSection}>
@@ -706,7 +661,7 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
             { width: a4PageWidth },
           ]}
         >
-          {supportingAttachmentBanners}
+          {supportingAttachmentCards}
         </View>
       ) : null}
     </View>
@@ -1016,89 +971,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 4,
     alignSelf: 'center',
-  },
-  supportingDocBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: '#f0f7ff',
-    borderWidth: 1,
-    borderColor: 'rgba(13, 79, 140, 0.16)',
-    shadowColor: '#0d4f8c',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  supportingDocIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#d9e9fb',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(13, 79, 140, 0.12)',
-  },
-  supportingDocTextCol: {
-    flex: 1,
-    minWidth: 0,
-    marginRight: 8,
-  },
-  supportingDocLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#082654',
-    lineHeight: 15,
-  },
-  supportingDocKind: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#3d6ea8',
-    marginTop: 3,
-    letterSpacing: 0.2,
-  },
-  supportingDocViewBtnWrap: {
-    borderRadius: 999,
-    overflow: 'hidden',
-    minWidth: 102,
-    shadowColor: '#082654',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.28,
-    shadowRadius: 5,
-    elevation: 4,
-  },
-  supportingDocViewBtnWrapPressed: {
-    transform: [{ scale: 0.97 }],
-    opacity: 0.94,
-  },
-  supportingDocViewBtnWrapDisabled: {
-    opacity: 0.42,
-  },
-  supportingDocViewBtnInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-  },
-  supportingDocViewBtnInnerPrimary: {
-    backgroundColor: '#0d4f8c',
-  },
-  supportingDocViewBtnInnerMuted: {
-    backgroundColor: '#64748b',
-  },
-  supportingDocViewBtnIcon: {
-    marginRight: 6,
-  },
-  supportingDocViewBtnText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.4,
   },
   supportingViewerRoot: {
     flex: 1,

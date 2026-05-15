@@ -16,6 +16,8 @@ interface Employee {
 export interface ApprovedTravelOrder {
   _id: string;
   employee: Employee;
+  /** Submitter role snapshot from server */
+  employeeRole?: string;
   approvedBy?: Employee;
   recommendedBy?: Employee[];
   /** Employee (submitter) signature on the travel order */

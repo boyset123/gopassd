@@ -9,6 +9,18 @@ const QRCode = require('qrcode');
 const { parseLocalDate, parseMeridiemTimeToDate } = require('../utils/dateTime');
 const { getEffectiveSigner, toIdString } = require('../utils/oic');
 const { travelOrderToClientJson, travelOrdersToClientJson } = require('../utils/travelOrderSerialize');
+
+/** Populate employee before JSON so clients always receive `employee.role` (socket/POST often omitted it). */
+async function travelOrderToClientJsonWithEmployee(travelOrderDoc) {
+  if (travelOrderDoc != null && typeof travelOrderDoc.populate === 'function') {
+    try {
+      await travelOrderDoc.populate({ path: 'employee', select: 'name email profilePicture role' });
+    } catch (err) {
+      console.warn('travelOrder employee populate failed:', err?.message || err);
+    }
+  }
+  return travelOrderToClientJson(travelOrderDoc);
+}
 const multer = require('multer');
 const storage = multer.memoryStorage();
 const mongoose = require('mongoose');
@@ -211,6 +223,7 @@ router.post(
 
     const travelOrderData = {
       employee: req.user.userId,
+      employeeRole: user.role,
       date: parsedDate,
       address,
       salary,
@@ -331,9 +344,9 @@ router.post(
     }
 
     // --- Real-time Update via Socket.IO ---
-    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
+    req.io.emit('travelOrderDataChanged', await travelOrderToClientJsonWithEmployee(travelOrder));
 
-    res.status(201).json(travelOrderToClientJson(travelOrder));
+    res.status(201).json(await travelOrderToClientJsonWithEmployee(travelOrder));
   } catch (error) {
     console.error('Error creating travel order:', error);
     res.status(500).json({ message: 'Server error' });
@@ -442,9 +455,9 @@ router.put('/:id/approve-president', [auth], async (req, res) => {
     }
 
     // --- Real-time Update via Socket.IO ---
-    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
+    req.io.emit('travelOrderDataChanged', await travelOrderToClientJsonWithEmployee(travelOrder));
 
-    res.json(travelOrderToClientJson(travelOrder));
+    res.json(await travelOrderToClientJsonWithEmployee(travelOrder));
   } catch (error) {
     console.error('Error approving travel order by president:', error);
     res.status(500).json({ message: 'Server error' });
@@ -716,9 +729,9 @@ router.put('/:id/status', [auth], async (req, res) => {
     }
 
     // --- Real-time Update via Socket.IO ---
-    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
+    req.io.emit('travelOrderDataChanged', await travelOrderToClientJsonWithEmployee(travelOrder));
 
-    res.json(travelOrderToClientJson(travelOrder));
+    res.json(await travelOrderToClientJsonWithEmployee(travelOrder));
   } catch (error) {
     console.error('Error updating travel order status:', error);
     res.status(500).json({ message: 'Server error' });
@@ -812,7 +825,7 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
           const payload = hrUser.notifications[hrUser.notifications.length - 1].toObject ? hrUser.notifications[hrUser.notifications.length - 1].toObject() : hrUser.notifications[hrUser.notifications.length - 1];
           req.io.emit('newNotification', { userId: hrUser._id.toString(), notification: payload });
         }
-        req.io.emit('travelOrderDataChanged', travelOrderToClientJson(order));
+        req.io.emit('travelOrderDataChanged', await travelOrderToClientJsonWithEmployee(order));
       }
     }
 
@@ -963,8 +976,8 @@ router.put('/:id/verify', [auth, authorize('Security Personnel')], async (req, r
     travelOrder.departureTime = new Date();
     await travelOrder.save();
 
-    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
-    res.json(travelOrderToClientJson(travelOrder));
+    req.io.emit('travelOrderDataChanged', await travelOrderToClientJsonWithEmployee(travelOrder));
+    res.json(await travelOrderToClientJsonWithEmployee(travelOrder));
   } catch (error) {
     console.error('Error verifying travel order:', error);
     res.status(500).json({ message: 'Server error' });
@@ -1009,8 +1022,8 @@ router.put('/return/:id', auth, async (req, res) => {
       req.io.emit('newNotification', { userId: hrUser._id.toString(), notification: payload });
     }
 
-    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
-    res.json(travelOrderToClientJson(travelOrder));
+    req.io.emit('travelOrderDataChanged', await travelOrderToClientJsonWithEmployee(travelOrder));
+    res.json(await travelOrderToClientJsonWithEmployee(travelOrder));
   } catch (error) {
     console.error('Error marking travel order as returned:', error);
     res.status(500).json({ message: 'Server error' });
@@ -1041,8 +1054,8 @@ router.put('/:id/return', auth, async (req, res) => {
     travelOrder.arrivalTime = new Date();
     await travelOrder.save();
 
-    req.io.emit('travelOrderDataChanged', travelOrderToClientJson(travelOrder));
-    res.json(travelOrderToClientJson(travelOrder));
+    req.io.emit('travelOrderDataChanged', await travelOrderToClientJsonWithEmployee(travelOrder));
+    res.json(await travelOrderToClientJsonWithEmployee(travelOrder));
   } catch (error) {
     console.error('Error marking travel order as returned:', error);
     res.status(500).json({ message: 'Server error' });
@@ -1182,7 +1195,7 @@ router.get('/:id', [auth, authorize('Security Personnel')], async (req, res) => 
       return res.status(404).json({ message: 'Travel order not found.' });
     }
 
-    res.json(travelOrderToClientJson(travelOrder));
+    res.json(await travelOrderToClientJsonWithEmployee(travelOrder));
   } catch (error) {
     console.error('Error fetching travel order:', error);
     res.status(500).json({ message: 'Server error' });

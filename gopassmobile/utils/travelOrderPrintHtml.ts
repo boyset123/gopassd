@@ -7,6 +7,7 @@ export interface TravelOrderPrintItem {
   travelOrderNo?: string;
   date: string;
   employee?: { name?: string; role?: string };
+  employeeRole?: string;
   employeeAddress?: string;
   salary?: string;
   to?: string;
@@ -41,6 +42,9 @@ const formatSalary = (salary: string | undefined) =>
 
 const normalizeInline = (value: string | undefined | null) =>
   (value ?? '').replace(/\s+/g, ' ').trim();
+
+const travelOrderPositionLabel = (item: TravelOrderPrintItem) =>
+  normalizeInline(item.employeeRole) || normalizeInline(item.employee?.role) || 'N/A';
 
 const formatNamesList = (names: string[]): string => {
   const filtered = names.map(normalizeInline).filter(Boolean);
@@ -339,7 +343,7 @@ export function getTravelOrderPrintHtml(
 
       <div class="form-row">
         <span class="label">POSITION:</span>
-        <span class="value-u">${escapeHtml(normalizeInline(item.employee?.role) || '—')}</span>
+        <span class="value-u">${escapeHtml(travelOrderPositionLabel(item))}</span>
       </div>
 
       <div class="form-row">

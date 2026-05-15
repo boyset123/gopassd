@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 
 const travelOrderSchema = new mongoose.Schema({
   employee: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  /** Snapshot of submitter's `User.role` at creation (system role / broad position). Survives lean responses without full `employee` populate. */
+  employeeRole: { type: String },
   signature: {
     type: String, // Base64
   },

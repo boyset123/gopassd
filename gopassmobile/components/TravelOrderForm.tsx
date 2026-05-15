@@ -42,6 +42,8 @@ type UserRef = string | { _id?: string; name?: string; role?: string } | undefin
 interface TravelOrder {
   _id: string;
   employee: Employee;
+  /** Submitter role snapshot from server */
+  employeeRole?: string;
   purpose: string;
   to: string;
   date: string;
@@ -172,6 +174,9 @@ const formatSalary = (salary: string | undefined) =>
 
 const normalizeInline = (value: string | undefined | null) =>
   (value ?? '').replace(/\s+/g, ' ').trim();
+
+const travelOrderPositionLabel = (order: TravelOrder) =>
+  normalizeInline(order.employeeRole) || normalizeInline(order.employee?.role) || 'N/A';
 
 const formatNamesList = (names: string[]): string => {
   const filtered = names.map(normalizeInline).filter(Boolean);
@@ -466,7 +471,7 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
 
         <View style={styles.formRow}>
           <Text style={styles.formLabel}>POSITION:</Text>
-          <Text style={styles.formValueUnderlined}>{order.employee?.role}</Text>
+          <Text style={styles.formValueUnderlined}>{travelOrderPositionLabel(order)}</Text>
         </View>
         <View style={styles.addressSalaryRow}>
           <View style={styles.addressGroup}>

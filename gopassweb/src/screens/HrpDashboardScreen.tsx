@@ -67,6 +67,8 @@ interface PassSlip {
 interface TravelOrder {
   _id: string;
   employee: Employee;
+  /** Submitter role snapshot from server */
+  employeeRole?: string;
   travelOrderNo: string;
   date: string;
   address: string;
@@ -222,6 +224,7 @@ const getCoordinatorSignature = (order: ApprovedTravelOrder | null): string | un
 const buildTravelOrderWebView = (o: TravelOrder) => ({
   _id: o._id,
   employee: o.employee,
+  employeeRole: o.employeeRole,
   purpose: o.purpose,
   to: o.to,
   date: o.date,

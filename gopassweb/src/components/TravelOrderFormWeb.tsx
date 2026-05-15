@@ -26,6 +26,8 @@ type WebUserRef = string | { _id?: string; name?: string; role?: string } | null
 export interface TravelOrderWebOrder {
   _id: string;
   employee: Employee;
+  /** Snapshot of submitter role from server (present when API omits populated `employee.role`). */
+  employeeRole?: string;
   purpose: string;
   to: string;
   date: string;
@@ -90,6 +92,9 @@ const formatSalary = (salary: string | undefined) =>
 
 const normalizeInline = (value: string | undefined | null) =>
   (value ?? '').replace(/\s+/g, ' ').trim();
+
+const travelOrderPositionLabel = (order: TravelOrderWebOrder) =>
+  normalizeInline(order.employeeRole) || normalizeInline(order.employee?.role) || 'N/A';
 
 const formatNamesList = (names: string[]): string => {
   const filtered = names.map(normalizeInline).filter(Boolean);
@@ -579,7 +584,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
 
         <View style={styles.formRow}>
           <Text style={styles.formLabel}>POSITION:</Text>
-          <Text style={styles.formValueUnderlined}>{order.employee?.role || '—'}</Text>
+          <Text style={styles.formValueUnderlined}>{travelOrderPositionLabel(order)}</Text>
         </View>
         <View style={styles.addressSalaryRow}>
           <View style={styles.addressGroup}>

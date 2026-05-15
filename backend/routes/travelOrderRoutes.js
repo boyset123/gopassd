@@ -96,10 +96,17 @@ async function canViewSupportingDocument(reqUser, travelOrderLean) {
     if (resolution && toIdString(resolution.signerId) === uid) return true;
   }
 
+  // President role, the configured President user, their OIC, or the President while on travel (OIC signs).
+  if (role === 'President') return true;
   const president = await User.findOne({ role: 'President' }).select('_id').lean();
   if (president?._id) {
+    const presidentId = toIdString(president._id);
+    if (presidentId === uid) return true;
     const resolution = await getEffectiveSigner(president._id);
-    if (resolution && toIdString(resolution.signerId) === uid) return true;
+    if (resolution) {
+      if (toIdString(resolution.signerId) === uid) return true;
+      if (toIdString(resolution.originalId) === uid) return true;
+    }
   }
 
   const sigs = travelOrderLean.recommenderSignatures || [];

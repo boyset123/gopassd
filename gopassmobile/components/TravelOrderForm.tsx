@@ -139,6 +139,11 @@ interface TravelOrderFormProps {
   onChooseSignature: (type: SignatureType) => void;
   /** When true, show draw/upload controls in the APPROVED BY (President) section. */
   presidentCanSign?: boolean;
+  /**
+   * Signatory review: render supporting files below the A4 “paper” card instead of inside it
+   * (clearer separation when signing).
+   */
+  supportingAttachmentsOutsidePaper?: boolean;
 }
 
 const formatDate = (dateString: string, includeTime = false) => {
@@ -199,6 +204,7 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
   onRedoApproverSignature,
   onChooseSignature,
   presidentCanSign = false,
+  supportingAttachmentsOutsidePaper = false,
 }) => {
   const { width: windowWidth } = useWindowDimensions();
   const a4PageWidth = Math.min(windowWidth - 32, 420);
@@ -379,6 +385,28 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
     ...(order.participants || []).filter((p) => !!p),
   ];
 
+  const supportingAttachmentBanners = hasSupportingDocument
+    ? attachmentMeta.map((meta, i) => (
+        <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBanner}>
+          <FontAwesome name="paperclip" size={12} color="#011a6b" style={{ marginRight: 6 }} />
+          <Text style={styles.supportingDocLabel} numberOfLines={1}>
+            {meta.name || `Attachment ${i + 1}`}
+          </Text>
+          <Pressable
+            onPress={() => void openSupportingDocumentAtIndex(i)}
+            disabled={openingSupportingIndex !== null || supportingViewer !== null}
+            style={({ pressed }) => [styles.supportingDocViewBtn, pressed && styles.supportingDocViewBtnPressed]}
+          >
+            {openingSupportingIndex === i ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.supportingDocViewBtnText}>View</Text>
+            )}
+          </Pressable>
+        </View>
+      ))
+    : null;
+
   return (
     <>
     <View style={styles.a4Stack}>
@@ -481,28 +509,8 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
           Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.
         </Text>
 
-        {hasSupportingDocument ? (
-          <View style={styles.supportingAttachmentsBlock}>
-            {attachmentMeta.map((meta, i) => (
-              <View key={`${meta.name || 'file'}-${i}`} style={styles.supportingDocBanner}>
-                <FontAwesome name="paperclip" size={12} color="#011a6b" style={{ marginRight: 6 }} />
-                <Text style={styles.supportingDocLabel} numberOfLines={1}>
-                  {meta.name || `Attachment ${i + 1}`}
-                </Text>
-                <Pressable
-                  onPress={() => void openSupportingDocumentAtIndex(i)}
-                  disabled={openingSupportingIndex !== null || supportingViewer !== null}
-                  style={({ pressed }) => [styles.supportingDocViewBtn, pressed && styles.supportingDocViewBtnPressed]}
-                >
-                  {openingSupportingIndex === i ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.supportingDocViewBtnText}>View</Text>
-                  )}
-                </Pressable>
-              </View>
-            ))}
-          </View>
+        {hasSupportingDocument && !supportingAttachmentsOutsidePaper ? (
+          <View style={styles.supportingAttachmentsBlock}>{supportingAttachmentBanners}</View>
         ) : null}
 
         <View style={styles.signatureSection}>
@@ -619,6 +627,17 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
           </View>
         </View>
       </View>
+      {hasSupportingDocument && supportingAttachmentsOutsidePaper ? (
+        <View
+          style={[
+            styles.supportingAttachmentsBlock,
+            styles.supportingAttachmentsOutsidePaper,
+            { width: a4PageWidth },
+          ]}
+        >
+          {supportingAttachmentBanners}
+        </View>
+      ) : null}
     </View>
 
     <Modal
@@ -920,6 +939,12 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 6,
     marginBottom: 6,
+  },
+  /** Below the A4 card; same width as paper for signatory review modals. */
+  supportingAttachmentsOutsidePaper: {
+    marginTop: 12,
+    marginBottom: 4,
+    alignSelf: 'center',
   },
   supportingDocBanner: {
     flexDirection: 'row',

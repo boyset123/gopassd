@@ -533,6 +533,7 @@ export default function FacultyDeanDashboard() {
                       approverSignature={approverSignature}
                       onRedoApproverSignature={() => setApproverSignature(null)}
                       onChooseSignature={(type) => setSignatureType(type)}
+                      supportingAttachmentsOutsidePaper
                     />
                   </>
                 )}

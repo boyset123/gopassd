@@ -560,6 +560,7 @@ export default function ProgramHeadDashboard() {
                     approverSignature={approverSignature}
                     onRedoApproverSignature={() => setApproverSignature(null)}
                     onChooseSignature={(type) => setSignatureType(type)}
+                    supportingAttachmentsOutsidePaper
                   />
                 )}
               </View>

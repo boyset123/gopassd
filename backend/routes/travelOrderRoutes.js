@@ -817,7 +817,7 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
     }
 
     const recommendedOrders = await TravelOrder.find({ status: 'Recommended' })
-      .populate('employee', 'name email profilePicture')
+      .populate('employee', 'name email profilePicture role')
       .populate('recommendedBy', 'name')
       .populate('recommenderSignatures.user', 'name role')
       .populate('recommenderSignatures.signedAsOicFor', 'name role')
@@ -835,7 +835,7 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
 router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async (req, res) => {
   try {
     const hrApprovedOrders = await TravelOrder.find({ status: 'President Approved' })
-      .populate('employee', 'name email profilePicture')
+      .populate('employee', 'name email profilePicture role')
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
       .populate('presidentApprovedBy', 'name')
@@ -870,7 +870,7 @@ router.get('/approved', [auth, authorize('Human Resource Personnel')], async (re
     }
 
     const approvedOrders = await TravelOrder.find({ status: 'Approved' })
-      .populate('employee', 'name email profilePicture')
+      .populate('employee', 'name email profilePicture role')
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
       .populate('presidentApprovedBy', 'name')
@@ -891,7 +891,7 @@ router.get('/approved', [auth, authorize('Human Resource Personnel')], async (re
 router.get('/returned', [auth, authorize('Human Resource Personnel')], async (req, res) => {
   try {
     const returnedOrders = await TravelOrder.find({ status: 'Returned' })
-      .populate('employee', 'name email profilePicture')
+      .populate('employee', 'name email profilePicture role')
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
       .populate('presidentApprovedBy', 'name')

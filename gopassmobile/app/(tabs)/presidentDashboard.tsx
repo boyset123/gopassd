@@ -466,6 +466,7 @@ export default function PresidentDashboard() {
           onRedoApproverSignature={() => setApproverSignature(null)}
           onChooseSignature={(type) => setSignatureType(type as 'draw' | 'upload')}
           presidentCanSign
+          supportingAttachmentsOutsidePaper
         />
       </View>
     );

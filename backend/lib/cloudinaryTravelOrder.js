@@ -114,40 +114,83 @@ function resourceSecureUrlFromAdmin(publicId, resourceTypesInOrder) {
 }
 
 /**
+ * Guess Cloudinary `format` option for raw uploads from filename (public_id may omit extension).
+ *
+ * @param {string | undefined} name
+ * @returns {string | undefined}
+ */
+function inferRawFormatFromFilename(name) {
+  const n = String(name || '').toLowerCase();
+  const m = n.match(/\.([a-z0-9]+)$/i);
+  if (!m) return undefined;
+  const ext = m[1];
+  if (ext === 'jpeg') return 'jpg';
+  if (['pdf', 'png', 'gif', 'webp', 'jpg', 'docx'].includes(ext)) return ext;
+  return undefined;
+}
+
+/**
  * Delivery URLs to try when fetching an asset from Cloudinary (server-side only).
- * Tries signed first, then unsigned.
+ * Raw files (PDF, DOCX) often need an explicit `format` in `cloudinary.url()`; without it,
+ * generated URLs 404/401 while images still work.
  *
  * @param {string} publicId
  * @param {'image' | 'raw'} resourceType
+ * @param {{ format?: string; name?: string }} [meta]
  * @returns {string[]}
  */
-function assetDeliveryUrlsToTry(publicId, resourceType) {
+function assetDeliveryUrlsToTry(publicId, resourceType, meta = {}) {
   applyConfig();
   const id = String(publicId || '').trim();
-  const signed = cloudinary.url(id, {
-    resource_type: resourceType,
-    secure: true,
-    sign_url: true,
-  });
-  const unsigned = cloudinary.url(id, {
-    resource_type: resourceType,
-    secure: true,
-  });
-  return signed === unsigned ? [signed] : [signed, unsigned];
+  const formatHint = meta.format ? String(meta.format).replace(/^\./, '') : undefined;
+  const fromName = inferRawFormatFromFilename(meta.name);
+
+  /** @type {Record<string, unknown>[]} */
+  const extraVariants = [];
+  const pushVariant = (v) => {
+    const key = JSON.stringify(v);
+    if (!extraVariants.some((x) => JSON.stringify(x) === key)) extraVariants.push(v);
+  };
+
+  if (resourceType === 'raw') {
+    pushVariant({});
+    if (formatHint) pushVariant({ format: formatHint });
+    if (fromName && fromName !== formatHint) pushVariant({ format: fromName });
+  } else {
+    pushVariant({});
+  }
+
+  const urls = [];
+  const seen = new Set();
+  for (const extra of extraVariants) {
+    for (const signUrl of [true, false]) {
+      const u = cloudinary.url(id, {
+        resource_type: resourceType,
+        secure: true,
+        sign_url: signUrl,
+        ...extra,
+      });
+      if (!seen.has(u)) {
+        seen.add(u);
+        urls.push(u);
+      }
+    }
+  }
+  return urls;
 }
 
 /**
  * @deprecated Prefer assetDeliveryUrlsToTry; kept for callers that need a single URL.
  */
-function assetDeliveryUrl(publicId, resourceType) {
-  return assetDeliveryUrlsToTry(publicId, resourceType)[0];
+function assetDeliveryUrl(publicId, resourceType, meta = {}) {
+  return assetDeliveryUrlsToTry(publicId, resourceType, meta)[0];
 }
 
 /**
  * @deprecated Use assetDeliveryUrl; kept as alias for callers.
  */
-function signedDeliveryUrl(publicId, resourceType, _ttlSec = 600) {
-  return assetDeliveryUrl(publicId, resourceType);
+function signedDeliveryUrl(publicId, resourceType, _ttlSec = 600, meta = {}) {
+  return assetDeliveryUrl(publicId, resourceType, meta);
 }
 
 /**

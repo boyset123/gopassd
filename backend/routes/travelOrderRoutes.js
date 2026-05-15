@@ -1101,7 +1101,7 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
       };
       let lastErr;
       for (const rtt of rtList) {
-        for (const url of assetDeliveryUrlsToTry(doc.publicId, rtt)) {
+        for (const url of assetDeliveryUrlsToTry(doc.publicId, rtt, { format: doc.format, name: doc.name })) {
           try {
             await proxyHttpUrlToExpressResponse(url, res, proxyOpts);
             return;

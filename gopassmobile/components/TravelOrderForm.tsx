@@ -14,7 +14,9 @@ import {
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Image as ExpoImage } from 'expo-image';
 import { Buffer } from 'buffer';
+import Pdf from 'react-native-pdf';
 import { WebView } from 'react-native-webview';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -104,10 +106,18 @@ function toFileWebviewUri(localPath: string): string {
   return `file://${normalized}`;
 }
 
+function previewKindFromMeta(contentType: string | undefined, fileName: string | undefined): 'image' | 'pdf' | 'other' {
+  const ct = (contentType || '').toLowerCase();
+  const name = (fileName || '').toLowerCase();
+  if (ct.startsWith('image/')) return 'image';
+  if (ct.includes('pdf') || name.endsWith('.pdf')) return 'pdf';
+  return 'other';
+}
+
 type SupportingViewerState =
   | null
   | { status: 'loading'; title: string }
-  | { status: 'ready'; title: string; filePath: string };
+  | { status: 'ready'; title: string; filePath: string; previewKind: 'image' | 'pdf' | 'other' };
 
 interface TravelOrderFormProps {
   order: TravelOrder;
@@ -266,7 +276,12 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
         const ab = await res.arrayBuffer();
         const b64 = Buffer.from(new Uint8Array(ab)).toString('base64');
         await FileSystem.writeAsStringAsync(filePath, b64, { encoding: FileSystem.EncodingType.Base64 });
-        setSupportingViewer({ status: 'ready', title, filePath });
+        setSupportingViewer({
+          status: 'ready',
+          title,
+          filePath,
+          previewKind: previewKindFromMeta(meta.contentType, meta.name),
+        });
       } catch (e: unknown) {
         if (e && typeof e === 'object' && 'name' in e && (e as { name?: string }).name === 'AbortError') {
           return;
@@ -622,32 +637,53 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
             <Text style={styles.supportingLoadingHint}>Loading preview…</Text>
           </View>
         ) : supportingViewer?.status === 'ready' ? (
-          <WebView
-            style={styles.supportingWebView}
-            source={{ uri: toFileWebviewUri(supportingViewer.filePath) }}
-            originWhitelist={['*']}
-            startInLoadingState
-            allowsInlineMediaPlayback
-            mixedContentMode="always"
-            allowingReadAccessToURL={Platform.OS === 'ios' ? FileSystem.cacheDirectory ?? undefined : undefined}
-            androidLayerType={Platform.OS === 'android' ? 'hardware' : undefined}
-            renderLoading={() => (
-              <View style={styles.supportingWebViewLoading}>
-                <ActivityIndicator size="large" color="#011a6b" />
-              </View>
-            )}
-            onHttpError={(e) => {
-              const code = e.nativeEvent.statusCode;
-              if (code >= 400) {
-                Alert.alert('Could not load', `The preview could not be shown (HTTP ${code}).`);
+          supportingViewer.previewKind === 'image' ? (
+            <ExpoImage
+              source={{ uri: toFileWebviewUri(supportingViewer.filePath) }}
+              style={styles.supportingWebView}
+              contentFit="contain"
+              transition={0}
+            />
+          ) : supportingViewer.previewKind === 'pdf' && Platform.OS !== 'web' ? (
+            <Pdf
+              source={{ uri: toFileWebviewUri(supportingViewer.filePath), cache: true }}
+              style={styles.supportingWebView}
+              fitPolicy={0}
+              onError={(err) => {
+                console.error('TravelOrderForm Pdf preview error:', err);
+                Alert.alert('Could not load', 'The PDF could not be displayed on this device.');
                 closeSupportingViewer();
-              }
-            }}
-            onError={() => {
-              Alert.alert('Could not load', 'The preview could not be displayed. Try opening a PDF or image file.');
-              closeSupportingViewer();
-            }}
-          />
+              }}
+            />
+          ) : (
+            <WebView
+              style={styles.supportingWebView}
+              source={{ uri: toFileWebviewUri(supportingViewer.filePath) }}
+              originWhitelist={['*']}
+              startInLoadingState
+              allowsInlineMediaPlayback
+              mixedContentMode="always"
+              allowingReadAccessToURL={Platform.OS === 'ios' ? FileSystem.cacheDirectory ?? undefined : undefined}
+              androidLayerType={Platform.OS === 'android' ? 'hardware' : undefined}
+              renderLoading={() => (
+                <View style={styles.supportingWebViewLoading}>
+                  <ActivityIndicator size="large" color="#011a6b" />
+                </View>
+              )}
+              onHttpError={(e) => {
+                const code = e.nativeEvent.statusCode;
+                if (code >= 400) {
+                  Alert.alert('Could not load', `The preview could not be shown (HTTP ${code}).`);
+                  closeSupportingViewer();
+                }
+              }}
+              onError={(e) => {
+                console.error('TravelOrderForm WebView preview error:', e?.nativeEvent);
+                Alert.alert('Could not load', 'The preview could not be displayed. Try opening a PDF or image file.');
+                closeSupportingViewer();
+              }}
+            />
+          )
         ) : null}
       </SafeAreaView>
     </Modal>

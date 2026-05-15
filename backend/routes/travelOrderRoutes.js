@@ -1127,10 +1127,19 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
           return;
         }
       }
+      const pid = String(doc.publicId || '').trim();
+      const publicIdSnippet =
+        pid.length <= 28 ? pid : `${pid.slice(0, 14)}…${pid.slice(-10)}`;
       console.error(
-        'Cloudinary attachment proxy failed (all strategies):',
-        lastErr?.message || lastErr,
-        lastErr?.statusCode != null ? `(upstream ${lastErr.statusCode})` : ''
+        JSON.stringify({
+          event: 'travel_order_attachment_proxy_failed',
+          travelOrderId: String(req.params.id),
+          attachmentIndex: index,
+          publicIdSnippet,
+          resourceTypesTried: rtList,
+          lastError: String(lastErr?.message || lastErr || ''),
+          upstreamStatus: lastErr?.statusCode != null ? lastErr.statusCode : null,
+        })
       );
       if (!res.headersSent) {
         return res.status(502).json({ message: 'Could not retrieve attachment from storage.' });

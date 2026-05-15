@@ -1,63 +1,19 @@
-const http = require('http');const https = require('https');
+const http = require('http');
+const https = require('https');
 const { URL } = require('url');
 
 /** Max bytes to buffer when proxying (travel supporting files are capped at 5 MB each in routes). */
 const PROXY_MAX_BYTES = 12 * 1024 * 1024;
 
 /**
- * GET urlString (following redirects) and send the final 200 body to an Express response.
- * Used so clients (e.g. mobile fetch) get one 200 + bytes from our API.
- *
- * Buffers the upstream body up to PROXY_MAX_BYTES for reliability (avoids stream/pipeline
- * issues between undici fetch and Express in some Node versions).
+ * GET urlString (follow redirects) via https/http and send final 200 body to Express.
  *
  * @param {string} urlString
  * @param {import('express').Response} expressRes
  * @param {{ filename: string; fallbackContentType?: string }} opts
  */
-async function proxyHttpUrlToExpressResponse(urlString, expressRes, opts) {
+async function proxyViaHttpGet(urlString, expressRes, opts) {
   const { filename, fallbackContentType } = opts;
-
-  if (typeof globalThis.fetch === 'function') {
-    const response = await globalThis.fetch(urlString, {
-      redirect: 'follow',
-      headers: { 'User-Agent': 'GOPASS-travel-order/1.0', Accept: '*/*' },
-    });
-
-    if (!response.ok) {
-      const err = new Error(`Upstream HTTP ${response.status}`);
-      err.statusCode = response.status;
-      throw err;
-    }
-
-    const lenHeader = response.headers.get('content-length');
-    if (lenHeader) {
-      const n = parseInt(lenHeader, 10);
-      if (Number.isFinite(n) && n > PROXY_MAX_BYTES) {
-        const err = new Error(`Upstream body too large (${n} bytes)`);
-        err.statusCode = 413;
-        throw err;
-      }
-    }
-
-    const ab = await response.arrayBuffer();
-    if (ab.byteLength > PROXY_MAX_BYTES) {
-      const err = new Error(`Upstream body too large (${ab.byteLength} bytes)`);
-      err.statusCode = 413;
-      throw err;
-    }
-
-    const rawCt = response.headers.get('content-type');
-    const ct =
-      (rawCt && String(rawCt).split(';')[0].trim()) ||
-      fallbackContentType ||
-      'application/octet-stream';
-    expressRes.setHeader('Content-Type', ct);
-    expressRes.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-    expressRes.send(Buffer.from(ab));
-    return;
-  }
-
   let current = urlString;
   for (let hop = 0; hop < 12; hop += 1) {
     const incoming = await new Promise((resolve, reject) => {
@@ -111,6 +67,68 @@ async function proxyHttpUrlToExpressResponse(urlString, expressRes, opts) {
   }
 
   throw new Error('Too many redirects when fetching remote attachment');
+}
+
+/**
+ * GET urlString (following redirects) and send the final 200 body to an Express response.
+ * Tries global fetch first; on failure falls back to Node https.get (some hosts / TLS differ).
+ *
+ * @param {string} urlString
+ * @param {import('express').Response} expressRes
+ * @param {{ filename: string; fallbackContentType?: string }} opts
+ */
+async function proxyHttpUrlToExpressResponse(urlString, expressRes, opts) {
+  const { filename, fallbackContentType } = opts;
+
+  if (typeof globalThis.fetch === 'function') {
+    try {
+      const response = await globalThis.fetch(urlString, {
+        redirect: 'follow',
+        headers: { 'User-Agent': 'GOPASS-travel-order/1.0', Accept: '*/*' },
+      });
+
+      if (!response.ok) {
+        const err = new Error(`Upstream HTTP ${response.status}`);
+        err.statusCode = response.status;
+        throw err;
+      }
+
+      const lenHeader = response.headers.get('content-length');
+      if (lenHeader) {
+        const n = parseInt(lenHeader, 10);
+        if (Number.isFinite(n) && n > PROXY_MAX_BYTES) {
+          const err = new Error(`Upstream body too large (${n} bytes)`);
+          err.statusCode = 413;
+          throw err;
+        }
+      }
+
+      const ab = await response.arrayBuffer();
+      if (ab.byteLength > PROXY_MAX_BYTES) {
+        const err = new Error(`Upstream body too large (${ab.byteLength} bytes)`);
+        err.statusCode = 413;
+        throw err;
+      }
+
+      const rawCt = response.headers.get('content-type');
+      const ct =
+        (rawCt && String(rawCt).split(';')[0].trim()) ||
+        fallbackContentType ||
+        'application/octet-stream';
+      expressRes.setHeader('Content-Type', ct);
+      expressRes.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+      expressRes.send(Buffer.from(ab));
+      return;
+    } catch (fetchErr) {
+      if (expressRes.headersSent) throw fetchErr;
+      console.warn(
+        '[proxyHttpUrlToExpressResponse] fetch failed, falling back to https.get:',
+        fetchErr?.message || fetchErr
+      );
+    }
+  }
+
+  await proxyViaHttpGet(urlString, expressRes, opts);
 }
 
 module.exports = { proxyHttpUrlToExpressResponse };

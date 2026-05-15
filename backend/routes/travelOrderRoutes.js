@@ -16,7 +16,7 @@ const {
   isConfigured: isCloudinaryForTravelOrdersConfigured,
   uploadTravelOrderAttachment,
   assetDeliveryUrlsToTry,
-  resourceSecureUrlFromAdmin,
+  adminDeliveryUrlsToTry,
   resourceTypesToTry,
   destroyTravelOrderUpload,
 } = require('../lib/cloudinaryTravelOrder');
@@ -1100,6 +1100,19 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
         fallbackContentType: doc.contentType || 'application/octet-stream',
       };
       let lastErr;
+      const adminUrls = await adminDeliveryUrlsToTry(String(doc.publicId).trim(), rtList);
+      for (const url of adminUrls) {
+        try {
+          await proxyHttpUrlToExpressResponse(url, res, proxyOpts);
+          return;
+        } catch (err) {
+          lastErr = err;
+          if (res.headersSent) {
+            console.error('Cloudinary attachment proxy failed mid-stream:', err?.message || err);
+            return;
+          }
+        }
+      }
       for (const rtt of rtList) {
         for (const url of assetDeliveryUrlsToTry(doc.publicId, rtt, { format: doc.format, name: doc.name })) {
           try {
@@ -1112,19 +1125,6 @@ router.get('/:id/supporting-document', auth, async (req, res) => {
               return;
             }
           }
-        }
-      }
-      try {
-        const adminUrl = await resourceSecureUrlFromAdmin(String(doc.publicId).trim(), rtList);
-        if (adminUrl) {
-          await proxyHttpUrlToExpressResponse(adminUrl, res, proxyOpts);
-          return;
-        }
-      } catch (err) {
-        lastErr = err;
-        if (res.headersSent) {
-          console.error('Cloudinary admin URL resolve failed mid-stream:', err?.message || err);
-          return;
         }
       }
       const pid = String(doc.publicId || '').trim();

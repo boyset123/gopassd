@@ -76,41 +76,123 @@ function resourceTypesToTry(doc) {
 }
 
 /**
- * Admin API: resolve canonical delivery URL (includes version segment). Tries resource_type
- * candidates in order (wrong type returns 404 from Admin API).
- *
  * @param {string} publicId
- * @param {('image' | 'raw')[]} resourceTypesInOrder
- * @returns {Promise<string | null>}
+ * @param {'image' | 'raw'} resourceType
+ * @returns {Promise<object | null>}
  */
-function resourceSecureUrlFromAdmin(publicId, resourceTypesInOrder) {
+function adminResourceByType(publicId, resourceType) {
   applyConfig();
   const id = String(publicId || '').trim();
   if (!id) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    cloudinary.api.resource(id, { resource_type: resourceType }, (err, result) => {
+      if (err || !result?.public_id) {
+        resolve(null);
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
+
+/**
+ * Build delivery URLs from Admin `resource` metadata (includes `version`; critical for `raw`/PDF).
+ *
+ * @param {{ public_id: string; resource_type?: string; version?: string | number; format?: string; secure_url?: string; url?: string }} result
+ * @returns {string[]}
+ */
+function deliveryUrlsFromAdminResult(result) {
+  if (!result?.public_id) return [];
+  applyConfig();
+  const rt =
+    result.resource_type === 'image' || result.resource_type === 'raw' ? result.resource_type : 'raw';
+  const id = result.public_id;
+  const version = result.version;
+  const fmt = result.format ? String(result.format).replace(/^\./, '') : undefined;
+
+  const urls = [];
+  const add = (u) => {
+    if (typeof u !== 'string' || !u) return;
+    const normalized = u.replace(/^http:\/\//i, 'https://');
+    if (!urls.includes(normalized)) urls.push(normalized);
+  };
+
+  if (result.secure_url) add(result.secure_url);
+  if (result.url) add(result.url);
+
+  /** @type {Record<string, unknown>[]} */
+  const extraVariants = [];
+  const pushVariant = (v) => {
+    const key = JSON.stringify(v);
+    if (!extraVariants.some((x) => JSON.stringify(x) === key)) extraVariants.push(v);
+  };
+  if (rt === 'raw') {
+    if (fmt) pushVariant({ format: fmt });
+    pushVariant({});
+  } else {
+    pushVariant({});
+    if (fmt) pushVariant({ format: fmt });
+  }
+
+  for (const extra of extraVariants) {
+    for (const signUrl of [true, false]) {
+      /** @type {Record<string, unknown>} */
+      const opts = {
+        resource_type: rt,
+        secure: true,
+        sign_url: signUrl,
+        ...extra,
+      };
+      if (version != null && version !== '') opts.version = version;
+      add(cloudinary.url(id, opts));
+    }
+  }
+
+  return urls;
+}
+
+/**
+ * Admin API: ordered delivery URLs (version + format aware). Tries resource_type candidates until
+ * one `resource` call succeeds (wrong type yields null).
+ *
+ * @param {string} publicId
+ * @param {('image' | 'raw')[]} resourceTypesInOrder
+ * @returns {Promise<string[]>}
+ */
+async function adminDeliveryUrlsToTry(publicId, resourceTypesInOrder) {
+  const id = String(publicId || '').trim();
+  if (!id) return [];
   const types =
     Array.isArray(resourceTypesInOrder) && resourceTypesInOrder.length > 0
       ? [...new Set(resourceTypesInOrder)]
       : ['image', 'raw'];
 
-  return new Promise((resolve) => {
-    let i = 0;
-    function tryNext() {
-      if (i >= types.length) {
-        resolve(null);
-        return;
+  const out = [];
+  const seen = new Set();
+  for (const rt of types) {
+    const result = await adminResourceByType(id, rt);
+    if (!result) continue;
+    for (const u of deliveryUrlsFromAdminResult(result)) {
+      if (!seen.has(u)) {
+        seen.add(u);
+        out.push(u);
       }
-      const rt = types[i++];
-      cloudinary.api.resource(id, { resource_type: rt }, (err, result) => {
-        if (!err && result && (result.secure_url || result.url)) {
-          const u = result.secure_url || result.url;
-          resolve(typeof u === 'string' ? u.replace(/^http:\/\//i, 'https://') : null);
-          return;
-        }
-        tryNext();
-      });
     }
-    tryNext();
-  });
+    break;
+  }
+  return out;
+}
+
+/**
+ * Admin API: first canonical HTTPS delivery URL (legacy helper).
+ *
+ * @param {string} publicId
+ * @param {('image' | 'raw')[]} resourceTypesInOrder
+ * @returns {Promise<string | null>}
+ */
+async function resourceSecureUrlFromAdmin(publicId, resourceTypesInOrder) {
+  const list = await adminDeliveryUrlsToTry(publicId, resourceTypesInOrder);
+  return list[0] || null;
 }
 
 /**
@@ -217,6 +299,7 @@ module.exports = {
   uploadTravelOrderAttachment,
   assetDeliveryUrl,
   assetDeliveryUrlsToTry,
+  adminDeliveryUrlsToTry,
   resourceSecureUrlFromAdmin,
   signedDeliveryUrl,
   destroyTravelOrderUpload,

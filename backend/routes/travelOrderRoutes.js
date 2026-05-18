@@ -535,6 +535,41 @@ router.put('/:id/status', [auth], async (req, res) => {
 
     const previousStatus = travelOrder.status;
 
+    // Owner marks travel order complete (Approved only).
+    if (status === 'Completed') {
+      const currentUserId = toIdString(req.user.userId || req.user.id);
+      const employeeId = toIdString(travelOrder.employee);
+      if (!currentUserId || !employeeId || currentUserId !== employeeId) {
+        return res.status(403).json({ message: 'Only the employee on this travel order can mark it as completed.' });
+      }
+      if (travelOrder.status !== 'Approved') {
+        return res.status(400).json({ message: 'You can only complete travel orders that are approved.' });
+      }
+      travelOrder.status = 'Completed';
+      await travelOrder.populate([{ path: 'employee', select: 'name role' }, { path: 'recommendedBy', select: 'name' }, { path: 'approvedBy', select: 'name' }, { path: 'presidentApprovedBy', select: 'name' }]);
+      const qrPayload = buildTravelOrderQrPayload(travelOrder);
+      travelOrder.qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload), { errorCorrectionLevel: 'M' });
+      await travelOrder.save();
+
+      const employeeUser = await User.findById(travelOrder.employee);
+      if (employeeUser) {
+        const newNotif = employeeUser.notifications.create({
+          message: 'Your travel order has been completed.',
+          type: 'Status Update',
+          relatedId: travelOrder._id,
+        });
+        employeeUser.notifications.push(newNotif);
+        await employeeUser.save();
+        const payload = employeeUser.notifications[employeeUser.notifications.length - 1].toObject
+          ? employeeUser.notifications[employeeUser.notifications.length - 1].toObject()
+          : employeeUser.notifications[employeeUser.notifications.length - 1];
+        req.io.emit('newNotification', { userId: employeeUser._id.toString(), notification: payload });
+      }
+
+      req.io.emit('travelOrderDataChanged', await travelOrderToClientJsonWithEmployee(travelOrder));
+      return res.json(await travelOrderToClientJsonWithEmployee(travelOrder));
+    }
+
     // Determine actor scope: are we acting as a recommender (or their OIC) or as HR?
     const isHr = req.user.role === 'Human Resource Personnel';
     const isPresidentReject =
@@ -542,7 +577,7 @@ router.put('/:id/status', [auth], async (req, res) => {
 
     // Whitelist of allowed transitions per role group.
     if (isHr) {
-      if (!['Approved', 'For President Approval', 'Completed', 'Rejected'].includes(status)) {
+      if (!['Approved', 'For President Approval', 'Rejected'].includes(status)) {
         return res.status(400).json({ message: 'Invalid status for HR personnel.' });
       }
     } else if (isPresidentReject) {
@@ -701,17 +736,6 @@ router.put('/:id/status', [auth], async (req, res) => {
         travelOrder.travelOrderNoSignature = travelOrderNoSignature;
         travelOrder.departureSignature = departureSignature;
         travelOrder.arrivalSignature = arrivalSignature;
-        await travelOrder.populate([{ path: 'employee', select: 'name role' }, { path: 'recommendedBy', select: 'name' }, { path: 'approvedBy', select: 'name' }, { path: 'presidentApprovedBy', select: 'name' }]);
-        const qrPayload = buildTravelOrderQrPayload(travelOrder);
-        travelOrder.qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload), { errorCorrectionLevel: 'M' });
-      } else if (status === 'Completed') {
-        if (travelOrder.status !== 'Returned' && travelOrder.status !== 'Approved') {
-          return res.status(400).json({
-            message:
-              'HR can only complete travel orders that are approved (active) or returned from travel.',
-          });
-        }
-        travelOrder.status = 'Completed';
         await travelOrder.populate([{ path: 'employee', select: 'name role' }, { path: 'recommendedBy', select: 'name' }, { path: 'approvedBy', select: 'name' }, { path: 'presidentApprovedBy', select: 'name' }]);
         const qrPayload = buildTravelOrderQrPayload(travelOrder);
         travelOrder.qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload), { errorCorrectionLevel: 'M' });
@@ -1066,18 +1090,19 @@ router.put('/return/:id', auth, async (req, res) => {
     travelOrder.arrivalTime = new Date();
     await travelOrder.save();
 
-    // Notify HR that document is ready for completion
-    const hrUsers = await User.find({ role: 'Human Resource Personnel' });
-    for (const hrUser of hrUsers) {
-      const newNotif = hrUser.notifications.create({
-        message: 'A travel order has been marked as returned and is ready for completion.',
+    const employeeUser = await User.findById(travelOrder.employee);
+    if (employeeUser) {
+      const newNotif = employeeUser.notifications.create({
+        message: 'Your travel order has been marked as returned.',
         type: 'Status Update',
         relatedId: travelOrder._id,
       });
-      hrUser.notifications.push(newNotif);
-      await hrUser.save();
-      const payload = hrUser.notifications[hrUser.notifications.length - 1].toObject ? hrUser.notifications[hrUser.notifications.length - 1].toObject() : hrUser.notifications[hrUser.notifications.length - 1];
-      req.io.emit('newNotification', { userId: hrUser._id.toString(), notification: payload });
+      employeeUser.notifications.push(newNotif);
+      await employeeUser.save();
+      const payload = employeeUser.notifications[employeeUser.notifications.length - 1].toObject
+        ? employeeUser.notifications[employeeUser.notifications.length - 1].toObject()
+        : employeeUser.notifications[employeeUser.notifications.length - 1];
+      req.io.emit('newNotification', { userId: employeeUser._id.toString(), notification: payload });
     }
 
     req.io.emit('travelOrderDataChanged', await travelOrderToClientJsonWithEmployee(travelOrder));

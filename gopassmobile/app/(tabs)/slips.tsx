@@ -160,6 +160,7 @@ export default function SlipsScreen() {
   const [cancellationReason, setCancellationReason] = useState('');
   const [selectedReason, setSelectedReason] = useState('');
   const [itemToCancel, setItemToCancel] = useState<{ id: string; type: 'Pass Slip' | 'Travel Order' } | null>(null);
+  const [completingTravelOrderId, setCompletingTravelOrderId] = useState<string | null>(null);
   const socket = useSocket();
   const insets = useSafeAreaInsets();
   const createModalContext = useCreateModalOptional();
@@ -386,6 +387,41 @@ export default function SlipsScreen() {
     setCancellationReason('');
     setSelectedReason('');
     setItemToCancel(null);
+  };
+
+  const handleMarkTravelOrderComplete = (id: string) => {
+    if (completingTravelOrderId) return;
+    Alert.alert(
+      'Complete travel order?',
+      'Mark this travel order as completed? It will move to your history.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Complete',
+          onPress: async () => {
+            setCompletingTravelOrderId(id);
+            try {
+              const token = await AsyncStorage.getItem('userToken');
+              await axios.put(
+                `${API_URL}/travel-orders/${id}/status`,
+                { status: 'Completed' },
+                { headers: { 'x-auth-token': token } }
+              );
+              Alert.alert('Success', 'Your travel order has been marked as completed.');
+              fetchData();
+            } catch (err: unknown) {
+              const message =
+                axios.isAxiosError(err) && err.response?.data?.message
+                  ? String(err.response.data.message)
+                  : 'Failed to mark the travel order as completed.';
+              Alert.alert('Error', message);
+            } finally {
+              setCompletingTravelOrderId(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleDelete = async (id: string, type: 'Pass Slip' | 'Travel Order') => {
@@ -705,6 +741,15 @@ export default function SlipsScreen() {
               <Pressable style={styles.scanArrivalButton} onPress={() => setScannerVisible(true)}>
                 <FontAwesome name="camera" size={14} color="#fff" />
                 <Text style={styles.scanArrivalButtonText}>Scan for Arrival</Text>
+              </Pressable>
+            )}
+            {item.type === 'Travel Order' && item.status === 'Approved' && !isHistoryItem(item) && (
+              <Pressable
+                style={[styles.completeButton, completingTravelOrderId === item._id && styles.completeButtonDisabled]}
+                disabled={completingTravelOrderId === item._id}
+                onPress={() => handleMarkTravelOrderComplete(item._id)}
+              >
+                <Text style={styles.completeButtonText}>Complete</Text>
               </Pressable>
             )}
             {isHistoryItem(item) && (
@@ -1768,6 +1813,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     marginLeft: 6,
+    fontSize: 13,
+  },
+  completeButton: {
+    backgroundColor: theme.success,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  completeButtonDisabled: {
+    opacity: 0.6,
+  },
+  completeButtonText: {
+    color: '#fff',
+    fontWeight: '600',
     fontSize: 13,
   },
   saveButton: {

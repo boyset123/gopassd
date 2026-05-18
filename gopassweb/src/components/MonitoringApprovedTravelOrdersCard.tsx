@@ -58,22 +58,14 @@ export interface MonitoringApprovedTravelOrdersCardProps {
   onView: (order: ApprovedTravelOrder) => void;
   /** When FEATURE_CTC_ENABLED is false, omit or pass undefined */
   onIssueCtc?: (order: ApprovedTravelOrder) => void;
-  /** HR: mark approved travel order as Completed (with confirmation in parent) */
-  onMarkComplete?: (order: ApprovedTravelOrder) => void;
-  completingOrderId?: string | null;
-  /** Row _id while the mark-complete confirmation modal is open for that order */
-  markCompleteConfirmOpenForId?: string | null;
 }
 
 export default function MonitoringApprovedTravelOrdersCard(props: MonitoringApprovedTravelOrdersCardProps) {
-  const { styles, orders, onView, onIssueCtc, onMarkComplete, completingOrderId, markCompleteConfirmOpenForId } = props;
+  const { styles, orders, onView, onIssueCtc } = props;
   const showCtc = FEATURE_CTC_ENABLED && !!onIssueCtc;
-  const showMarkComplete = !!onMarkComplete;
   const actionsColStyle = showCtc
-    ? (styles as any).monitoringColActionsThreeButtons
-    : showMarkComplete
-      ? (styles as any).monitoringColActionsTwoButtons
-      : (styles as any).monitoringColActions;
+    ? (styles as any).monitoringColActionsTwoButtons
+    : (styles as any).monitoringColActions;
 
   return (
     <View style={styles.monitoringCard}>
@@ -136,23 +128,6 @@ export default function MonitoringApprovedTravelOrdersCard(props: MonitoringAppr
                 <Pressable style={styles.viewButton} onPress={() => onView(item)}>
                   <Text style={styles.viewButtonText}>View</Text>
                 </Pressable>
-                {onMarkComplete && (!item.status || item.status === 'Approved') ? (
-                  <Pressable
-                    disabled={
-                      String(completingOrderId || '') === String(item._id) ||
-                      String(markCompleteConfirmOpenForId || '') === String(item._id)
-                    }
-                    style={[
-                      styles.markTravelCompleteButton,
-                      (String(completingOrderId || '') === String(item._id) ||
-                        String(markCompleteConfirmOpenForId || '') === String(item._id)) &&
-                        styles.markTravelCompleteButtonDisabled,
-                    ]}
-                    onPress={() => onMarkComplete(item)}
-                  >
-                    <Text style={styles.markTravelCompleteButtonText}>Complete</Text>
-                  </Pressable>
-                ) : null}
                 {FEATURE_CTC_ENABLED && onIssueCtc ? (
                   <Pressable style={styles.issueCtcButton} onPress={() => onIssueCtc(item)}>
                     <Text style={styles.issueCtcButtonText}>Travel Complete</Text>
@@ -166,4 +141,3 @@ export default function MonitoringApprovedTravelOrdersCard(props: MonitoringAppr
     </View>
   );
 }
-

@@ -376,11 +376,6 @@ const HrpDashboardScreen = () => {
   const [selectedCtcOrder, setSelectedCtcOrder] = useState<ApprovedTravelOrder | null>(null);
   /** Set when Travel Complete is pressed so the certificate date reflects that moment */
   const [ctcIssueDateIso, setCtcIssueDateIso] = useState('');
-  const [completingTravelOrderId, setCompletingTravelOrderId] = useState<string | null>(null);
-  const [markCompleteModalVisible, setMarkCompleteModalVisible] = useState(false);
-  const [orderPendingComplete, setOrderPendingComplete] = useState<ApprovedTravelOrder | null>(null);
-  /** Result after mark-complete API (replaces browser alert on web) */
-  const [markCompleteFeedback, setMarkCompleteFeedback] = useState<{ variant: 'success' | 'error'; message: string } | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [liveUpdateMessage, setLiveUpdateMessage] = useState<string | null>(null);
@@ -794,52 +789,6 @@ const HrpDashboardScreen = () => {
     setCtcIssueDateIso(new Date().toISOString());
     setSelectedCtcOrder(order);
     setIsCtcModalVisible(true);
-  };
-
-  const commitMarkTravelOrderComplete = async (orderId: string) => {
-    const id = String(orderId);
-    setCompletingTravelOrderId(id);
-    try {
-      const token = await AsyncStorage.getItem('userToken');
-      await axios.put(
-        `${API_URL}/travel-orders/${id}/status`,
-        { status: 'Completed' },
-        { headers: { 'x-auth-token': token } }
-      );
-      await fetchData({ silent: true });
-      setMarkCompleteFeedback({
-        variant: 'success',
-        message: 'Travel order has been marked as completed.',
-      });
-    } catch (e: unknown) {
-      const msg =
-        axios.isAxiosError(e) && e.response?.data?.message
-          ? String(e.response.data.message)
-          : 'Failed to mark the travel order as completed.';
-      setMarkCompleteFeedback({ variant: 'error', message: msg });
-    } finally {
-      setCompletingTravelOrderId(null);
-    }
-  };
-
-  const promptMarkTravelOrderComplete = (order: ApprovedTravelOrder) => {
-    if (completingTravelOrderId || markCompleteModalVisible) return;
-    if (order.status && order.status !== 'Approved') return;
-    setOrderPendingComplete(order);
-    setMarkCompleteModalVisible(true);
-  };
-
-  const cancelMarkTravelOrderComplete = () => {
-    setMarkCompleteModalVisible(false);
-    setOrderPendingComplete(null);
-  };
-
-  const confirmMarkTravelOrderComplete = () => {
-    if (!orderPendingComplete) return;
-    const id = String(orderPendingComplete._id);
-    setMarkCompleteModalVisible(false);
-    setOrderPendingComplete(null);
-    void commitMarkTravelOrderComplete(id);
   };
 
   const openMapModal = (item: PassSlip | TravelOrder) => {
@@ -1458,11 +1407,6 @@ const HrpDashboardScreen = () => {
                     orders={monitoringApprovedTravelOrders}
                     onView={(order) => openReviewModal(order as any, 'order')}
                     onIssueCtc={FEATURE_CTC_ENABLED ? openCtcModal : undefined}
-                    onMarkComplete={promptMarkTravelOrderComplete}
-                    completingOrderId={completingTravelOrderId}
-                    markCompleteConfirmOpenForId={
-                      markCompleteModalVisible && orderPendingComplete ? String(orderPendingComplete._id) : null
-                    }
                   />
                 )}
               </View>
@@ -1951,62 +1895,6 @@ const HrpDashboardScreen = () => {
               <View style={[styles.modalButtonContainer, isNarrow && (styles as any).modalButtonContainerNarrow]}>
                 <Pressable style={[styles.button, styles.cancelButton, styles.modalButton]} onPress={() => setIsCtcModalVisible(false)}>
                   <Text style={styles.buttonText}>Close</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Mark travel order complete — Modal works on web; Alert.alert does not reliably show there */}
-        <Modal
-          animationType="fade"
-          transparent
-          visible={markCompleteModalVisible}
-          onRequestClose={cancelMarkTravelOrderComplete}
-        >
-          <View style={styles.rejectModalOverlay}>
-            <View style={styles.rejectModalContent}>
-              <Text style={styles.rejectModalTitle}>Complete travel order?</Text>
-              <Text style={styles.rejectModalSubtitle}>
-                Are you sure you want to mark this travel order as Completed for{' '}
-                {orderPendingComplete?.employee?.name || 'this employee'}? It will leave the active list. This action is
-                final for this step.
-              </Text>
-              <View style={styles.rejectModalButtons}>
-                <Pressable style={[styles.rejectModalButton, styles.rejectModalCancel]} onPress={cancelMarkTravelOrderComplete}>
-                  <Text style={styles.rejectModalCancelText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.rejectModalButton, styles.markCompleteModalPrimaryButton]}
-                  onPress={confirmMarkTravelOrderComplete}
-                  disabled={!!completingTravelOrderId}
-                >
-                  <Text style={styles.markCompleteModalPrimaryButtonText}>Mark completed</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Mark complete result (success / error) — no window.alert */}
-        <Modal
-          animationType="fade"
-          transparent
-          visible={!!markCompleteFeedback}
-          onRequestClose={() => setMarkCompleteFeedback(null)}
-        >
-          <View style={styles.rejectModalOverlay}>
-            <View style={styles.rejectModalContent}>
-              <Text style={styles.rejectModalTitle}>
-                {markCompleteFeedback?.variant === 'success' ? 'Success' : 'Could not complete'}
-              </Text>
-              <Text style={styles.rejectModalSubtitle}>{markCompleteFeedback?.message}</Text>
-              <View style={styles.rejectModalButtons}>
-                <Pressable
-                  style={[styles.rejectModalButton, styles.markCompleteModalPrimaryButton]}
-                  onPress={() => setMarkCompleteFeedback(null)}
-                >
-                  <Text style={styles.markCompleteModalPrimaryButtonText}>OK</Text>
                 </Pressable>
               </View>
             </View>

@@ -54,6 +54,8 @@ interface TravelOrder {
   departureDate: string;
   arrivalDate: string;
   additionalInfo: string;
+  officialBusinessNote?: string;
+  chargeableAgainstNote?: string;
   recommendedBy: Recommender[];
   recommenderSignatures?: { user: UserRef; signature: string; date: string; signedAsOicFor?: UserRef }[];
   recommendersWhoApproved?: string[];
@@ -201,6 +203,12 @@ const formatSalary = (salary: string | undefined) =>
 
 const normalizeInline = (value: string | undefined | null) =>
   (value ?? '').replace(/\s+/g, ' ').trim();
+
+/** Wide em-spaces so underlined blank fields span ~full line on paper-style forms (minWidth alone fails on nested Text). */
+const BLANK_OPTIONAL_NOTE_LINE = '\u2003'.repeat(52);
+
+const displayOptionalNote = (value: string | undefined | null) =>
+  normalizeInline(value) || BLANK_OPTIONAL_NOTE_LINE;
 
 const travelOrderPositionLabel = (order: TravelOrder) =>
   normalizeInline(order.employeeRole) || normalizeInline(order.employee?.role) || 'N/A';
@@ -530,6 +538,20 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
         <Text style={styles.infoText}>
           You shall be guided further by the following additional instruction and information on{' '}
           <Text style={styles.inlineUnderlinedText}>{normalizeInline(order.additionalInfo)}</Text>
+        </Text>
+        <Text style={styles.infoText}>
+          Your travelling expenses in the field will be authorized or allowed under Official Business,{' '}
+          <Text style={styles.inlineUnderlinedText}>
+            {displayOptionalNote(order.officialBusinessNote)}
+          </Text>
+          .
+        </Text>
+        <Text style={styles.infoText}>
+          Chargeable against Higher Education,{' '}
+          <Text style={styles.inlineUnderlinedText}>
+            {displayOptionalNote(order.chargeableAgainstNote)}
+          </Text>
+          .
         </Text>
         <Text style={styles.infoText}>
           Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.

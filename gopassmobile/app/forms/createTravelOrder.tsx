@@ -19,6 +19,8 @@ import { Picker } from '@react-native-picker/picker';
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
 
+const BLANK_OPTIONAL_NOTE_LINE = '\u2003'.repeat(52);
+
 const theme = {
   primary: '#011a6b',
   primaryDark: '#010d40',
@@ -143,6 +145,8 @@ const CreateTravelOrderScreen = () => {
   const [departureDate, setDepartureDate] = useState(new Date());
   const [arrivalDate, setArrivalDate] = useState(new Date());
   const [additionalInfo, setAdditionalInfo] = useState('');
+  const [officialBusinessNote, setOfficialBusinessNote] = useState('');
+  const [chargeableAgainstNote, setChargeableAgainstNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -742,6 +746,8 @@ const CreateTravelOrderScreen = () => {
           departureDate: toISOStringAtMinute(departureDate),
           arrivalDate: toISOStringAtMinute(arrivalDate),
           additionalInfo: additionalInfo ?? '',
+          officialBusinessNote: officialBusinessNote ?? '',
+          chargeableAgainstNote: chargeableAgainstNote ?? '',
           recommendedBy: recommenderPayload,
           participants: participantsPayload,
         };
@@ -770,6 +776,8 @@ const CreateTravelOrderScreen = () => {
         formData.append('departureDate', toISOStringAtMinute(departureDate));
         formData.append('arrivalDate', toISOStringAtMinute(arrivalDate));
         formData.append('additionalInfo', additionalInfo ?? '');
+        formData.append('officialBusinessNote', officialBusinessNote ?? '');
+        formData.append('chargeableAgainstNote', chargeableAgainstNote ?? '');
         formData.append('recommendedBy', recommenderPayload);
         formData.append('participants', participantsPayload);
         if (location?.latitude != null && location?.longitude != null) {
@@ -1505,8 +1513,28 @@ const CreateTravelOrderScreen = () => {
               </View>
             )}
 
-            <Text style={styles.staticTextFirst}>Your travelling expenses in the field will be authorized or allowed under Official Business.</Text>
-            <Text style={styles.staticText}>Chargeable against Higher Education.</Text>
+            <View style={styles.expenseNoteRow}>
+              <Text style={[styles.staticTextFirst, styles.expenseNotePrefix]}>
+                Your travelling expenses in the field will be authorized or allowed under Official Business
+              </Text>
+              <TextInput
+                style={styles.inlineInput}
+                value={officialBusinessNote}
+                onChangeText={setOfficialBusinessNote}
+                placeholder="Optional"
+                placeholderTextColor={theme.placeholder}
+              />
+            </View>
+            <View style={styles.expenseNoteRow}>
+              <Text style={[styles.staticText, styles.expenseNotePrefix]}>Chargeable against Higher Education</Text>
+              <TextInput
+                style={styles.inlineInput}
+                value={chargeableAgainstNote}
+                onChangeText={setChargeableAgainstNote}
+                placeholder="Optional"
+                placeholderTextColor={theme.placeholder}
+              />
+            </View>
             <Text style={styles.staticText}>Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.</Text>
 
             <View style={[styles.signatureContainer, styles.sectionGap]}>
@@ -1740,8 +1768,20 @@ const CreateTravelOrderScreen = () => {
                     {supportingFiles.map((f) => f.name).join(', ')}
                   </Text>
                 ) : null}
-                <Text style={styles.infoText}>Your traveling expenses in the field will be authorized or allowed under Official Business.</Text>
-                <Text style={styles.infoText}>Chargeable against Higher education.</Text>
+                <Text style={styles.infoText}>
+                  Your travelling expenses in the field will be authorized or allowed under Official Business,{' '}
+                  <Text style={styles.previewOptionalNote}>
+                    {officialBusinessNote.trim() || BLANK_OPTIONAL_NOTE_LINE}
+                  </Text>
+                  .
+                </Text>
+                <Text style={styles.infoText}>
+                  Chargeable against Higher Education,{' '}
+                  <Text style={styles.previewOptionalNote}>
+                    {chargeableAgainstNote.trim() || BLANK_OPTIONAL_NOTE_LINE}
+                  </Text>
+                  .
+                </Text>
                 <Text style={styles.infoText}>Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.</Text>
 
                 <View style={styles.signatureSection}>
@@ -2016,6 +2056,11 @@ const styles = StyleSheet.create({
   infoText: {
     fontSize: 10,
     marginBottom: 5,
+  },
+  previewOptionalNote: {
+    textDecorationLine: 'underline',
+    textDecorationColor: '#000',
+    fontWeight: 'bold',
   },
   signatureSection: {
     marginTop: 20,
@@ -2759,6 +2804,22 @@ const styles = StyleSheet.create({
   sectionText: { fontSize: 15, color: theme.text, marginTop: 18, marginBottom: 6 },
   staticText: { fontSize: 14, color: theme.textMuted, marginTop: 10, marginBottom: 4, fontStyle: 'italic' },
   staticTextFirst: { fontSize: 14, color: theme.textMuted, marginTop: 20, marginBottom: 4, fontStyle: 'italic' },
+  expenseNoteRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginBottom: 4 },
+  expenseNotePrefix: { marginBottom: 0, flexShrink: 1 },
+  inlineInput: {
+    flex: 1,
+    minWidth: 120,
+    fontSize: 14,
+    color: theme.text,
+    fontStyle: 'italic',
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    marginTop: 10,
+    marginBottom: 4,
+    backgroundColor: 'rgba(1,26,107,0.04)',
+  },
   signatureContainer: { marginTop: 20, marginBottom: 12, alignItems: 'flex-start' },
   signatureContainerSpaced: { marginTop: 24, marginBottom: 12, alignItems: 'flex-start' },
   recommenderHeaderRow: {

@@ -1,5 +1,15 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Image, Pressable, useWindowDimensions, Alert, Platform, Linking } from 'react-native';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  Pressable,
+  useWindowDimensions,
+  Alert,
+  Modal,
+  ActivityIndicator,
+} from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -38,6 +48,8 @@ export interface TravelOrderWebOrder {
   departureDate: string;
   arrivalDate: string;
   additionalInfo: string;
+  officialBusinessNote?: string;
+  chargeableAgainstNote?: string;
   recommendedBy?: Recommender[];
   recommenderSignatures?: { user?: WebUserRef; signature?: string; date?: string; signedAsOicFor?: WebUserRef }[];
   recommendersWhoApproved?: string[];
@@ -94,6 +106,11 @@ const formatSalary = (salary: string | undefined) =>
 const normalizeInline = (value: string | undefined | null) =>
   (value ?? '').replace(/\s+/g, ' ').trim();
 
+const BLANK_OPTIONAL_NOTE_LINE = '\u2003'.repeat(52);
+
+const displayOptionalNote = (value: string | undefined | null) =>
+  normalizeInline(value) || BLANK_OPTIONAL_NOTE_LINE;
+
 /** Stored names are often URL-encoded (`%20` for space). */
 function decodeFilenameForDisplay(name: string | undefined): string {
   const raw = normalizeInline(name);
@@ -103,6 +120,48 @@ function decodeFilenameForDisplay(name: string | undefined): string {
   } catch {
     return raw;
   }
+}
+
+function isWordAttachment(contentType: string | undefined, fileName: string | undefined): boolean {
+  const nameLower = (fileName || '').toLowerCase();
+  const ct = (contentType || '').toLowerCase();
+  return ct.includes('wordprocessingml') || ct.includes('officedocument') || nameLower.endsWith('.docx');
+}
+
+function previewKindFromMeta(
+  contentType: string | undefined,
+  fileName: string | undefined
+): 'image' | 'pdf' | 'other' {
+  const ct = (contentType || '').toLowerCase();
+  const name = (fileName || '').toLowerCase();
+  if (ct.startsWith('image/')) return 'image';
+  if (ct.includes('pdf') || name.endsWith('.pdf')) return 'pdf';
+  return 'other';
+}
+
+type SupportingWebViewer =
+  | null
+  | { status: 'loading'; title: string }
+  | { status: 'ready'; title: string; objectUrl: string; previewKind: 'image' | 'pdf' | 'other' };
+
+/** Browser iframe preview for PDF/other blobs (react-native-webview does not run on web). */
+function SupportingDocumentEmbed({ uri }: { uri: string }) {
+  return (
+    <View style={styles.supportingWebView}>
+      {React.createElement('iframe', {
+        src: uri,
+        title: 'Document preview',
+        style: {
+          width: '100%',
+          height: '100%',
+          border: 'none',
+          flex: 1,
+          minHeight: 280,
+          backgroundColor: '#fff',
+        },
+      })}
+    </View>
+  );
 }
 
 function supportingWebFileKindLabel(meta: { contentType?: string; name?: string }): string {
@@ -151,7 +210,8 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
   onRedoApproverSignature = () => {},
   onChooseSignature = () => {},
 }) => {
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const supportingViewerPanelHeight = Math.min(Math.round(windowHeight * 0.92), 900);
   /** Wide HR modal: travel order (left) + supporting files (right). */
   const sideBySideLayout = windowWidth >= 720;
   const layoutMaxWidth = Math.min(Math.max(windowWidth - 80, 280), 880);
@@ -165,6 +225,9 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
 
   const [generatedTravelOrderNo, setGeneratedTravelOrderNo] = useState<string>('');
   const [supportingDocLoadingIndex, setSupportingDocLoadingIndex] = useState<number | null>(null);
+  const [supportingViewer, setSupportingViewer] = useState<SupportingWebViewer>(null);
+  const supportingObjectUrlRef = useRef<string | null>(null);
+  const supportingOpenInFlightRef = useRef(false);
 
   const supportingMetaList = useMemo(() => {
     const docs = order.documents;
@@ -191,14 +254,40 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
   const hasSupportingDocument = supportingMetaList.length > 0;
   const supportingDocBusy = supportingDocLoadingIndex !== null;
 
+  const closeSupportingViewer = useCallback(() => {
+    if (supportingObjectUrlRef.current) {
+      URL.revokeObjectURL(supportingObjectUrlRef.current);
+      supportingObjectUrlRef.current = null;
+    }
+    setSupportingViewer(null);
+    setSupportingDocLoadingIndex(null);
+    supportingOpenInFlightRef.current = false;
+  }, []);
+
   const openSupportingDocumentAtIndex = useCallback(
     async (fileIndex: number) => {
       if (!order._id || fileIndex < 0 || fileIndex >= supportingMetaList.length) return;
+      if (supportingOpenInFlightRef.current) return;
+
+      const meta = supportingMetaList[fileIndex];
+      const title = meta.name || `Attachment ${fileIndex + 1}`;
+
+      if (isWordAttachment(meta.contentType, meta.name)) {
+        Alert.alert(
+          'Word attachment',
+          'Word (.docx) files cannot be previewed in the browser. Use Download on your computer after HR exports the file, or ask the employee for a PDF copy.'
+        );
+        return;
+      }
+
+      supportingOpenInFlightRef.current = true;
       setSupportingDocLoadingIndex(fileIndex);
+      setSupportingViewer({ status: 'loading', title });
 
       try {
         const token = await AsyncStorage.getItem('userToken');
         if (!token) {
+          closeSupportingViewer();
           Alert.alert('Session', 'You are not logged in.');
           return;
         }
@@ -215,6 +304,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           } catch {
             /* ignore */
           }
+          closeSupportingViewer();
           Alert.alert(
             'Could not open',
             detail
@@ -223,7 +313,6 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           );
           return;
         }
-        const meta = supportingMetaList[fileIndex];
         const headerCt = res.headers.get('content-type')?.split(';')[0]?.trim();
         const blob = await res.blob();
         const mime =
@@ -232,49 +321,30 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           meta?.contentType ||
           'application/octet-stream';
         const typedBlob = blob.type === mime ? blob : new Blob([blob], { type: mime });
-        const objectUrl = URL.createObjectURL(typedBlob);
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          // Single open after fetch — avoid pre-opening about:blank (leaves an extra empty tab).
-          const opened =
-            typeof window.open === 'function'
-              ? window.open(objectUrl, '_blank', 'noopener,noreferrer')
-              : null;
-          if (!opened && typeof document !== 'undefined') {
-            const a = document.createElement('a');
-            a.href = objectUrl;
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          } else if (!opened) {
-            URL.revokeObjectURL(objectUrl);
-            Alert.alert(
-              'Pop-up blocked',
-              'Allow pop-ups for this site to preview attachments, or try again.'
-            );
-            return;
-          }
-          setTimeout(() => URL.revokeObjectURL(objectUrl), 120000);
-        } else {
-          const canOpen = await Linking.canOpenURL(objectUrl);
-          if (canOpen) {
-            await Linking.openURL(objectUrl);
-            setTimeout(() => URL.revokeObjectURL(objectUrl), 120000);
-          } else {
-            URL.revokeObjectURL(objectUrl);
-            Alert.alert('Open file', 'Unable to open the file on this device.');
-          }
+        if (supportingObjectUrlRef.current) {
+          URL.revokeObjectURL(supportingObjectUrlRef.current);
         }
+        const objectUrl = URL.createObjectURL(typedBlob);
+        supportingObjectUrlRef.current = objectUrl;
+        setSupportingViewer({
+          status: 'ready',
+          title,
+          objectUrl,
+          previewKind: previewKindFromMeta(meta.contentType, meta.name),
+        });
+        setSupportingDocLoadingIndex(null);
       } catch (e) {
         console.error(e);
+        closeSupportingViewer();
         Alert.alert('Error', 'Could not open the supporting document.');
       } finally {
-        setSupportingDocLoadingIndex(null);
+        supportingOpenInFlightRef.current = false;
       }
     },
-    [order._id, supportingMetaList]
+    [order._id, supportingMetaList, closeSupportingViewer]
   );
+
+  useEffect(() => () => closeSupportingViewer(), [closeSupportingViewer]);
 
   const renderSupportingAttachmentCards = () =>
     supportingMetaList.map((meta, i) => (
@@ -480,6 +550,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
     });
 
   return (
+    <>
     <View style={[styles.a4Stack, sideBySideLayout ? styles.a4LayoutRow : styles.a4LayoutColumn]}>
       {!sideBySideLayout ? (
         <View style={[styles.supportingAttachmentsOutside, { width: supportingPanelWidth }]}>
@@ -597,6 +668,20 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           <Text style={styles.inlineUnderlinedText}>{normalizeInline(order.additionalInfo)}</Text>
         </Text>
         <Text style={styles.infoText}>
+          Your travelling expenses in the field will be authorized or allowed under Official Business,{' '}
+          <Text style={styles.inlineUnderlinedText}>
+            {displayOptionalNote(order.officialBusinessNote)}
+          </Text>
+          .
+        </Text>
+        <Text style={styles.infoText}>
+          Chargeable against Higher Education,{' '}
+          <Text style={styles.inlineUnderlinedText}>
+            {displayOptionalNote(order.chargeableAgainstNote)}
+          </Text>
+          .
+        </Text>
+        <Text style={styles.infoText}>
           Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.
         </Text>
 
@@ -644,6 +729,49 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
         </View>
       ) : null}
     </View>
+
+    <Modal
+      visible={supportingViewer !== null}
+      animationType="fade"
+      transparent
+      onRequestClose={closeSupportingViewer}
+    >
+      <View style={styles.supportingViewerOverlay}>
+        <View style={[styles.supportingViewerPanel, { maxHeight: supportingViewerPanelHeight }]}>
+          <View style={styles.supportingViewerToolbar}>
+            <Text style={styles.supportingViewerTitle} numberOfLines={1}>
+              {supportingViewer?.status === 'loading' || supportingViewer?.status === 'ready'
+                ? supportingViewer.title
+                : ''}
+            </Text>
+            <Pressable
+              onPress={closeSupportingViewer}
+              hitSlop={12}
+              style={({ pressed }) => [styles.supportingViewerCloseBtn, pressed && { opacity: 0.75 }]}
+            >
+              <Text style={styles.supportingViewerCloseText}>Close</Text>
+            </Pressable>
+          </View>
+          {supportingViewer?.status === 'loading' ? (
+            <View style={styles.supportingViewerBodyLoading}>
+              <ActivityIndicator size="large" color="#011a6b" />
+              <Text style={styles.supportingLoadingHint}>Loading preview…</Text>
+            </View>
+          ) : supportingViewer?.status === 'ready' ? (
+            supportingViewer.previewKind === 'image' ? (
+              <Image
+                source={{ uri: supportingViewer.objectUrl }}
+                style={styles.supportingPreviewImage}
+                resizeMode="contain"
+              />
+            ) : (
+              <SupportingDocumentEmbed uri={supportingViewer.objectUrl} />
+            )
+          ) : null}
+        </View>
+      </View>
+    </Modal>
+    </>
   );
 };
 
@@ -901,6 +1029,76 @@ const styles = StyleSheet.create({
   },
   supportingAttachmentsWeb: {
     gap: 10,
+  },
+  supportingViewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  supportingViewerPanel: {
+    width: '100%',
+    maxWidth: 920,
+    flex: 1,
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  supportingViewerToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.2)',
+    gap: 12,
+  },
+  supportingViewerTitle: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  supportingViewerCloseBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  supportingViewerCloseText: {
+    color: '#93c5fd',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  supportingViewerBodyLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    minHeight: 280,
+  },
+  supportingLoadingHint: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#475569',
+  },
+  supportingPreviewImage: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#f8fafc',
+    minHeight: 280,
+  },
+  supportingWebView: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#fff',
+    minHeight: 280,
+  },
+  supportingWebViewLoading: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
   },
   viewMapBtn: {
     alignSelf: 'flex-start',

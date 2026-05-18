@@ -18,6 +18,8 @@ export interface TravelOrderPrintItem {
   departureDate?: string;
   arrivalDate?: string;
   additionalInfo?: string;
+  officialBusinessNote?: string;
+  chargeableAgainstNote?: string;
   participants?: string[];
   recommendedBy?: Array<{ _id?: string; name?: string }>;
   recommenderSignatures?: Array<{
@@ -55,6 +57,13 @@ const formatSalary = (salary: string | undefined) =>
 
 const normalizeInline = (value: string | undefined | null) =>
   (value ?? '').replace(/\s+/g, ' ').trim();
+
+const BLANK_OPTIONAL_NOTE_HTML = '&nbsp;'.repeat(52);
+
+const optionalNoteSpanHtml = (note: string | undefined) => {
+  const trimmed = normalizeInline(note);
+  return `<span class="inline-u optional-note-field">${trimmed ? escapeHtml(trimmed) : BLANK_OPTIONAL_NOTE_HTML}</span>`;
+};
 
 const travelOrderPositionLabel = (item: TravelOrderPrintItem) =>
   normalizeInline(item.employeeRole) || normalizeInline(item.employee?.role) || 'N/A';
@@ -210,6 +219,7 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
     .directive { font-size: 11px; margin: 10px 0 8px; }
     .info { font-size: 11px; margin: 0 0 6px; }
     .inline-u { font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    .optional-note-field { min-width: 55%; display: inline-block; }
 
     /* Signatures */
     .sig-section { margin-top: 14px; }
@@ -322,6 +332,14 @@ export function getTravelOrderPrintHtml(item: TravelOrderPrintItem, presidentNam
       <p class="info">
         You shall be guided further by the following additional instruction and information on
         <span class="inline-u"> ${normalizeInline(item.additionalInfo) || '—'}</span>
+      </p>
+      <p class="info">
+        Your travelling expenses in the field will be authorized or allowed under Official Business,
+        ${optionalNoteSpanHtml(item.officialBusinessNote)}.
+      </p>
+      <p class="info">
+        Chargeable against Higher Education,
+        ${optionalNoteSpanHtml(item.chargeableAgainstNote)}.
       </p>
       <p class="info">
         Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.

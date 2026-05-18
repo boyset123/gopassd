@@ -62,6 +62,7 @@ interface PassSlip {
   trackingNo?: string;
   arrivalStatus?: string;
   overdueMinutes?: number;
+  rejectionReason?: string;
 }
 
 interface TravelOrder {
@@ -78,6 +79,8 @@ interface TravelOrder {
   departureDate: string;
   arrivalDate: string;
   additionalInfo: string;
+  officialBusinessNote?: string;
+  chargeableAgainstNote?: string;
   timeOut?: string;
   status: string;
   recommendedBy: Employee[];
@@ -102,6 +105,7 @@ interface TravelOrder {
   recommendersWhoApproved?: string[];
   document?: { name?: string; contentType?: string } | null;
   documents?: { name?: string; contentType?: string }[] | null;
+  rejectionReason?: string;
 }
 
 type MonitoringPassSlip = PassSlip & { type: 'slip' };
@@ -109,6 +113,13 @@ type MonitoringItem = MonitoringPassSlip;
 
 type ItemType = 'slip' | 'order';
 type DashboardView = 'dashboard' | 'records' | 'reports' | 'monitoring' | 'passSlipTracker';
+
+function getApiErrorMessage(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err) && err.response?.data?.message) {
+    return String(err.response.data.message);
+  }
+  return fallback;
+}
 
 type RootStackParamList = {
   Login: undefined;
@@ -234,6 +245,8 @@ const buildTravelOrderWebView = (o: TravelOrder) => ({
   departureDate: o.departureDate,
   arrivalDate: o.arrivalDate,
   additionalInfo: o.additionalInfo || '',
+  officialBusinessNote: o.officialBusinessNote || '',
+  chargeableAgainstNote: o.chargeableAgainstNote || '',
   recommendedBy: o.recommendedBy?.map((e) => ({ _id: e._id, id: e._id, name: e.name || '' })),
   recommenderSignatures: o.recommenderSignatures,
   recommendersWhoApproved: o.recommendersWhoApproved,
@@ -356,6 +369,8 @@ const HrpDashboardScreen = () => {
   const [hrSignatureForPresident, setHrSignatureForPresident] = useState<string | null>(null);
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [rejectComment, setRejectComment] = useState('');
+  const [isRejecting, setIsRejecting] = useState(false);
+  const [returnFeedback, setReturnFeedback] = useState<{ variant: 'success' | 'error'; message: string } | null>(null);
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
   const [isCtcModalVisible, setIsCtcModalVisible] = useState(false);
   const [selectedCtcOrder, setSelectedCtcOrder] = useState<ApprovedTravelOrder | null>(null);
@@ -367,6 +382,13 @@ const HrpDashboardScreen = () => {
   /** Result after mark-complete API (replaces browser alert on web) */
   const [markCompleteFeedback, setMarkCompleteFeedback] = useState<{ variant: 'success' | 'error'; message: string } | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [liveUpdateMessage, setLiveUpdateMessage] = useState<string | null>(null);
+
+  const isSelectedItemInForReview = useMemo(() => {
+    if (!selectedItem) return false;
+    return forReviewItems.some((item) => item._id === selectedItem._id);
+  }, [forReviewItems, selectedItem]);
 
   const trackerPassSlips = useMemo<PassSlip[]>(() => {
     const recordsPassSlips = records.filter((item): item is PassSlip => 'destination' in item);
@@ -407,9 +429,16 @@ const HrpDashboardScreen = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isNarrow, mobileSidebarOpen]);
 
-  const fetchData = async () => {
-    setIsLoading(true);
-    setError('');
+  const showLiveUpdate = useCallback((message: string) => {
+    setLiveUpdateMessage(message);
+  }, []);
+
+  const fetchData = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setIsLoading(true);
+      setError('');
+    }
     try {
       const token = await AsyncStorage.getItem('userToken');
       const headers = { 'x-auth-token': token };
@@ -426,14 +455,11 @@ const HrpDashboardScreen = () => {
       const allSlips = slipsResponse.data;
       const allOrders = [...ordersResponse.data, ...presidentApprovedOrdersResponse.data];
 
-      // Items needing HR review/approval
       setForReviewItems([...allSlips, ...allOrders]);
 
-      // Items for monitoring
       const verifiedSlips = verifiedSlipsResponse.data.map(item => ({ ...item, type: 'slip' as const }));
       setMonitoringItems([...verifiedSlips]);
 
-      // Active (Approved) travel orders for monitoring
       setMonitoringApprovedTravelOrders(
         (approvedOrdersResponse.data || []).filter((o) => o.status === 'Approved')
       );
@@ -444,25 +470,76 @@ const HrpDashboardScreen = () => {
       setFilteredRecords(recordsResponse.data);
 
     } catch (err) {
-      setError('Failed to fetch requests. Please try again.');
+      if (!silent) {
+        setError('Failed to fetch requests. Please try again.');
+      }
       console.error(err);
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
-  };
+  }, []);
+
+  const fetchUserData = useCallback(async () => {
+    const token = await AsyncStorage.getItem('userToken');
+    const headers = { 'x-auth-token': token };
+    try {
+      const response = await axios.get(`${API_URL}/users/me`, { headers });
+      setName(response.data.name);
+      if (response.data._id) {
+        setCurrentUserId(String(response.data._id));
+      }
+    } catch (error) {
+      console.error('Failed to fetch user data', error);
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       fetchData();
       fetchUserData();
-    }, [])
+    }, [fetchData, fetchUserData])
   );
+
+  useEffect(() => {
+    if (!liveUpdateMessage) return;
+    const timer = setTimeout(() => setLiveUpdateMessage(null), 8000);
+    return () => clearTimeout(timer);
+  }, [liveUpdateMessage]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchData({ silent: true });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [fetchData]);
 
   useEffect(() => {
     if (!socket) return;
 
+    const refreshFromSocket = (message?: string) => {
+      void fetchData({ silent: true });
+      if (message) showLiveUpdate(message);
+    };
+
     const handleDataUpdate = () => {
-      fetchData();
+      refreshFromSocket('New activity — your dashboard has been updated.');
+    };
+
+    const handleNewNotification = (payload: {
+      userId?: string;
+      notification?: { message?: string };
+    }) => {
+      if (!currentUserId || !payload.userId || String(payload.userId) !== String(currentUserId)) {
+        return;
+      }
+      const text = payload.notification?.message?.trim();
+      refreshFromSocket(text || 'You have a new notification — your dashboard has been updated.');
     };
 
     socket.on('passSlipStatusUpdate', handleDataUpdate);
@@ -471,6 +548,8 @@ const HrpDashboardScreen = () => {
     socket.on('travelOrderDataChanged', handleDataUpdate);
     socket.on('passSlipDeleted', handleDataUpdate);
     socket.on('travelOrderDeleted', handleDataUpdate);
+    socket.on('newPassSlip', handleDataUpdate);
+    socket.on('newNotification', handleNewNotification);
 
     return () => {
       socket.off('passSlipStatusUpdate', handleDataUpdate);
@@ -479,8 +558,10 @@ const HrpDashboardScreen = () => {
       socket.off('travelOrderDataChanged', handleDataUpdate);
       socket.off('passSlipDeleted', handleDataUpdate);
       socket.off('travelOrderDeleted', handleDataUpdate);
+      socket.off('newPassSlip', handleDataUpdate);
+      socket.off('newNotification', handleNewNotification);
     };
-  }, [socket]);
+  }, [socket, fetchData, currentUserId, showLiveUpdate]);
 
   useEffect(() => {
     let tempRecords = records;
@@ -546,17 +627,6 @@ const HrpDashboardScreen = () => {
     fetchPresident();
   }, []);
 
-  const fetchUserData = async () => {
-    const token = await AsyncStorage.getItem('userToken');
-    const headers = { 'x-auth-token': token };
-    try {
-      const response = await axios.get(`${API_URL}/users/me`, { headers });
-      setName(response.data.name);
-    } catch (error) {
-      console.error('Failed to fetch user data', error);
-    }
-  };
-
   const handleUpdateName = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
@@ -584,6 +654,8 @@ const HrpDashboardScreen = () => {
   };
 
   const handleUpdateStatus = async (type: ItemType, id: string, status: 'Approved' | 'Completed' | 'Rejected' | 'Recommended' | 'For President Approval', rejectionReason?: string) => {
+    const isReturn = status === 'Rejected';
+    if (isReturn) setIsRejecting(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
       const headers = { 'x-auth-token': token };
@@ -618,20 +690,37 @@ const HrpDashboardScreen = () => {
           setIsApproved(false);
           setTrackingNoInput('');
           setHrSignatureForPresident(null);
-          fetchData();
+          fetchData({ silent: true });
         }, 2000);
-      } else {
-        Alert.alert('Success', status === 'For President Approval' ? 'Sent to President for approval.' : status === 'Rejected' ? 'Request has been returned to the employee.' : `Request has been ${status.toLowerCase()}.`);
+      } else if (isReturn) {
+        setReturnFeedback({ variant: 'success', message: 'Request has been returned to the employee.' });
         setHrSignatureForPresident(null);
         setRejectModalVisible(false);
         setRejectComment('');
-        fetchData();
+        fetchData({ silent: true });
+        setIsModalVisible(false);
+        setSelectedItem(null);
+      } else {
+        Alert.alert('Success', status === 'For President Approval' ? 'Sent to President for approval.' : `Request has been ${status.toLowerCase()}.`);
+        setHrSignatureForPresident(null);
+        setRejectModalVisible(false);
+        setRejectComment('');
+        fetchData({ silent: true });
         setIsModalVisible(false);
         setSelectedItem(null);
       }
     } catch (err) {
-      Alert.alert('Error', 'Failed to update the request status.');
+      if (isReturn) {
+        setReturnFeedback({
+          variant: 'error',
+          message: getApiErrorMessage(err, 'Failed to return the request.'),
+        });
+      } else {
+        Alert.alert('Error', getApiErrorMessage(err, 'Failed to update the request status.'));
+      }
       console.error(err);
+    } finally {
+      if (isReturn) setIsRejecting(false);
     }
   };
 
@@ -717,7 +806,7 @@ const HrpDashboardScreen = () => {
         { status: 'Completed' },
         { headers: { 'x-auth-token': token } }
       );
-      await fetchData();
+      await fetchData({ silent: true });
       setMarkCompleteFeedback({
         variant: 'success',
         message: 'Travel order has been marked as completed.',
@@ -1022,6 +1111,20 @@ const HrpDashboardScreen = () => {
             </Text>
           </View>
         </View>
+        {liveUpdateMessage ? (
+          <View style={[styles.liveUpdateBanner, isNarrow && styles.liveUpdateBannerMobile]}>
+            <FontAwesome name="bell" size={16} color="#011a6b" />
+            <Text style={styles.liveUpdateBannerText}>{liveUpdateMessage}</Text>
+            <Pressable
+              onPress={() => setLiveUpdateMessage(null)}
+              style={styles.liveUpdateBannerDismiss}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss update notification"
+            >
+              <FontAwesome name="times" size={18} color="#011a6b" />
+            </Pressable>
+          </View>
+        ) : null}
         <ScrollView
           style={styles.mainScrollView}
           contentContainerStyle={[styles.mainScrollContent, isNarrow && styles.mainScrollContentNarrow]}
@@ -1521,7 +1624,7 @@ const HrpDashboardScreen = () => {
                         <View style={styles.docTitleContainer}>
                           <View style={styles.trackingNoContainer}>
                             <Text style={styles.docField}>Tracking No.: </Text>
-                            {forReviewItems.includes(selectedItem) && selectedItem.status !== 'Approved' ? (
+                            {isSelectedItemInForReview && selectedItem.status !== 'Approved' ? (
                               <TextInput
                                 style={styles.trackingNoInput}
                                 onChangeText={setTrackingNoInput}
@@ -1581,6 +1684,16 @@ const HrpDashboardScreen = () => {
                             <Text style={styles.rejectedStamp}>REJECTED</Text>
                           </View>
                         )}
+                        {selectedItem.status === 'Rejected' &&
+                          (selectedItem as PassSlip).rejectionReason != null &&
+                          String((selectedItem as PassSlip).rejectionReason).trim() !== '' && (
+                          <View style={styles.rejectionReasonBlock}>
+                            <Text style={styles.rejectionReasonLabel}>Return reason: </Text>
+                            <Text style={styles.rejectionReasonContent}>
+                              {String((selectedItem as PassSlip).rejectionReason).trim()}
+                            </Text>
+                          </View>
+                        )}
                         <View style={styles.docSignatureContainer}>
                           <View style={styles.docSignatureBox}>
                             <Text style={styles.docField}>Requested by:</Text>
@@ -1607,7 +1720,7 @@ const HrpDashboardScreen = () => {
                       </>
                     ) : (
                       <>
-                        {forReviewItems.includes(selectedItem) &&
+                        {isSelectedItemInForReview &&
                           (selectedItem as TravelOrder).status !== 'Recommended' && (
                           <View style={{ marginBottom: 12, width: '100%', maxWidth: 520, alignSelf: 'center' }}>
                             <Text style={styles.formLabel}>Travel Order No. (required to approve)</Text>
@@ -1619,22 +1732,39 @@ const HrpDashboardScreen = () => {
                             />
                           </View>
                         )}
-                        <TravelOrderFormWeb
-                          order={buildTravelOrderWebView(selectedItem as TravelOrder)}
-                          presidentName={presidentName}
-                          viewOnly
-                          travelOrderNoDraft={
-                            forReviewItems.includes(selectedItem) &&
-                            (selectedItem as TravelOrder).status !== 'Recommended'
-                              ? travelOrderNoInput
-                              : undefined
-                          }
-                          onViewMap={
-                            (selectedItem as TravelOrder).latitude && (selectedItem as TravelOrder).longitude
-                              ? () => openMapModal(selectedItem as TravelOrder)
-                              : undefined
-                          }
-                        />
+                        <View style={styles.travelOrderReviewWrap}>
+                          {selectedItem.status === 'Rejected' && (
+                            <View style={styles.rejectedStampContainer}>
+                              <Text style={styles.rejectedStamp}>REJECTED</Text>
+                            </View>
+                          )}
+                          <TravelOrderFormWeb
+                            order={buildTravelOrderWebView(selectedItem as TravelOrder)}
+                            presidentName={presidentName}
+                            viewOnly
+                            travelOrderNoDraft={
+                              isSelectedItemInForReview &&
+                              (selectedItem as TravelOrder).status !== 'Recommended'
+                                ? travelOrderNoInput
+                                : undefined
+                            }
+                            onViewMap={
+                              (selectedItem as TravelOrder).latitude && (selectedItem as TravelOrder).longitude
+                                ? () => openMapModal(selectedItem as TravelOrder)
+                                : undefined
+                            }
+                          />
+                          {selectedItem.status === 'Rejected' &&
+                            (selectedItem as TravelOrder).rejectionReason != null &&
+                            String((selectedItem as TravelOrder).rejectionReason).trim() !== '' && (
+                            <View style={styles.rejectionReasonBlock}>
+                              <Text style={styles.rejectionReasonLabel}>Return reason: </Text>
+                              <Text style={styles.rejectionReasonContent}>
+                                {String((selectedItem as TravelOrder).rejectionReason).trim()}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
                       </>
                     )}
                   </>
@@ -1642,7 +1772,7 @@ const HrpDashboardScreen = () => {
               </ScrollView>
               {selectedItem && (
                 <View style={[styles.modalButtonContainer, isNarrow && (styles as any).modalButtonContainerNarrow]}>
-                  {forReviewItems.includes(selectedItem) ? (
+                  {isSelectedItemInForReview ? (
                     <>
                       {(() => {
                         const isTravelOrderRecommended = selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended';
@@ -1679,7 +1809,7 @@ const HrpDashboardScreen = () => {
                       </Pressable>
                     </>
                   ) : null}
-                  {selectedItemType === 'order' && !forReviewItems.includes(selectedItem) && (
+                  {selectedItemType === 'order' && !isSelectedItemInForReview && (
                     <Pressable style={[styles.button, styles.printButton, styles.modalButton]} onPress={() => handlePrintTravelOrder(selectedItem as TravelOrder)}>
                       <Text style={styles.buttonText}>Print</Text>
                     </Pressable>
@@ -1908,8 +2038,38 @@ const HrpDashboardScreen = () => {
           </View>
         </Modal>
 
+        {/* Return result (success / error) — Modal works on web; Alert.alert does not reliably show there */}
+        <Modal
+          animationType="fade"
+          transparent
+          visible={!!returnFeedback}
+          onRequestClose={() => setReturnFeedback(null)}
+        >
+          <View style={styles.rejectModalOverlay}>
+            <View style={styles.rejectModalContent}>
+              <Text style={styles.rejectModalTitle}>
+                {returnFeedback?.variant === 'success' ? 'Returned' : 'Could not return'}
+              </Text>
+              <Text style={styles.rejectModalSubtitle}>{returnFeedback?.message}</Text>
+              <View style={styles.rejectModalButtons}>
+                <Pressable
+                  style={[styles.rejectModalButton, styles.markCompleteModalPrimaryButton]}
+                  onPress={() => setReturnFeedback(null)}
+                >
+                  <Text style={styles.markCompleteModalPrimaryButtonText}>OK</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         {/* Return confirmation modal with optional comment */}
-        <Modal animationType="fade" transparent visible={rejectModalVisible} onRequestClose={() => setRejectModalVisible(false)}>
+        <Modal
+          animationType="fade"
+          transparent
+          visible={rejectModalVisible}
+          onRequestClose={() => !isRejecting && setRejectModalVisible(false)}
+        >
           <View style={styles.rejectModalOverlay}>
             <View style={styles.rejectModalContent}>
               <Text style={styles.rejectModalTitle}>Return request</Text>
@@ -1922,13 +2082,24 @@ const HrpDashboardScreen = () => {
                 onChangeText={setRejectComment}
                 multiline
                 numberOfLines={3}
+                editable={!isRejecting}
               />
               <View style={styles.rejectModalButtons}>
-                <Pressable style={[styles.rejectModalButton, styles.rejectModalCancel]} onPress={() => { setRejectModalVisible(false); setRejectComment(''); }}>
+                <Pressable
+                  style={[styles.rejectModalButton, styles.rejectModalCancel]}
+                  onPress={() => { if (!isRejecting) { setRejectModalVisible(false); setRejectComment(''); } }}
+                  disabled={isRejecting}
+                >
                   <Text style={styles.rejectModalCancelText}>Cancel</Text>
                 </Pressable>
-                <Pressable style={[styles.rejectModalButton, styles.rejectModalConfirm]} onPress={() => selectedItem && selectedItemType && handleUpdateStatus(selectedItemType, selectedItem._id, 'Rejected', rejectComment)}>
-                  <Text style={styles.rejectModalConfirmText}>Confirm Return</Text>
+                <Pressable
+                  style={[styles.rejectModalButton, styles.rejectModalConfirm, isRejecting && { opacity: 0.6 }]}
+                  onPress={() => selectedItem && selectedItemType && handleUpdateStatus(selectedItemType, selectedItem._id, 'Rejected', rejectComment)}
+                  disabled={isRejecting}
+                >
+                  <Text style={styles.rejectModalConfirmText}>
+                    {isRejecting ? 'Returning…' : 'Confirm Return'}
+                  </Text>
                 </Pressable>
               </View>
             </View>

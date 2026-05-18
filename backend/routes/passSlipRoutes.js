@@ -344,11 +344,12 @@ router.put('/:id/status', [auth], async (req, res) => {
       passSlip.approvedBySignedAsOicFor = resolution.viaOic ? resolution.originalId : null;
     } else if (!isHr && status === 'Rejected') {
       // Only the assigned approver or their currently-acting OIC can reject.
-      if (passSlip.approvedBy) {
-        const resolution = await getEffectiveSigner(passSlip.approvedBy);
-        if (!resolution || toIdString(resolution.signerId) !== toIdString(req.user.userId)) {
-          return res.status(403).json({ message: 'You are not authorized to reject this pass slip.' });
-        }
+      if (!passSlip.approvedBy) {
+        return res.status(400).json({ message: 'This pass slip has no assigned approver.' });
+      }
+      const resolution = await getEffectiveSigner(passSlip.approvedBy);
+      if (!resolution || toIdString(resolution.signerId) !== toIdString(req.user.userId)) {
+        return res.status(403).json({ message: 'You are not authorized to reject this pass slip.' });
       }
       passSlip.status = status;
       if (rejectionReason != null) passSlip.rejectionReason = String(rejectionReason).trim() || undefined;

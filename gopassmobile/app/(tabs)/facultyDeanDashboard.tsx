@@ -83,6 +83,8 @@ interface TravelOrder {
   departureDate: string;
   arrivalDate: string;
   additionalInfo: string;
+  officialBusinessNote?: string;
+  chargeableAgainstNote?: string;
   signature: string;
   approverSignature?: string;
   approvedBy?: { name: string };
@@ -138,6 +140,7 @@ export default function FacultyDeanDashboard() {
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<{ type: ItemType; id: string } | null>(null);
   const [rejectComment, setRejectComment] = useState('');
+  const [isRejecting, setIsRejecting] = useState(false);
 
   // Defer mounting signature canvas so iOS Modal has layout before WebView (fixes "only appears when exit")
   useEffect(() => {
@@ -198,11 +201,13 @@ export default function FacultyDeanDashboard() {
     };
 
     socket.on('newPassSlip', handleDataRefresh);
+    socket.on('travelOrderDataChanged', handleDataRefresh);
     socket.on('passSlipStatusUpdate', handleDataRefresh);
     socket.on('passSlipDeleted', handleDataRefresh);
 
     return () => {
       socket.off('newPassSlip', handleDataRefresh);
+      socket.off('travelOrderDataChanged', handleDataRefresh);
       socket.off('passSlipStatusUpdate', handleDataRefresh);
       socket.off('passSlipDeleted', handleDataRefresh);
     };
@@ -309,7 +314,8 @@ export default function FacultyDeanDashboard() {
   };
 
   const handleRejectConfirm = async () => {
-    if (!rejectTarget) return;
+    if (!rejectTarget || isRejecting) return;
+    setIsRejecting(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
       const headers = { 'x-auth-token': token };
@@ -319,10 +325,19 @@ export default function FacultyDeanDashboard() {
       setRejectModalVisible(false);
       setRejectTarget(null);
       setRejectComment('');
+      setReviewModalVisible(false);
+      setSelectedItem(null);
+      setSelectedItemType(null);
       fetchData();
-    } catch (err) {
-      Alert.alert('Error', 'Failed to update the request status.');
+    } catch (err: unknown) {
+      const axiosMsg =
+        axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object'
+          ? (err.response.data as { message?: string }).message
+          : undefined;
+      Alert.alert('Error', axiosMsg || 'Failed to update the request status.');
       console.error(err);
+    } finally {
+      setIsRejecting(false);
     }
   };
 
@@ -404,7 +419,7 @@ export default function FacultyDeanDashboard() {
           </TouchableOpacity>
         </View>
       </ImageBackground>
-      <Modal visible={rejectModalVisible} animationType="fade" transparent>
+      <Modal visible={rejectModalVisible} animationType="fade" transparent onRequestClose={() => !isRejecting && setRejectModalVisible(false)}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.rejectModalOverlay}
@@ -425,13 +440,22 @@ export default function FacultyDeanDashboard() {
                 onChangeText={setRejectComment}
                 multiline
                 numberOfLines={3}
+                editable={!isRejecting}
               />
               <View style={styles.rejectModalButtons}>
-                <Pressable style={[styles.rejectModalButton, styles.rejectModalCancel]} onPress={() => { setRejectModalVisible(false); setRejectTarget(null); setRejectComment(''); }}>
+                <Pressable
+                  style={[styles.rejectModalButton, styles.rejectModalCancel]}
+                  onPress={() => { if (!isRejecting) { setRejectModalVisible(false); setRejectTarget(null); setRejectComment(''); } }}
+                  disabled={isRejecting}
+                >
                   <Text style={styles.rejectModalCancelText}>Cancel</Text>
                 </Pressable>
-                <Pressable style={[styles.rejectModalButton, styles.rejectModalConfirm]} onPress={handleRejectConfirm}>
-                  <Text style={styles.rejectModalConfirmText}>Confirm Rejection</Text>
+                <Pressable
+                  style={[styles.rejectModalButton, styles.rejectModalConfirm, isRejecting && { opacity: 0.6 }]}
+                  onPress={handleRejectConfirm}
+                  disabled={isRejecting}
+                >
+                  <Text style={styles.rejectModalConfirmText}>{isRejecting ? 'Rejecting…' : 'Confirm Rejection'}</Text>
                 </Pressable>
               </View>
             </View>
@@ -524,7 +548,7 @@ export default function FacultyDeanDashboard() {
                   </>
                 )}
 
-                {selectedItemType === 'order' && (
+                {selectedItemType === 'order' && selectedItem && (
                   <>
                     <TravelOrderForm
                       order={selectedItem as TravelOrder}
@@ -546,7 +570,7 @@ export default function FacultyDeanDashboard() {
                 styles.button, 
                 styles.approveButton,
                 (() => {
-                  if (selectedItemType !== 'order') return false;
+                  if (selectedItemType !== 'order' || !selectedItem) return false;
                   const order = selectedItem as TravelOrder;
                   const currentUserId = user?.id || user?._id;
                   const nextRecommender = order.recommendedBy?.[order.recommendersWhoApproved?.length || 0];
@@ -555,7 +579,7 @@ export default function FacultyDeanDashboard() {
               ]} 
               onPress={handleSubmitToHR}
               disabled={(() => {
-                if (selectedItemType !== 'order') return false;
+                if (selectedItemType !== 'order' || !selectedItem) return false;
                 const order = selectedItem as TravelOrder;
                 const currentUserId = user?.id || user?._id;
                 const nextRecommender = order.recommendedBy?.[order.recommendersWhoApproved?.length || 0];

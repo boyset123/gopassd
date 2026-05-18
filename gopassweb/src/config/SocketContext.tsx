@@ -12,8 +12,10 @@ export const useSocket = () => {
   return useContext(SocketContext);
 };
 
-const socket = io(API_URL.replace('/api', ''), { // Connect to the base URL
-  transports: ['websocket'], // Force websocket connection
+const socket = io(API_URL.replace('/api', ''), {
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: 10,
 });
 
 export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {

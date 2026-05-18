@@ -84,6 +84,8 @@ interface TravelOrder {
   departureDate: string;
   arrivalDate: string;
   additionalInfo: string;
+  officialBusinessNote?: string;
+  chargeableAgainstNote?: string;
   signature: string;
   approverSignature?: string;
   hrApproverSignature?: string;
@@ -141,6 +143,7 @@ export default function PresidentDashboard() {
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<{ type: ItemType; id: string } | null>(null);
   const [rejectComment, setRejectComment] = useState('');
+  const [isRejecting, setIsRejecting] = useState(false);
 
   // Defer mounting signature canvas so iOS Modal has layout before WebView (fixes "only appears when exit")
   useEffect(() => {
@@ -289,7 +292,8 @@ export default function PresidentDashboard() {
   };
 
   const handleRejectConfirm = async () => {
-    if (!rejectTarget) return;
+    if (!rejectTarget || isRejecting) return;
+    setIsRejecting(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
       const headers = { 'x-auth-token': token };
@@ -299,10 +303,19 @@ export default function PresidentDashboard() {
       setRejectModalVisible(false);
       setRejectTarget(null);
       setRejectComment('');
+      setReviewModalVisible(false);
+      setSelectedItem(null);
+      setSelectedItemType(null);
       fetchData();
-    } catch (err) {
-      Alert.alert('Error', 'Failed to update the request status.');
+    } catch (err: unknown) {
+      const axiosMsg =
+        axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object'
+          ? (err.response.data as { message?: string }).message
+          : undefined;
+      Alert.alert('Error', axiosMsg || 'Failed to update the request status.');
       console.error(err);
+    } finally {
+      setIsRejecting(false);
     }
   };
 
@@ -497,7 +510,7 @@ export default function PresidentDashboard() {
         </View>
       </ImageBackground>
 
-      <Modal visible={rejectModalVisible} animationType="fade" transparent>
+      <Modal visible={rejectModalVisible} animationType="fade" transparent onRequestClose={() => !isRejecting && setRejectModalVisible(false)}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.rejectModalOverlay}
@@ -518,13 +531,22 @@ export default function PresidentDashboard() {
                 onChangeText={setRejectComment}
                 multiline
                 numberOfLines={3}
+                editable={!isRejecting}
               />
               <View style={styles.rejectModalButtons}>
-                <Pressable style={[styles.rejectModalButton, styles.rejectModalCancel]} onPress={() => { setRejectModalVisible(false); setRejectTarget(null); setRejectComment(''); }}>
+                <Pressable
+                  style={[styles.rejectModalButton, styles.rejectModalCancel]}
+                  onPress={() => { if (!isRejecting) { setRejectModalVisible(false); setRejectTarget(null); setRejectComment(''); } }}
+                  disabled={isRejecting}
+                >
                   <Text style={styles.rejectModalCancelText}>Cancel</Text>
                 </Pressable>
-                <Pressable style={[styles.rejectModalButton, styles.rejectModalConfirm]} onPress={handleRejectConfirm}>
-                  <Text style={styles.rejectModalConfirmText}>Confirm Rejection</Text>
+                <Pressable
+                  style={[styles.rejectModalButton, styles.rejectModalConfirm, isRejecting && { opacity: 0.6 }]}
+                  onPress={handleRejectConfirm}
+                  disabled={isRejecting}
+                >
+                  <Text style={styles.rejectModalConfirmText}>{isRejecting ? 'Rejecting…' : 'Confirm Rejection'}</Text>
                 </Pressable>
               </View>
             </View>

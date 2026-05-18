@@ -134,6 +134,8 @@ function buildTravelOrderQrPayload(doc) {
     timeOut: doc.timeOut,
     arrivalDate: doc.arrivalDate,
     additionalInfo: doc.additionalInfo,
+    officialBusinessNote: doc.officialBusinessNote,
+    chargeableAgainstNote: doc.chargeableAgainstNote,
     employeeAddress: doc.employeeAddress,
     employee: doc.employee ? { name: doc.employee.name, role: doc.employee.role } : undefined,
     recommendedBy: recs.map((r, i) => ({ name: r?.name || '', _id: `qr-${i}` })),
@@ -205,7 +207,7 @@ router.post(
   },
   async (req, res) => {
   try {
-    const { date, address, salary, to, purpose, departureDate, arrivalDate, additionalInfo, timeOut, recommendedBy, participants, employeeAddress } = req.body;
+    const { date, address, salary, to, purpose, departureDate, arrivalDate, additionalInfo, officialBusinessNote, chargeableAgainstNote, timeOut, recommendedBy, participants, employeeAddress } = req.body;
 
     const user = await User.findById(req.user.userId);
     if (!user) {
@@ -239,6 +241,8 @@ router.post(
       departureDate: parsedDeparture,
       arrivalDate: parsedArrival,
       additionalInfo,
+      officialBusinessNote,
+      chargeableAgainstNote,
       timeOut,
       status: 'Pending',
       participants: participants ? JSON.parse(participants) : [],
@@ -533,11 +537,17 @@ router.put('/:id/status', [auth], async (req, res) => {
 
     // Determine actor scope: are we acting as a recommender (or their OIC) or as HR?
     const isHr = req.user.role === 'Human Resource Personnel';
+    const isPresidentReject =
+      !isHr && status === 'Rejected' && travelOrder.status === 'For President Approval';
 
     // Whitelist of allowed transitions per role group.
     if (isHr) {
       if (!['Approved', 'For President Approval', 'Completed', 'Rejected'].includes(status)) {
         return res.status(400).json({ message: 'Invalid status for HR personnel.' });
+      }
+    } else if (isPresidentReject) {
+      if (status !== 'Rejected') {
+        return res.status(400).json({ message: 'Invalid status update.' });
       }
     } else {
       if (!['Recommended', 'Rejected'].includes(status)) {
@@ -546,7 +556,27 @@ router.put('/:id/status', [auth], async (req, res) => {
     }
 
     // Validate status transitions
-    if (!isHr) {
+    if (isPresidentReject) {
+      const president = await resolvePresidentAccount(req.user);
+      if (!president) {
+        return res.status(500).json({ message: 'No President configured in the system.' });
+      }
+      try {
+        await assertCanSignFor(req.user.userId, president._id);
+      } catch (signErr) {
+        const fallback = await getEffectiveSigner(president._id);
+        const message =
+          signErr.message ||
+          (fallback?.viaOic
+            ? 'Only the assigned OIC for the President can reject while the President is on travel.'
+            : 'Only the President can reject this travel order.');
+        return res.status(signErr.status || 403).json({ message });
+      }
+      travelOrder.status = 'Rejected';
+      if (rejectionReason != null) {
+        travelOrder.rejectionReason = String(rejectionReason).trim() || undefined;
+      }
+    } else if (!isHr) {
       if (status === 'Recommended' && travelOrder.status !== 'Pending') {
         return res.status(400).json({ message: 'Recommenders can only recommend pending travel orders.' });
       }
@@ -735,6 +765,17 @@ router.put('/:id/status', [auth], async (req, res) => {
       await notifyUsersWithRole(req.io, 'President', {
         message: `A travel order from ${employeeName} that was awaiting your approval has been rejected by HR.`,
         type: 'Travel Order — President',
+        relatedId: travelOrder._id,
+      });
+    }
+
+    // --- Notify HR when President rejects an order awaiting approval ---
+    if (isPresidentReject) {
+      const emp = await User.findById(travelOrder.employee).select('name').lean();
+      const employeeName = emp?.name || 'An employee';
+      await notifyUsersWithRole(req.io, 'Human Resource Personnel', {
+        message: `A travel order from ${employeeName} has been rejected by the President.`,
+        type: 'Status Update',
         relatedId: travelOrder._id,
       });
     }

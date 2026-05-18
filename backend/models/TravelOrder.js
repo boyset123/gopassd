@@ -43,6 +43,8 @@ const travelOrderSchema = new mongoose.Schema({
   departureDate: { type: Date, required: true },
   arrivalDate: { type: Date, required: true },
   additionalInfo: { type: String },
+  officialBusinessNote: { type: String },
+  chargeableAgainstNote: { type: String },
   timeOut: { type: String },
   status: { type: String, enum: ['Pending', 'Recommended', 'For HR Approval', 'For President Approval', 'President Approved', 'Approved', 'Rejected', 'Completed', 'Verified', 'Returned'], default: 'Pending' },
   recommendedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],

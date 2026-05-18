@@ -703,9 +703,11 @@ export default function SlipsScreen() {
             )}
           </Pressable>
           {(item.status === 'Rejected' || item.status === 'Cancelled') && (item.rejectionReason != null && String(item.rejectionReason).trim() !== '') ? (
-            <View style={styles.cardRow}>
-              <FontAwesome name="comment-o" size={14} color={theme.danger} style={styles.cardRowIcon} />
-              <Text style={styles.rejectionReasonText} numberOfLines={2}>{String(item.rejectionReason).trim()}</Text>
+            <View style={styles.reasonNote}>
+              <Text style={styles.reasonNoteLabel}>
+                {item.status === 'Cancelled' ? 'Cancellation reason' : 'Rejection reason'}
+              </Text>
+              <Text style={styles.reasonNoteText}>{String(item.rejectionReason).trim()}</Text>
             </View>
           ) : null}
           <View style={styles.historyWrapper}>
@@ -1008,9 +1010,9 @@ export default function SlipsScreen() {
                           <Text style={styles.rejectedStamp}>REJECTED</Text>
                         </View>
                         {(selectedSubmission.rejectionReason != null && String(selectedSubmission.rejectionReason).trim() !== '') && (
-                          <View style={styles.rejectionReasonBlock}>
-                            <Text style={styles.rejectionReasonLabel}>Reason: </Text>
-                            <Text style={styles.rejectionReasonContent}>{String(selectedSubmission.rejectionReason).trim()}</Text>
+                          <View style={[styles.reasonNote, styles.reasonNoteModal]}>
+                            <Text style={styles.reasonNoteLabel}>Rejection reason</Text>
+                            <Text style={styles.reasonNoteText}>{String(selectedSubmission.rejectionReason).trim()}</Text>
                           </View>
                         )}
                       </>
@@ -1058,9 +1060,9 @@ export default function SlipsScreen() {
                       <Text style={styles.rejectedStamp}>REJECTED</Text>
                     </View>
                     {(selectedSubmission.rejectionReason != null && String(selectedSubmission.rejectionReason).trim() !== '') && (
-                      <View style={styles.rejectionReasonBlock}>
-                        <Text style={styles.rejectionReasonLabel}>Reason: </Text>
-                        <Text style={styles.rejectionReasonContent}>{String(selectedSubmission.rejectionReason).trim()}</Text>
+                      <View style={[styles.reasonNote, styles.reasonNoteModal]}>
+                        <Text style={styles.reasonNoteLabel}>Rejection reason</Text>
+                        <Text style={styles.reasonNoteText}>{String(selectedSubmission.rejectionReason).trim()}</Text>
                       </View>
                     )}
                   </>
@@ -2241,29 +2243,29 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 8,
   },
-  rejectionReasonText: {
-    fontSize: 13,
-    color: '#721c24',
-    flex: 1,
-  },
-  rejectionReasonBlock: {
-    marginTop: 12,
-    marginBottom: 8,
-    padding: 10,
-    backgroundColor: 'rgba(220,53,69,0.1)',
+  reasonNote: {
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(1,26,107,0.04)',
     borderRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: theme.danger,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border,
   },
-  rejectionReasonLabel: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#721c24',
-    marginBottom: 4,
+  reasonNoteModal: {
+    marginTop: 16,
+    marginBottom: 12,
   },
-  rejectionReasonContent: {
+  reasonNoteLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: theme.textMuted,
+    marginBottom: 6,
+  },
+  reasonNoteText: {
     fontSize: 14,
-    color: '#721c24',
+    lineHeight: 22,
+    color: theme.text,
   },
   rejectedStampContainer: {
     position: 'absolute',

@@ -11,7 +11,6 @@ import AdminScreen from './src/screens/AdminScreen';
 import HrpDashboardScreen from './src/screens/HrpDashboardScreen';
 import SecurityDashboardScreen from './src/screens/SecurityDashboardScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
-import { SocketProvider } from './src/config/SocketContext';
 import { getWebInitialRouteForRole, isWebAllowedRole } from './src/config/webAuth';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -66,7 +65,6 @@ const App = () => {
 
   return (
     <SafeAreaProvider>
-    <SocketProvider>
       <NavigationContainer>
         <Stack.Navigator 
         initialRouteName={userRole ? getWebInitialRouteForRole(userRole) : 'Login'}
@@ -80,7 +78,6 @@ const App = () => {
         <Stack.Screen name="Profile" component={ProfileScreen} />
         </Stack.Navigator>
       </NavigationContainer>
-    </SocketProvider>
     </SafeAreaProvider>
   );
 };

@@ -13,6 +13,7 @@ import { useSocket } from '../../config/SocketContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { NotificationsModal, type Notification } from '../../components/NotificationsModal';
 import TravelOrderForm from '../../components/TravelOrderForm';
+import { getAxiosErrorMessage, isStaleApprovalRequestError } from '../../utils/approvalErrors';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
@@ -141,6 +142,7 @@ export default function ProgramHeadDashboard() {
   const [rejectTarget, setRejectTarget] = useState<{ type: ItemType; id: string } | null>(null);
   const [rejectComment, setRejectComment] = useState('');
   const [isRejecting, setIsRejecting] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
 
   const handleDeleteNotification = (notificationId: string) => {
     Alert.alert(
@@ -366,19 +368,23 @@ export default function ProgramHeadDashboard() {
   };
 
   const handleSubmitToHR = async () => {
-    if (!selectedItem || !selectedItemType) return;
+    if (!selectedItem || !selectedItemType || isApproving) return;
+
+    if (!approverSignature) {
+      Alert.alert('Signature Required', 'Please provide your signature to approve.');
+      return;
+    }
 
     const status = 'Recommended';
+    setIsApproving(true);
 
     try {
-      const token = await AsyncStorage.getItem('userToken'); 
+      const token = await AsyncStorage.getItem('userToken');
       const headers = { 'x-auth-token': token };
-      const url = selectedItemType === 'slip' ? `${API_URL}/pass-slips/${selectedItem._id}/status` : `${API_URL}/travel-orders/${selectedItem._id}/status`;
-
-      if (!approverSignature) {
-        Alert.alert('Signature Required', 'Please provide your signature to approve.');
-        return;
-      }
+      const url =
+        selectedItemType === 'slip'
+          ? `${API_URL}/pass-slips/${selectedItem._id}/status`
+          : `${API_URL}/travel-orders/${selectedItem._id}/status`;
       const payload = { status, approverSignature };
 
       await axios.put(url, payload, { headers });
@@ -386,10 +392,20 @@ export default function ProgramHeadDashboard() {
       Alert.alert('Success', `Request has been ${status.toLowerCase()}.`);
       setReviewModalVisible(false);
       setSelectedItem(null);
-      fetchData(); // Refresh the list
+      setSelectedItemType(null);
+      fetchData();
     } catch (err) {
-      Alert.alert('Error', 'Failed to update the request status.');
+      if (isStaleApprovalRequestError(err)) {
+        setReviewModalVisible(false);
+        setSelectedItem(null);
+        setSelectedItemType(null);
+        fetchData();
+        return;
+      }
+      Alert.alert('Error', getAxiosErrorMessage(err, 'Failed to update the request status.'));
       console.error(err);
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -602,15 +618,20 @@ export default function ProgramHeadDashboard() {
                 })() && styles.disabledButton
               ]} 
               onPress={handleSubmitToHR}
-              disabled={(() => {
-                if (selectedItemType !== 'order' || !selectedItem) return false;
-                const order = selectedItem as TravelOrder;
-                const currentUserId = user?.id || user?._id;
-                const nextRecommender = order.recommendedBy?.[order.recommendersWhoApproved?.length || 0];
-                return (nextRecommender?._id !== currentUserId) && (nextRecommender?.id !== currentUserId);
-              })()}
+              disabled={
+                isApproving ||
+                (() => {
+                  if (selectedItemType !== 'order' || !selectedItem) return false;
+                  const order = selectedItem as TravelOrder;
+                  const currentUserId = user?.id || user?._id;
+                  const nextRecommender = order.recommendedBy?.[order.recommendersWhoApproved?.length || 0];
+                  return (nextRecommender?._id !== currentUserId) && (nextRecommender?.id !== currentUserId);
+                })()
+              }
             >
-              <Text style={styles.buttonText}>{selectedItemType === 'slip' ? 'Approve' : 'Recommend'}</Text>
+              <Text style={styles.buttonText}>
+                {isApproving ? 'Submitting…' : selectedItemType === 'slip' ? 'Approve' : 'Recommend'}
+              </Text>
             </Pressable>
             <Pressable style={[styles.button, styles.cancelButton]} onPress={() => setReviewModalVisible(false)}>
               <Text style={styles.buttonText}>Cancel</Text>

@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { API_URL } from '../config/api';
+import { useServerEvents } from '../hooks/useServerEvents';
 
 // --- Type Definitions ---
 interface Employee {
@@ -104,8 +105,10 @@ const SecurityDashboardScreen = () => {
   const [error, setError] = useState('');
   const navigation = useNavigation<SecurityDashboardNavigationProp>();
 
-  const fetchData = async () => {
-    setIsLoading(true);
+  const fetchData = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setIsLoading(true);
+    }
     setError('');
     try {
       const token = await AsyncStorage.getItem('userToken');
@@ -129,6 +132,13 @@ const SecurityDashboardScreen = () => {
       fetchData();
     }, [])
   );
+
+  useServerEvents({
+    enabled: Platform.OS === 'web',
+    onDataChange: () => {
+      void fetchData({ silent: true });
+    },
+  });
 
   const handleLogout = async () => {
     await AsyncStorage.multiRemove(['userToken', 'userRole']);

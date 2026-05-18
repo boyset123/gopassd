@@ -15,7 +15,7 @@ import L from 'leaflet';
 import polyline from '@mapbox/polyline';
 import { API_URL, API_BASE_URL } from '../config/api';
 import { FEATURE_CTC_ENABLED } from '../config/featureFlags';
-import { useSocket } from '../config/SocketContext';
+import { useServerEvents } from '../hooks/useServerEvents';
 import { getTravelOrderPrintHtml } from '../utils/travelOrderPrintHtml';
 import { getPassSlipPrintHtml } from '../utils/passSlipPrintHtml';
 import { stripArrivalStatusDisplaySuffix } from '../utils/arrivalStatusDisplay';
@@ -362,7 +362,6 @@ const HrpDashboardScreen = () => {
   const [isMapModalVisible, setIsMapModalVisible] = useState(false);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [mapData, setMapData] = useState<{ lat: number; lon: number; polyline: Array<[number, number]> | null, startLat: number | null, startLon: number | null, startName: string | null, destName: string | null } | null>(null);
-  const socket = useSocket();
   const [activeTab, setActiveTab] = useState<'slips' | 'orders'>('slips');
   const [approvedPassSlips, setApprovedPassSlips] = useState<PassSlip[]>([]);
   const [presidentName, setPresidentName] = useState('');
@@ -514,49 +513,22 @@ const HrpDashboardScreen = () => {
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [fetchData]);
 
-  useEffect(() => {
-    if (!socket) return;
-
-    const refreshFromSocket = (message?: string) => {
+  useServerEvents({
+    enabled: Platform.OS === 'web',
+    currentUserId,
+    onDataChange: (message) => {
       void fetchData({ silent: true });
       if (message) showLiveUpdate(message);
-    };
-
-    const handleDataUpdate = () => {
-      refreshFromSocket('New activity — your dashboard has been updated.');
-    };
-
-    const handleNewNotification = (payload: {
-      userId?: string;
-      notification?: { message?: string };
-    }) => {
+    },
+    onNotification: (payload) => {
       if (!currentUserId || !payload.userId || String(payload.userId) !== String(currentUserId)) {
         return;
       }
       const text = payload.notification?.message?.trim();
-      refreshFromSocket(text || 'You have a new notification — your dashboard has been updated.');
-    };
-
-    socket.on('passSlipStatusUpdate', handleDataUpdate);
-    socket.on('passSlipVerified', handleDataUpdate);
-    socket.on('passSlipReturned', handleDataUpdate);
-    socket.on('travelOrderDataChanged', handleDataUpdate);
-    socket.on('passSlipDeleted', handleDataUpdate);
-    socket.on('travelOrderDeleted', handleDataUpdate);
-    socket.on('newPassSlip', handleDataUpdate);
-    socket.on('newNotification', handleNewNotification);
-
-    return () => {
-      socket.off('passSlipStatusUpdate', handleDataUpdate);
-      socket.off('passSlipVerified', handleDataUpdate);
-      socket.off('passSlipReturned', handleDataUpdate);
-      socket.off('travelOrderDataChanged', handleDataUpdate);
-      socket.off('passSlipDeleted', handleDataUpdate);
-      socket.off('travelOrderDeleted', handleDataUpdate);
-      socket.off('newPassSlip', handleDataUpdate);
-      socket.off('newNotification', handleNewNotification);
-    };
-  }, [socket, fetchData, currentUserId, showLiveUpdate]);
+      void fetchData({ silent: true });
+      showLiveUpdate(text || 'You have a new notification — your dashboard has been updated.');
+    },
+  });
 
   useEffect(() => {
     let tempRecords = records;

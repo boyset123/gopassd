@@ -9,6 +9,7 @@ const passSlipRoutes = require('./routes/passSlipRoutes');
 const travelOrderRoutes = require('./routes/travelOrderRoutes');
 const recordsRoutes = require('./routes/recordsRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const eventsRoutes = require('./routes/eventsRoutes');
 const admin = require('firebase-admin');
 const fs = require('fs');
 const http = require('http');
@@ -126,6 +127,7 @@ app.use('/api/pass-slips', passSlipRoutes);
 app.use('/api/travel-orders', travelOrderRoutes);
 app.use('/api/records', recordsRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/events', eventsRoutes);
 
 io.on('connection', (socket) => {
   console.log('a user connected:', socket.id);

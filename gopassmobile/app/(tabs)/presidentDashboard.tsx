@@ -13,6 +13,7 @@ import { useSocket } from '../../config/SocketContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { NotificationsModal, type Notification } from '../../components/NotificationsModal';
 import TravelOrderForm from '../../components/TravelOrderForm';
+import { getAxiosErrorMessage, isStaleApprovalRequestError } from '../../utils/approvalErrors';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
@@ -144,6 +145,7 @@ export default function PresidentDashboard() {
   const [rejectTarget, setRejectTarget] = useState<{ type: ItemType; id: string } | null>(null);
   const [rejectComment, setRejectComment] = useState('');
   const [isRejecting, setIsRejecting] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
 
   // Defer mounting signature canvas so iOS Modal has layout before WebView (fixes "only appears when exit")
   useEffect(() => {
@@ -320,26 +322,28 @@ export default function PresidentDashboard() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedItem || !selectedItemType) return;
+    if (!selectedItem || !selectedItemType || isApproving) return;
 
     if (!approverSignature) {
       Alert.alert('Signature Required', 'Please provide your signature to proceed.');
       return;
     }
 
+    setIsApproving(true);
+
     try {
       const token = await AsyncStorage.getItem('userToken');
       const headers = { 'x-auth-token': token };
       let url = '';
-      let payload: any = { approverSignature };
+      let payload: { approverSignature: string; status?: string } = { approverSignature };
       let successMessage = '';
 
       if (selectedItemType === 'slip') {
         url = `${API_URL}/pass-slips/${selectedItem._id}/status`;
         payload.status = 'Recommended';
-        successMessage = `Pass slip has been recommended.`;
-      } else { // order
-                url = `${API_URL}/travel-orders/${selectedItem._id}/approve-president`;
+        successMessage = 'Pass slip has been recommended.';
+      } else {
+        url = `${API_URL}/travel-orders/${selectedItem._id}/approve-president`;
         payload.status = 'President Approved';
         successMessage = 'Travel order has been approved.';
       }
@@ -350,18 +354,25 @@ export default function PresidentDashboard() {
       setReviewModalVisible(false);
       setSelectedItem(null);
       setSelectedItemType(null);
-      fetchData(); // Refresh the list
+      fetchData();
     } catch (err: unknown) {
-      const axiosMsg =
-        axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object'
-          ? (err.response.data as { message?: string }).message
-          : undefined;
+      if (isStaleApprovalRequestError(err)) {
+        setReviewModalVisible(false);
+        setSelectedItem(null);
+        setSelectedItemType(null);
+        fetchData();
+        return;
+      }
       Alert.alert(
         'Error',
-        axiosMsg ||
+        getAxiosErrorMessage(
+          err,
           `Failed to update the ${selectedItemType === 'slip' ? 'pass slip' : 'travel order'}.`
+        )
       );
       console.error(err);
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -563,10 +574,14 @@ export default function PresidentDashboard() {
             {selectedItemType === 'slip' ? renderPassSlipReview() : renderTravelOrderReview()}
           </ScrollView>
           <View style={styles.modalButtonContainer}>
-            <Pressable style={[styles.button, styles.approveButton]} onPress={handleSubmit}>
-              <Text style={styles.buttonText}>Approve</Text>
+            <Pressable
+              style={[styles.button, styles.approveButton, isApproving && { opacity: 0.6 }]}
+              onPress={handleSubmit}
+              disabled={isApproving}
+            >
+              <Text style={styles.buttonText}>{isApproving ? 'Submitting…' : 'Approve'}</Text>
             </Pressable>
-            <Pressable style={[styles.button, styles.cancelButton]} onPress={() => setReviewModalVisible(false)}>
+            <Pressable style={[styles.button, styles.cancelButton]} onPress={() => setReviewModalVisible(false)} disabled={isApproving}>
               <Text style={styles.buttonText}>Cancel</Text>
             </Pressable>
           </View>

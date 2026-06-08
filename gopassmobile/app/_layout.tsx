@@ -3,6 +3,7 @@ import { useFonts } from 'expo-font';
 import { FontAwesome } from '@expo/vector-icons';
 import { useEffect } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SocketProvider } from '../config/SocketContext';
 import { NotificationsProvider } from '../contexts/NotificationsContext';
 
@@ -29,14 +30,16 @@ export default function RootLayout() {
   }
 
   return (
-    <SocketProvider>
-      <NotificationsProvider>
-      <Stack>
-      <Stack.Screen name="index" options={{ headerShown: false }} />
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="auth" options={{ headerShown: false, animation: 'none' }} />
-      </Stack>
-      </NotificationsProvider>
-    </SocketProvider>
+    <SafeAreaProvider>
+      <SocketProvider>
+        <NotificationsProvider>
+          <Stack>
+            <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="auth" options={{ headerShown: false, animation: 'none' }} />
+          </Stack>
+        </NotificationsProvider>
+      </SocketProvider>
+    </SafeAreaProvider>
   );
 }

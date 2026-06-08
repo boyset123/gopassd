@@ -9,6 +9,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
 import { API_URL } from '../../config/api';
+import { ModalActionFooter } from '../../components/ModalActionFooter';
 
 function resolveProfilePictureUri(pathOrUrl: string, apiUrl: string): string {
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
@@ -403,14 +404,14 @@ export default function ProfileScreen() {
                 onChangeText={setSurname}
                 placeholder="Surname"
               />
-              <View style={styles.modalButtonContainer}>
+              <ModalActionFooter style={styles.modalButtonContainer}>
                 <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setEditNameModalVisible(false)} disabled={isUpdating}>
                   <Text style={styles.modalButtonText}>Cancel</Text>
                 </Pressable>
                 <Pressable style={[styles.modalButton, styles.saveButton]} onPress={handleUpdateName} disabled={isUpdating}>
                   {isUpdating ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Save</Text>}
                 </Pressable>
-              </View>
+              </ModalActionFooter>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -458,14 +459,14 @@ export default function ProfileScreen() {
                 placeholder="Confirm New Password"
                 secureTextEntry
               />
-              <View style={styles.modalButtonContainer}>
+              <ModalActionFooter style={styles.modalButtonContainer}>
                 <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setChangePasswordModalVisible(false)} disabled={isUpdating}>
                   <Text style={styles.modalButtonText}>Cancel</Text>
                 </Pressable>
                 <Pressable style={[styles.modalButton, styles.saveButton]} onPress={handleChangePassword} disabled={isUpdating}>
                   {isUpdating ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Save</Text>}
                 </Pressable>
-              </View>
+              </ModalActionFooter>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -484,14 +485,14 @@ export default function ProfileScreen() {
             <Text style={styles.logoutConfirmText}>
               Are you sure you want to log out? You will need to sign in again to continue.
             </Text>
-            <View style={styles.modalButtonContainer}>
+            <ModalActionFooter style={styles.modalButtonContainer}>
               <Pressable style={[styles.modalButton, styles.logoutStayButton]} onPress={cancelLogout}>
                 <Text style={styles.modalButtonText}>Stay Logged In</Text>
               </Pressable>
               <Pressable style={[styles.modalButton, styles.logoutConfirmButton]} onPress={confirmLogout}>
                 <Text style={styles.modalButtonText}>Logout</Text>
               </Pressable>
-            </View>
+            </ModalActionFooter>
           </View>
         </View>
       </Modal>
@@ -547,7 +548,7 @@ export default function ProfileScreen() {
                 )}
               />
             )}
-            <View style={styles.modalButtonContainer}>
+            <ModalActionFooter style={styles.modalButtonContainer}>
               <Pressable
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={closeOicPicker}
@@ -562,7 +563,7 @@ export default function ProfileScreen() {
               >
                 {isSavingOic ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Clear</Text>}
               </Pressable>
-            </View>
+            </ModalActionFooter>
           </View>
         </View>
       </Modal>

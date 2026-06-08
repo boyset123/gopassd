@@ -10,6 +10,7 @@ import { CameraView, Camera } from 'expo-camera';
 import { FontAwesome } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { API_URL } from '../../config/api';
+import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { useSocket } from '../../config/SocketContext';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
@@ -756,7 +757,7 @@ export default function SecurityDashboard() {
                 )}
               </View>
             </ScrollView>
-            <View style={styles.modalButtonContainer}>
+            <ModalActionFooter style={styles.modalButtonContainer} basePadding={16}>
               {scannedData.status === 'Approved' && (() => {
                 const depMoment = getDepartureMoment(scannedData);
                 const canVerifyDeparture = depMoment != null && new Date() >= depMoment;
@@ -828,7 +829,7 @@ export default function SecurityDashboard() {
               >
                 <Text style={styles.vModalButtonSecondaryText}>Back to scanner</Text>
               </Pressable>
-            </View>
+            </ModalActionFooter>
           </View>
         </Modal>
       )}
@@ -1229,7 +1230,7 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     justifyContent: 'flex-start',
     alignItems: 'stretch',
-    paddingVertical: 16,
+    paddingTop: 16,
     paddingHorizontal: 20,
     backgroundColor: '#f1f5f9',
     borderTopWidth: 1,

@@ -79,7 +79,7 @@ export interface TravelOrderFormWebProps {
   onChooseSignature?: (type: SignatureType) => void;
 }
 
-const formatDate = (dateString: string, includeTime = false) => {
+const formatDate = (dateString: string) => {
   if (!dateString) return '';
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return '';
@@ -87,17 +87,21 @@ const formatDate = (dateString: string, includeTime = false) => {
   const month = date.toLocaleString('en-US', { month: 'long' });
   const day = date.getDate();
   const year = date.getFullYear();
-  const base = `${month} ${day}, ${year}`;
+  return `${month} ${day}, ${year}`;
+};
 
-  if (!includeTime) return base;
+const formatTravelPeriodDate = (dateString: string) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '';
+  const period = date.getHours() < 12 ? 'AM' : 'PM';
+  return `${formatDate(dateString)} (${period})`;
+};
 
-  const time = date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-
-  return `${base} : ${time}`;
+const normalizeTravelOrderNo = (value: string | undefined | null) => {
+  const no = normalizeInline(value);
+  if (!no) return '';
+  return no.replace(/\s*[-–—]\s*/g, '-');
 };
 
 const formatSalary = (salary: string | undefined) =>
@@ -188,7 +192,7 @@ const formatNamesList = (names: string[]): string => {
 };
 
 const formatTravelOrderNoDisplay = (travelOrderNo: string | undefined, dateString: string | undefined) => {
-  const no = normalizeInline(travelOrderNo);
+  const no = normalizeTravelOrderNo(travelOrderNo);
   if (no) return no;
 
   const date = new Date(dateString || '');
@@ -196,8 +200,11 @@ const formatTravelOrderNoDisplay = (travelOrderNo: string | undefined, dateStrin
 
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const yy = String(date.getFullYear()).slice(-2);
-  return `${mm} - ____ - ${yy}`;
+  return `${mm}-____-${yy}`;
 };
+
+const RECOMMENDER_ROLE_LABEL = 'Supervising Administrative Officer';
+const PRESIDENT_ROLE_LABEL = 'SUC President III';
 
 export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
   order,
@@ -407,7 +414,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
       const mm = String(dateForNo.getMonth() + 1).padStart(2, '0');
       const yy = String(yyyy).slice(-2);
       const seq4 = String(seq).padStart(4, '0');
-      const fullNo = `${mm} - ${seq4} - ${yy}`;
+      const fullNo = `${mm}-${seq4}-${yy}`;
 
       if (!cancelled) setGeneratedTravelOrderNo(fullNo);
 
@@ -434,8 +441,8 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
 
   const travelOrderNoDisplay =
     travelOrderNoDraft !== undefined
-      ? normalizeInline(travelOrderNoDraft) || formatTravelOrderNoDisplay('', order.date)
-      : normalizeInline(order.travelOrderNo) ||
+      ? normalizeTravelOrderNo(travelOrderNoDraft) || formatTravelOrderNoDisplay('', order.date)
+      : normalizeTravelOrderNo(order.travelOrderNo) ||
         generatedTravelOrderNo ||
         formatTravelOrderNoDisplay(order.travelOrderNo, order.date);
 
@@ -473,10 +480,13 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
       const isOicSigned = !!oicSignedForName;
       const displayName = isOicSigned ? (oicSignerName || recommender.name || '—') : (recommender.name || '—');
 
+      const recHeader =
+        chiefList.length > 1 ? `RECOMMENDED BY ${index + 1}:` : 'RECOMMENDED BY:';
+
       if (viewOnly) {
         return (
           <View key={recommenderId || `${recommender.name}-${index}`} style={styles.signatureBlockLeft}>
-            <Text style={styles.signatureHeader}>RECOMMENDED BY {index + 1}:</Text>
+            <Text style={styles.signatureHeader}>{recHeader}</Text>
             <View style={styles.docSignatureDisplay}>
               {existingSignature ? (
                 <View style={styles.signatureImageContainer}>
@@ -491,7 +501,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
                 <Text style={styles.signatureName}>{displayName}</Text>
               </View>
             </View>
-            <Text style={styles.signatureTitle}>Immediate Chief</Text>
+            <Text style={styles.signatureTitle}>{RECOMMENDER_ROLE_LABEL}</Text>
             {isOicSigned && (
               <Text style={styles.oicNote}>(OIC for {oicSignedForName})</Text>
             )}
@@ -506,7 +516,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
 
       return (
         <View key={recommenderId || `${recommender.name}-${index}`} style={styles.signatureBlockLeft}>
-          <Text style={styles.signatureHeader}>RECOMMENDED BY {index + 1}:</Text>
+          <Text style={styles.signatureHeader}>{recHeader}</Text>
           <View style={styles.docSignatureDisplay}>
             {hasSigned && existingSignature ? (
               <View style={styles.signatureImageContainer}>
@@ -541,7 +551,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
               <Text style={styles.signatureName}>{displayName}</Text>
             </View>
           </View>
-          <Text style={styles.signatureTitle}>Immediate Chief</Text>
+          <Text style={styles.signatureTitle}>{RECOMMENDER_ROLE_LABEL}</Text>
           {isOicSigned && (
             <Text style={styles.oicNote}>(OIC for {oicSignedForName})</Text>
           )}

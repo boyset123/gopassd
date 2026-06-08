@@ -14,6 +14,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { API_URL } from '../../config/api';
+import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { Picker } from '@react-native-picker/picker';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
@@ -1082,7 +1083,7 @@ const CreateTravelOrderScreen = () => {
                     </View>
                 )}
             </View>
-            <View style={[styles.confirmButtonContainer, { paddingBottom: insets.bottom + 20 }]}>
+            <ModalActionFooter style={styles.confirmButtonContainer} basePadding={20}>
               <Pressable
                 style={({ pressed }) => [
                   styles.mapConfirmButton,
@@ -1095,7 +1096,7 @@ const CreateTravelOrderScreen = () => {
                 <FontAwesome name="check" size={18} color="#fff" style={{ marginRight: 8 }} />
                 <Text style={styles.confirmButtonText}>Confirm Destination</Text>
               </Pressable>
-            </View>
+            </ModalActionFooter>
         </View>
       </Modal>
 
@@ -1807,14 +1808,14 @@ const CreateTravelOrderScreen = () => {
                 </View>
 
               </ScrollView>
-              <View style={styles.modalButtonContainer}>
+              <ModalActionFooter style={styles.modalButtonContainer}>
                 <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setIsPreviewVisible(false)} disabled={isSubmitting}>
                   <Text style={styles.buttonText}>Close</Text>
                 </Pressable>
                 <Pressable style={[styles.modalButton, styles.submitButton]} onPress={handleSubmit} disabled={isSubmitting}>
                   {isSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Submit</Text>}
                 </Pressable>
-              </View>
+              </ModalActionFooter>
             </View>
           </View>
         </Modal>

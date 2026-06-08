@@ -177,7 +177,7 @@ interface TravelOrderFormProps {
   supportingAttachmentsOutsidePaper?: boolean;
 }
 
-const formatDate = (dateString: string, includeTime = false) => {
+const formatDate = (dateString: string) => {
   if (!dateString) return '';
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return '';
@@ -185,17 +185,22 @@ const formatDate = (dateString: string, includeTime = false) => {
   const month = date.toLocaleString('en-US', { month: 'long' });
   const day = date.getDate();
   const year = date.getFullYear();
-  const base = `${month} ${day}, ${year}`;
+  return `${month} ${day}, ${year}`;
+};
 
-  if (!includeTime) return base;
+/** Departure/arrival lines on the printed form use (AM) / (PM), not clock time. */
+const formatTravelPeriodDate = (dateString: string) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '';
+  const period = date.getHours() < 12 ? 'AM' : 'PM';
+  return `${formatDate(dateString)} (${period})`;
+};
 
-  const time = date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-
-  return `${base} : ${time}`;
+const normalizeTravelOrderNo = (value: string | undefined | null) => {
+  const no = normalizeInline(value);
+  if (!no) return '';
+  return no.replace(/\s*[-–—]\s*/g, '-');
 };
 
 const formatSalary = (salary: string | undefined) =>
@@ -225,7 +230,7 @@ const formatNamesList = (names: string[]): string => {
 };
 
 const formatTravelOrderNoDisplay = (travelOrderNo: string | undefined, dateString: string | undefined) => {
-  const no = normalizeInline(travelOrderNo);
+  const no = normalizeTravelOrderNo(travelOrderNo);
   if (no) return no;
 
   const date = new Date(dateString || '');
@@ -233,8 +238,11 @@ const formatTravelOrderNoDisplay = (travelOrderNo: string | undefined, dateStrin
 
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const yy = String(date.getFullYear()).slice(-2);
-  return `${mm} - ____ - ${yy}`;
+  return `${mm}-____-${yy}`;
 };
+
+const RECOMMENDER_ROLE_LABEL = 'Supervising Administrative Officer';
+const PRESIDENT_ROLE_LABEL = 'SUC President III';
 
 export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
   order,
@@ -399,7 +407,7 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
       const mm = String(dateForNo.getMonth() + 1).padStart(2, '0');
       const yy = String(yyyy).slice(-2);
       const seq4 = String(seq).padStart(4, '0');
-      const fullNo = `${mm} - ${seq4} - ${yy}`;
+      const fullNo = `${mm}-${seq4}-${yy}`;
 
       if (!cancelled) setGeneratedTravelOrderNo(fullNo);
 
@@ -445,71 +453,47 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
     <>
     <View style={styles.a4Stack}>
       <View style={[styles.a4Page, { width: a4PageWidth }]}>
-        <View style={styles.docHeader}>
-          <View style={styles.universityNameContainer}>
-            <View style={styles.headerRule} />
-            <Text style={styles.universityName}>
-              DAVAO ORIENTAL{'\n'}STATE UNIVERSITY
-            </Text>
-            <Text style={styles.universityMotto}>{'"A University of excellence, innovation, and inclusion"'}</Text>
-            <View style={styles.headerRule} />
-          </View>
-          <Image source={require('../assets/images/dorsulogo.png')} style={styles.logo} />
-          <View style={styles.docCodeCard}>
-            <View style={styles.docCodeTopBar}>
-              <Text style={styles.docCodeTopBarText}>Document Code No.</Text>
-            </View>
-            <View style={styles.docCodeValueRow}>
-              <Text style={styles.docCodeValueText}>FM-DOrSU-HRMO-01</Text>
-            </View>
-            <View style={styles.docCodeTable}>
-              <View style={styles.docCodeTableHeaderRow}>
-                <Text style={styles.docCodeTableHeaderCell}>Issue Status</Text>
-                <Text style={[styles.docCodeTableHeaderCell, styles.docCodeTableNarrowCol]}>Rev No.</Text>
-                <Text style={styles.docCodeTableHeaderCell}>Effective Date</Text>
-                <Text style={[styles.docCodeTableHeaderCell, styles.docCodeTableNarrowCol, styles.docCodeTableLastCell]}>Page No.</Text>
-              </View>
-              <View style={styles.docCodeTableValueRow}>
-                <Text style={styles.docCodeTableValueCell}>01</Text>
-                <Text style={[styles.docCodeTableValueCell, styles.docCodeTableNarrowCol]}>00</Text>
-                <Text style={styles.docCodeTableValueCell}>07.22.2022</Text>
-                <Text style={[styles.docCodeTableValueCell, styles.docCodeTableNarrowCol, styles.docCodeTableLastCell]}>1 of 1</Text>
-              </View>
-            </View>
+        <View style={styles.logoHeaderCenter}>
+          <Image source={require('../assets/images/dorsulogo.png')} style={styles.logoCentered} />
+        </View>
+
+        <View style={styles.titleDateRow}>
+          <Text style={styles.docTitle}>TRAVEL ORDER FORM</Text>
+          <View style={styles.dateBlockRight}>
+            <Text style={styles.dateValueUnderlined}>{formatDate(order.date)}</Text>
+            <Text style={styles.dateLabelBelow}>Date</Text>
           </View>
         </View>
 
-        <Text style={styles.docTitle}>TRAVEL ORDER FORM</Text>
-        <Text style={styles.revisedText}>Revised 1996</Text>
-
         <View style={styles.formRow}>
-          <Text style={styles.formLabel}>Travel Order No.</Text>
+          <Text style={styles.formLabel}>Order No.</Text>
           <Text style={[styles.formValueUnderlined, styles.formValueTravelOrderNo]}>
-            {normalizeInline(order.travelOrderNo) || generatedTravelOrderNo || formatTravelOrderNoDisplay(order.travelOrderNo, order.date)}
+            {normalizeTravelOrderNo(order.travelOrderNo) ||
+              generatedTravelOrderNo ||
+              formatTravelOrderNoDisplay(order.travelOrderNo, order.date)}
           </Text>
-          <View style={styles.formDateRight}>
-            <Text style={styles.formLabelDate}>Date</Text>
-            <Text style={styles.formValueDate}>{formatDate(order.date)}</Text>
+        </View>
+
+        <View style={styles.splitRow}>
+          <View style={styles.splitRowLeft}>
+            <Text style={styles.formLabel}>TO:</Text>
+            <Text style={styles.formValueUnderlined}>{formatNamesList(toNames)}</Text>
+          </View>
+          <View style={styles.splitRowRight}>
+            <Text style={styles.formLabel}>POSITION:</Text>
+            <Text style={styles.formValueUnderlined}>{travelOrderPositionLabel(order)}</Text>
           </View>
         </View>
-
-        <View style={styles.formRow}>
-          <Text style={styles.formLabel}>TO:</Text>
-          <Text style={styles.formValueUnderlined}>{formatNamesList(toNames)}</Text>
-        </View>
-
-        <View style={styles.formRow}>
-          <Text style={styles.formLabel}>POSITION:</Text>
-          <Text style={styles.formValueUnderlined}>{travelOrderPositionLabel(order)}</Text>
-        </View>
-        <View style={styles.addressSalaryRow}>
-          <View style={styles.addressGroup}>
+        <View style={styles.splitRow}>
+          <View style={styles.splitRowLeft}>
             <Text style={styles.formLabel}>ADDRESS:</Text>
             <Text style={styles.formValueUnderlined}>{normalizeInline(order.employeeAddress)}</Text>
           </View>
-          <View style={styles.salaryGroup}>
-            <Text style={styles.formLabelSalary}>SALARY:</Text>
-            <Text style={styles.salaryValue}>₱{formatSalary(order.salary)}</Text>
+          <View style={styles.splitRowRight}>
+            <Text style={styles.formLabel}>SALARY:</Text>
+            <Text style={styles.salaryValue}>
+              {formatSalary(order.salary) ? `₱${formatSalary(order.salary)}` : BLANK_OPTIONAL_NOTE_LINE}
+            </Text>
           </View>
         </View>
 
@@ -528,30 +512,27 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
 
         <View style={styles.formRow}>
           <Text style={styles.formLabel}>Date of Departure:</Text>
-          <Text style={styles.formValueUnderlined}>{formatDate(order.departureDate, true)}</Text>
+          <Text style={styles.formValueUnderlined}>{formatTravelPeriodDate(order.departureDate)}</Text>
         </View>
         <View style={styles.formRow}>
           <Text style={styles.formLabel}>Date of Arrival:</Text>
-          <Text style={styles.formValueUnderlined}>{formatDate(order.arrivalDate, true)}</Text>
+          <Text style={styles.formValueUnderlined}>{formatTravelPeriodDate(order.arrivalDate)}</Text>
         </View>
 
         <Text style={styles.infoText}>
           You shall be guided further by the following additional instruction and information on{' '}
-          <Text style={styles.inlineUnderlinedText}>{normalizeInline(order.additionalInfo)}</Text>
-        </Text>
-        <Text style={styles.infoText}>
-          Your travelling expenses in the field will be authorized or allowed under Official Business,{' '}
           <Text style={styles.inlineUnderlinedText}>
-            {displayOptionalNote(order.officialBusinessNote)}
+            {displayOptionalNote(order.additionalInfo)}
           </Text>
-          .
         </Text>
         <Text style={styles.infoText}>
-          Chargeable against Higher Education,{' '}
+          Your traveling expenses in the field will be authorized or allowed under Official Business
+        </Text>
+        <Text style={styles.infoText}>
+          Chargeable against{' '}
           <Text style={styles.inlineUnderlinedText}>
             {displayOptionalNote(order.chargeableAgainstNote)}
           </Text>
-          .
         </Text>
         <Text style={styles.infoText}>
           Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.
@@ -561,7 +542,8 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
           <View style={styles.supportingAttachmentsBlock}>{supportingAttachmentCards}</View>
         ) : null}
 
-        <View style={styles.signatureSection}>
+        <View style={styles.signatureRow}>
+          <View style={styles.signatureColLeft}>
           {(order.recommendedBy || []).map((recommender, index) => {
             const currentApprovedCount = order.recommendersWhoApproved?.length || 0;
             const recommenderId = String(recommender._id || recommender.id || '');
@@ -587,9 +569,14 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
             const isOicSigned = !!oicSignedForName;
             const displayName = isOicSigned ? (oicSignerName || recommender.name) : recommender.name;
 
+            const recHeader =
+              (order.recommendedBy?.length || 0) > 1
+                ? `RECOMMENDED BY ${index + 1}:`
+                : 'RECOMMENDED BY:';
+
             return (
               <View key={recommenderId || `${recommender.name}-${index}`} style={styles.signatureBlockLeft}>
-                <Text style={styles.signatureHeader}>RECOMMENDED BY {index + 1}:</Text>
+                <Text style={styles.signatureHeader}>{recHeader}</Text>
                 <View style={styles.docSignatureDisplay}>
                   {hasSigned && existingSignature ? (
                     <View style={styles.signatureImageContainer}>
@@ -624,17 +611,16 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
                     <Text style={styles.signatureName}>{displayName}</Text>
                   </View>
                 </View>
-                <Text style={styles.signatureTitle}>Immediate Chief</Text>
+                <Text style={styles.signatureTitle}>{RECOMMENDER_ROLE_LABEL}</Text>
                 {isOicSigned && (
                   <Text style={styles.oicNote}>(OIC for {oicSignedForName})</Text>
                 )}
               </View>
             );
           })}
-        </View>
+          </View>
 
-        <View style={styles.signatureSection}>
-          <View style={styles.signatureBlockLeft}>
+          <View style={styles.signatureColRight}>
             <Text style={styles.signatureHeader}>APPROVED BY:</Text>
             <View style={styles.docSignatureDisplay}>
               {presidentCanSign ? (
@@ -668,7 +654,7 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
                 </Text>
               </View>
             </View>
-            <Text style={styles.signatureTitle}>President</Text>
+            <Text style={styles.signatureTitle}>{PRESIDENT_ROLE_LABEL}</Text>
             {order.presidentSignedAsOicFor?.name && (
               <Text style={styles.oicNote}>(OIC for {order.presidentSignedAsOicFor.name})</Text>
             )}
@@ -781,177 +767,80 @@ const styles = StyleSheet.create({
     borderColor: '#e6e6e6',
     borderRadius: 10,
     overflow: 'hidden',
+    ...Platform.select({
+      ios: { fontFamily: 'Times New Roman' },
+      android: { fontFamily: 'serif' },
+      default: { fontFamily: 'Times New Roman' },
+    }),
   },
-  docHeader: {
-    flexDirection: 'row',
+  logoHeaderCenter: {
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
+    marginBottom: 4,
   },
-  universityNameContainer: {
-    flex: 1,
-    alignItems: 'flex-start',
-    justifyContent: 'flex-start',
-    paddingRight: 6,
-  },
-  headerRule: {
-    height: 2,
-    width: '92%',
-    backgroundColor: '#7f93ad',
-    marginVertical: 3,
-  },
-  universityName: {
-    fontSize: 12,
-    fontWeight: '800',
-    textAlign: 'left',
-    color: '#8da2bf',
-    lineHeight: 14,
-    letterSpacing: 0.25,
-  },
-  universityMotto: {
-    fontSize: 5,
-    textAlign: 'left',
-    color: '#6f7f95',
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
-  logo: {
-    width: 60,
-    height: 60,
+  logoCentered: {
+    width: 56,
+    height: 56,
     resizeMode: 'contain',
-    marginHorizontal: 16,
   },
-  docCodeCard: {
-    width: 110,
-    borderWidth: 1,
-    borderColor: '#616a78',
-    backgroundColor: '#fff',
-  },
-  docCodeTopBar: {
-    backgroundColor: '#7c879a',
-    paddingVertical: 1,
-    paddingHorizontal: 3,
-    borderBottomWidth: 1,
-    borderColor: '#616a78',
-  },
-  docCodeTopBarText: {
-    fontSize: 4,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-  },
-  docCodeValueRow: {
-    paddingVertical: 2,
-    paddingHorizontal: 3,
-    borderBottomWidth: 1,
-    borderColor: '#616a78',
-  },
-  docCodeValueText: {
-    fontSize: 6,
-    fontWeight: '800',
-    textAlign: 'center',
-    color: '#6c6c6c',
-    lineHeight: 6,
-  },
-  docCodeTable: {
-    borderTopWidth: 0,
-  },
-  docCodeTableHeaderRow: {
-    flexDirection: 'row',
-    backgroundColor: '#7c879a',
-    borderBottomWidth: 1,
-    borderColor: '#616a78',
-  },
-  docCodeTableValueRow: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-  },
-  docCodeTableHeaderCell: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 4,
-    fontWeight: 'bold',
-    color: '#fff',
-    paddingVertical: 1,
-    borderRightWidth: 1,
-    borderColor: '#616a78',
-  },
-  docCodeTableValueCell: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 3,
-    fontWeight: 'bold',
-    color: '#666',
-    paddingVertical: 1,
-    borderRightWidth: 1,
-    borderColor: '#616a78',
-  },
-  docCodeTableLastCell: {
-    borderRightWidth: 0,
-  },
-  docCodeTableNarrowCol: {
-    flex: 0.6,
+  titleDateRow: {
+    position: 'relative',
+    marginBottom: 8,
+    minHeight: 36,
+    justifyContent: 'center',
   },
   docTitle: {
     textAlign: 'center',
     fontWeight: 'bold',
     fontSize: 14,
-    marginVertical: 4,
-    textDecorationLine: 'underline',
+    color: '#1a4b8c',
+    letterSpacing: 0.5,
   },
-  revisedText: {
-    textAlign: 'left',
+  dateBlockRight: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    alignItems: 'center',
+    minWidth: 88,
+  },
+  dateValueUnderlined: {
     fontSize: 9,
-    marginBottom: 6,
+    fontWeight: 'bold',
+    textDecorationLine: 'underline',
+    textDecorationStyle: 'solid',
+    textAlign: 'center',
+  },
+  dateLabelBelow: {
+    fontSize: 8,
+    marginTop: 1,
+    textAlign: 'center',
   },
   formRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginBottom: 4,
   },
-  addressSalaryRow: {
+  splitRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    justifyContent: 'space-between',
     marginBottom: 4,
-    width: '100%',
+    gap: 8,
   },
-  addressGroup: {
+  splitRowLeft: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     flex: 1,
     minWidth: 0,
-    marginRight: 8,
   },
-  salaryGroup: {
+  splitRowRight: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'flex-start',
     flexShrink: 0,
-    marginLeft: 'auto',
-  },
-  formLabelSalary: {
-    fontSize: 9,
-    marginRight: 5,
+    maxWidth: '42%',
   },
   formLabel: {
     fontSize: 9,
     marginRight: 5,
-  },
-  /** Keeps Date label + value flush to the right edge of the row (no flex gap after the value). */
-  formDateRight: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    flexShrink: 0,
-    marginLeft: 'auto',
-  },
-  formLabelDate: {
-    fontSize: 9,
-    marginRight: 5,
-  },
-  formValueDate: {
-    fontSize: 9,
-    fontWeight: 'bold',
-    textDecorationLine: 'underline',
-    textDecorationStyle: 'solid',
   },
   formValueTravelOrderNo: {
     minWidth: 0,
@@ -1044,16 +933,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#475569',
   },
-  signatureSection: {
-    marginTop: 10,
+  signatureRow: {
+    marginTop: 14,
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  signatureColLeft: {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: '48%',
+  },
+  signatureColRight: {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: '48%',
+    alignItems: 'flex-start',
   },
   signatureBlockLeft: {
     marginBottom: 12,
-    flexBasis: '32%',
-    maxWidth: '32%',
     alignItems: 'flex-start',
   },
   signatureHeader: {

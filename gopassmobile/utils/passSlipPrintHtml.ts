@@ -1,324 +1,306 @@
-/**
- * HTML for expo-print PDF — matches slips.tsx View Details pass slip layout (primary blue theme).
- */
+import { DORSU_LOGO_DATA_URI } from './dorsuLogoDataUri';
 
 export interface PassSlipPrintItem {
+  _id?: string;
   date: string;
-  status: string;
+  status?: string;
   trackingNo?: string;
   destination?: string;
-  employee?: { name?: string };
+  purpose?: string;
   timeOut?: string;
   estimatedTimeBack?: string;
   arrivalTime?: string;
   overdueMinutes?: number;
   additionalInfo?: string;
-  purpose?: string;
+  employee?: { name?: string; role?: string };
+  approvedBy?: { name?: string };
+  approvedBySignedAsOicFor?: { name?: string } | null;
   signature?: string;
   approverSignature?: string;
-  approvedBy?: { name?: string };
-  /** Populated when the first-line approver slot was signed by an OIC standing in for this user. */
-  approvedBySignedAsOicFor?: { name?: string } | null;
+  arrivalStatus?: string;
   rejectionReason?: string;
 }
 
-const escapeHtml = (s: string) =>
-  s
+interface PassSlipPrintOptions {
+  logoDataUri?: string;
+  logoSrc?: string;
+}
+
+const escapeHtml = (value: string) =>
+  value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const normalizeInline = (value: string | undefined | null) =>
-  (value ?? '').replace(/\s+/g, ' ').trim();
+const normalizeInline = (value: string | undefined | null) => (value ?? '').replace(/\s+/g, ' ').trim();
 
-function formatPassSlipDate(dateString: string | undefined): string {
-  if (!dateString) return 'No Date';
+const formatDate = (dateString: string | undefined) => {
+  if (!dateString) return 'N/A';
   const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) return 'No Date';
-  return date.toLocaleDateString();
-}
+  if (Number.isNaN(date.getTime())) return 'N/A';
+  return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+};
 
-function requestedByRoleLabel(viewerRole?: string): string {
-  if (viewerRole === 'Program Head') return 'Program Head';
-  if (viewerRole === 'Faculty Dean') return 'Faculty Dean';
+const requestedRoleLabel = (role: string | undefined) => {
+  if (role === 'Program Head') return 'Program Head';
+  if (role === 'Faculty Dean') return 'Faculty Dean';
   return 'Faculty Staff';
-}
+};
 
-function approvedByRoleLabel(viewerRole?: string): string {
-  if (viewerRole === 'Program Head') return 'Faculty Dean';
-  if (viewerRole === 'Faculty Dean') return 'President';
+const approvedRoleLabel = (role: string | undefined) => {
+  if (role === 'Faculty Dean') return 'President';
+  if (role === 'Program Head') return 'Faculty Dean';
   return 'Immediate Head';
-}
+};
 
-export function getPassSlipPrintHtml(
-  item: PassSlipPrintItem,
-  options?: { viewerRole?: string; logoDataUri?: string }
-): string {
-  const viewerRole = options?.viewerRole;
-  const dest = normalizeInline(item.destination);
-  const approved =
-    item.status === 'Approved' || item.status === 'Completed' || item.status === 'Verified';
-  const rejected = item.status === 'Rejected';
+const formatPrintTime = (value?: string) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+};
 
-  const trackingRow =
-    item.trackingNo != null && String(item.trackingNo).trim() !== ''
-      ? `<div class="meta-item"><span class="field">Tracking No.: </span><span class="val">${escapeHtml(String(item.trackingNo))}</span></div>`
-      : '';
+const statusStamp = (item: PassSlipPrintItem) => {
+  const raw = String(item.arrivalStatus || item.status || '').toLowerCase();
+  const overdue = typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0;
+  const returned =
+    item.arrivalTime &&
+    (item.status === 'Completed' || item.status === 'Verified' || item.status === 'Returned');
 
-  const formatTimeOnly = (value?: string) => {
-    if (!value) return '';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-  };
+  if (raw.includes('overdue') || overdue) {
+    return '<div class="stamp overdue">OVERDUE</div>';
+  }
+  if (raw.includes('on time') || (returned && !overdue)) {
+    return '<div class="stamp ontime">ON TIME</div>';
+  }
+  if (raw.includes('approved') && item.status === 'Approved') {
+    return '<div class="stamp approved">APPROVED</div>';
+  }
+  if (raw.includes('rejected')) return '<div class="stamp rejected">REJECTED</div>';
+  return '';
+};
 
-  const arrivalDisplay = formatTimeOnly(item.arrivalTime);
-  const arrivalRow = arrivalDisplay
-    ? `<div class="row"><span class="field">Actual Time Back: </span><span class="val">${escapeHtml(arrivalDisplay)}</span></div>`
-    : '';
-  const overdueRow =
-    typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0
-      ? `<div class="row overdue-row"><span class="field">Overdue: </span><span class="val overdue-val">${Math.round(item.overdueMinutes)} min</span></div>`
-      : '';
-
+const renderSlipCard = (item: PassSlipPrintItem, logoSrc: string) => {
+  const employeeRole = item.employee?.role;
   const logoSlot =
-    options?.logoDataUri != null && options.logoDataUri.length > 0
-      ? `<img class="logo-img" src="${options.logoDataUri}" alt="" />`
+    logoSrc.length > 0
+      ? `<img class="logo-img" src="${logoSrc}" alt="DOrSU Logo" />`
       : `<div class="logo-box">LOGO</div>`;
+
+  return `
+    <article class="slip-card">
+      <div class="header-row">
+        <div class="uni-wrap">
+          <div class="rule"></div>
+          <div class="uni-name">DAVAO ORIENTAL</div>
+          <div class="uni-name">STATE UNIVERSITY</div>
+          <div class="motto">"A university of excellence, innovation, and inclusion"</div>
+          <div class="rule"></div>
+          <div class="mini-title">PASS SLIP</div>
+        </div>
+        ${logoSlot}
+      </div>
+
+      <div class="meta-row">
+        <div><strong>Tracking No.:</strong> ${escapeHtml(normalizeInline(item.trackingNo) || 'N/A')}</div>
+        <div><strong>Date:</strong> ${escapeHtml(formatDate(item.date))}</div>
+      </div>
+
+      <div class="main-title">PASS SLIP</div>
+      <div class="subtitle">(Within Mati City)</div>
+
+      <div class="field data-field"><strong>Name of Employee:</strong> ${escapeHtml(normalizeInline(item.employee?.name) || 'N/A')}</div>
+      <div class="field data-field"><strong>Time Out:</strong> ${escapeHtml(normalizeInline(item.timeOut) || 'N/A')}</div>
+      <div class="field data-field"><strong>Estimated Time to be Back:</strong> ${escapeHtml(normalizeInline(item.estimatedTimeBack) || 'N/A')}</div>
+      ${
+        formatPrintTime(item.arrivalTime)
+          ? `<div class="field data-field"><strong>Actual Time Back:</strong> ${escapeHtml(formatPrintTime(item.arrivalTime))}</div>`
+          : ''
+      }
+      ${
+        typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0
+          ? `<div class="field data-field overdue-field"><strong>Overdue:</strong> ${Math.round(item.overdueMinutes)} min</div>`
+          : ''
+      }
+      <div class="field data-field"><strong>Destination:</strong> ${escapeHtml(normalizeInline(item.destination) || 'N/A')}</div>
+      <div class="field data-field"><strong>Purpose/s:</strong> ${escapeHtml(normalizeInline(item.purpose) || 'N/A')}</div>
+
+      ${statusStamp(item)}
+
+      <div class="sig-row">
+        <div class="sig-col">
+          <div class="sig-label">Requested by:</div>
+          <div class="sig-box">
+            ${item.signature ? `<img src="${item.signature}" class="sig-img" alt="" />` : '<div class="sig-empty"></div>'}
+            <div class="sig-name">${escapeHtml(normalizeInline(item.employee?.name) || 'N/A')}</div>
+          </div>
+          <div class="sig-role">${escapeHtml(requestedRoleLabel(employeeRole))}</div>
+        </div>
+        <div class="sig-col">
+          <div class="sig-label">Approved by:</div>
+          <div class="sig-box">
+            ${item.approverSignature ? `<img src="${item.approverSignature}" class="sig-img" alt="" />` : '<div class="sig-empty"></div>'}
+            <div class="sig-name">${escapeHtml(normalizeInline(item.approvedBy?.name) || 'N/A')}</div>
+          </div>
+          ${
+            item.approvedBySignedAsOicFor?.name
+              ? `<div class="sig-oic-note">(OIC for ${escapeHtml(normalizeInline(item.approvedBySignedAsOicFor.name))})</div>`
+              : ''
+          }
+          <div class="sig-role">${escapeHtml(approvedRoleLabel(employeeRole))}</div>
+        </div>
+      </div>
+    </article>
+  `;
+};
+
+export function getPassSlipPrintHtml(item: PassSlipPrintItem, options?: PassSlipPrintOptions): string {
+  const resolvedLogoSrc =
+    (options?.logoSrc && options.logoSrc.length > 0 ? options.logoSrc : null) ??
+    (options?.logoDataUri && options.logoDataUri.length > 0 ? options.logoDataUri : null) ??
+    DORSU_LOGO_DATA_URI;
+  const slipCards = Array.from({ length: 4 }, () => renderSlipCard(item, resolvedLogoSrc)).join('');
 
   return `<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Pass Slip</title>
+  <meta charset="utf-8" />
+  <title>Pass Slip${item._id ? ` - ${escapeHtml(item._id)}` : ''}</title>
   <style>
     @page {
       size: A4 portrait;
-      margin: 10mm;
+      margin: 8mm;
     }
+
     * { box-sizing: border-box; }
     html, body {
       margin: 0;
       padding: 0;
-    }
-    body {
-      font-family: sans-serif;
-      background: #fff;
-      color: #011a6b;
       width: 210mm;
-      min-height: 297mm;
+      height: 297mm;
+      background: #fff;
+      font-family: "Times New Roman", Times, serif;
+      color: #000;
     }
+
     .page {
-      max-width: 190mm;
+      width: 194mm;
+      height: 281mm;
       margin: 0 auto;
-      padding: 0 2mm;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      grid-template-rows: repeat(2, calc((281mm - 6mm) / 2));
+      gap: 6mm;
     }
-    .doc-header {
+
+    .slip-card {
+      border: 1px solid #222;
+      border-radius: 4px;
+      padding: 4mm;
       display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 20px;
+      flex-direction: column;
+      break-inside: avoid;
+      overflow: hidden;
+      height: 100%;
+      min-height: 0;
     }
-    .blue-line {
-      height: 2px;
-      background: #011a6b;
-      width: 80%;
-      margin: 2px 0 5px 0;
-    }
-    .uni-name { font-size: 18px; font-weight: bold; color: #011a6b; line-height: 1.2; margin: 0; }
-    .motto { font-size: 10px; font-style: italic; color: rgba(1, 26, 107, 0.75); margin: 4px 0 0 0; }
-    .pass-type { font-size: 14px; font-weight: bold; color: #011a6b; margin-top: 5px; }
+
+    .header-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 4px; }
+    .uni-wrap { flex: 1; min-width: 0; }
+    .rule { height: 1px; background: #111; margin: 1px 0 2px; width: 78%; }
+    .uni-name { font-size: 12px; font-weight: 700; line-height: 1.14; font-family: Arial, sans-serif; }
+    .motto { font-size: 8.5px; font-style: italic; color: #444; margin-top: 1px; }
+    .mini-title { margin-top: 3px; font-size: 11px; font-weight: 700; }
     .logo-box {
-      width: 60px;
-      height: 60px;
-      border: 1px solid rgba(1, 26, 107, 0.22);
-      border-radius: 8px;
-      flex-shrink: 0;
+      width: 40px;
+      height: 40px;
+      border: 1px solid #999;
+      border-radius: 3px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 8px;
-      color: #667085;
+      color: #666;
+      flex-shrink: 0;
     }
     .logo-img {
-      width: 60px;
-      height: 60px;
+      width: 40px;
+      height: 40px;
       object-fit: contain;
       flex-shrink: 0;
       display: block;
     }
+
     .meta-row {
+      margin-top: 4px;
+      font-size: 10.6px;
       display: flex;
       justify-content: space-between;
+      gap: 8px;
       flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 20px;
-      font-size: 14px;
     }
-    .meta-item { color: #011a6b; }
-    .field { color: #011a6b; }
-    .val { font-weight: bold; text-decoration: underline; color: #011a6b; }
-    .main-title { text-align: center; margin-bottom: 20px; }
-    .main-title h1 {
-      font-size: 20px;
-      font-weight: bold;
-      text-decoration: underline;
-      margin: 0;
-      color: #011a6b;
-    }
-    .sub { font-size: 14px; margin: 6px 0 0 0; color: #011a6b; }
-    .row { margin-bottom: 15px; font-size: 14px; color: #011a6b; }
+    .main-title { margin-top: 5px; text-align: center; font-size: 16.5px; font-weight: 800; text-decoration: underline; }
+    .subtitle { text-align: center; font-size: 9.8px; margin-bottom: 5px; }
+
+    .field { font-size: 9.8px; margin-bottom: 2px; line-height: 1.24; }
+    .data-field { font-size: 11.8px; line-height: 1.32; margin-bottom: 3px; }
+    .overdue-field { color: #c53030; }
+    .overdue-field strong { color: #c53030; }
+
     .stamp {
-      text-align: center;
-      margin: 16px 0;
-      font-size: 22px;
-      font-weight: bold;
-      color: #22c55e;
-    }
-    .rejected-banner {
-      text-align: center;
-      margin: 16px 0;
-      font-size: 22px;
-      font-weight: bold;
-      color: #dc3545;
-    }
-    .reason-block { margin: 12px 0; font-size: 13px; color: #011a6b; }
-    .overdue-row { color: #dc3545; }
-    .overdue-val { color: #dc3545; }
-    .sig-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-top: 40px;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-    .sig-box {
-      flex: 0 1 220px;
-      width: 220px;
-      max-width: 46%;
-      min-width: 160px;
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      text-align: left;
-    }
-    .sig-label {
-      font-size: 14px;
-      color: #011a6b;
-      font-weight: 600;
-      margin-bottom: 10px;
-      width: 100%;
-      text-align: left;
-    }
-    /* Signature image centered only over the name strip below, not the full page */
-    .sig-img-area {
-      width: 100%;
-      min-height: 56px;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      margin-bottom: 5px;
-    }
-    .sig-img { max-width: 120px; max-height: 52px; width: auto; height: auto; object-fit: contain; }
-    .sig-name-line {
-      font-size: 14px;
-      font-weight: bold;
-      color: #011a6b;
-      width: 100%;
-      text-align: center;
-      border-bottom: 1px solid #011a6b;
-      padding-bottom: 8px;
-      margin-bottom: 8px;
-    }
-    .sig-role-line {
+      align-self: center;
+      margin: 4px 0 3px;
+      padding: 1px 6px;
+      border: 1px solid currentColor;
       font-size: 12px;
-      color: rgba(1, 26, 107, 0.75);
-      width: 100%;
-      text-align: center;
+      font-weight: 800;
+      transform: rotate(-12deg);
+      opacity: 0.88;
     }
-    .sig-oic-note {
-      font-size: 11px;
-      font-style: italic;
-      color: rgba(1, 26, 107, 0.75);
-      width: 100%;
-      text-align: center;
-      margin-top: 2px;
+    .stamp.approved { color: #2f855a; }
+    .stamp.rejected { color: #c53030; }
+    .stamp.overdue { color: #c53030; }
+    .stamp.ontime { color: #2b6cb0; }
+
+    .sig-row {
+      margin-top: auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
     }
+    .sig-label { font-size: 10.8px; margin-bottom: 4px; font-weight: 700; }
+    .sig-box { min-height: 66px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+    .sig-empty { height: 34px; }
+    .sig-img { max-width: 120px; max-height: 38px; object-fit: contain; }
+    .sig-name {
+      width: 100%;
+      margin-top: 1px;
+      border-bottom: 1px solid #111;
+      text-align: center;
+      font-size: 11.4px;
+      font-weight: 700;
+      padding-bottom: 1px;
+      line-height: 1.1;
+    }
+    .sig-role { text-align: center; font-size: 9.6px; margin-top: 2px; color: #333; }
+    .sig-oic-note { text-align: center; font-size: 8.6px; font-style: italic; color: #555; margin-top: 1px; }
+
     @media print {
-      body { width: auto; min-height: auto; }
-      .page { max-width: 100%; padding: 0; }
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .page {
+        width: 194mm;
+        height: 281mm;
+        margin: 0 auto;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="page">
-    <div class="doc-header">
-      <div>
-        <div class="blue-line"></div>
-        <p class="uni-name">DAVAO ORIENTAL</p>
-        <p class="uni-name">STATE UNIVERSITY</p>
-        <p class="motto">"A university of excellence, innovation, and inclusion"</p>
-        <div class="blue-line"></div>
-        <div class="pass-type">PASS SLIP</div>
-      </div>
-      ${logoSlot}
-    </div>
-
-    <div class="meta-row">
-      ${trackingRow}
-      <div class="meta-item"><span class="field">Date: </span><span class="val">${escapeHtml(formatPassSlipDate(item.date))}</span></div>
-    </div>
-
-    <div class="main-title">
-      <h1>PASS SLIP</h1>
-      <p class="sub">(Within Mati City)</p>
-    </div>
-
-    <div class="row"><span class="field">Name of Employee: </span><span class="val">${escapeHtml(item.employee?.name || 'N/A')}</span></div>
-    <div class="row"><span class="field">Time Out: </span><span class="val">${escapeHtml(item.timeOut || '')}</span></div>
-    <div class="row"><span class="field">Estimated Time to be Back: </span><span class="val">${escapeHtml(item.estimatedTimeBack || '')}</span></div>
-    ${arrivalRow}
-    ${overdueRow}
-    ${dest ? `<div class="row"><span class="field">Destination: </span><span class="val">${escapeHtml(dest)}</span></div>` : ''}
-    <div class="row"><span class="field">Additional Information: </span><span class="val">${escapeHtml(normalizeInline(item.additionalInfo) || '')}</span></div>
-    <div class="row"><span class="field">Purpose/s: </span><span class="val">${escapeHtml(normalizeInline(item.purpose) || '')}</span></div>
-
-    ${approved ? '<div class="stamp">APPROVED</div>' : ''}
-    ${
-      rejected
-        ? `<div class="rejected-banner">REJECTED</div>${
-            item.rejectionReason != null && String(item.rejectionReason).trim() !== ''
-              ? `<div class="reason-block"><strong>Reason:</strong> ${escapeHtml(String(item.rejectionReason).trim())}</div>`
-              : ''
-          }`
-        : ''
-    }
-
-    <div class="sig-row">
-      <div class="sig-box">
-        <div class="sig-label">Requested by:</div>
-        <div class="sig-img-area">
-          ${item.signature ? `<img src="${item.signature}" class="sig-img" alt="" />` : ''}
-        </div>
-        <div class="sig-name-line">${escapeHtml(item.employee?.name || 'N/A')}</div>
-        <div class="sig-role-line">${escapeHtml(requestedByRoleLabel(viewerRole))}</div>
-      </div>
-      <div class="sig-box">
-        <div class="sig-label">Approved by:</div>
-        <div class="sig-img-area">
-          ${item.approverSignature ? `<img src="${item.approverSignature}" class="sig-img" alt="" />` : ''}
-        </div>
-        <div class="sig-name-line">${escapeHtml(item.approvedBy?.name || 'N/A')}</div>
-        <div class="sig-role-line">${escapeHtml(approvedByRoleLabel(viewerRole))}</div>
-        ${item.approvedBySignedAsOicFor?.name
-          ? `<div class="sig-oic-note">(OIC for ${escapeHtml(item.approvedBySignedAsOicFor.name)})</div>`
-          : ''}
-      </div>
-    </div>
-  </div>
+  <section class="page">
+    ${slipCards}
+  </section>
 </body>
 </html>`;
 }

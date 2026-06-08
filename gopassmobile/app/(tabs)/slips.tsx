@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
 import Timer from '../../components/Timer';
+import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { CameraView } from 'expo-camera';
@@ -17,6 +18,7 @@ import { useCreateModalOptional } from '../../contexts/CreateModalContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { NotificationsModal, type Notification } from '../../components/NotificationsModal';
 import TravelOrderForm from '../../components/TravelOrderForm';
+import PassSlipForm from '../../components/PassSlipForm';
 import { getTravelOrderPrintHtml } from '../../utils/travelOrderPrintHtml';
 import { getPassSlipPrintHtml } from '../../utils/passSlipPrintHtml';
 import { assetToImageDataUri } from '../../utils/printImageDataUri';
@@ -93,6 +95,7 @@ interface Submission {
   employeeAddress?: string;
   participants?: string[];
   rejectionReason?: string;
+  arrivalStatus?: string;
 }
 
 const formatDate = (dateString: string | undefined, includeTime: boolean = false) => {
@@ -265,9 +268,11 @@ export default function SlipsScreen() {
           signature: item.signature,
           approverSignature: item.approverSignature,
           approvedBy: item.approvedBy,
+          approvedBySignedAsOicFor: item.approvedBySignedAsOicFor,
           rejectionReason: item.rejectionReason,
+          arrivalStatus: item.arrivalStatus,
         },
-        { viewerRole: user?.role, logoDataUri }
+        { logoDataUri }
       );
     } else {
       html = getTravelOrderPrintHtml(
@@ -908,7 +913,7 @@ export default function SlipsScreen() {
                   multiline
                 />
               )}
-              <View style={styles.modalButtonContainer}>
+              <ModalActionFooter style={styles.modalButtonContainer}>
                 <TouchableOpacity
                   style={[styles.modalButton, styles.cancelModalButton]}
                   onPress={() => {
@@ -930,7 +935,7 @@ export default function SlipsScreen() {
                 >
                   <Text style={styles.submitButtonText}>Submit</Text>
                 </TouchableOpacity>
-              </View>
+              </ModalActionFooter>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -966,78 +971,35 @@ export default function SlipsScreen() {
                 >
                 {selectedSubmission.type === 'Pass Slip' && (
                   <>
-                    <View style={styles.docHeader}>
-                      <View>
-                        <View style={styles.blueLine} />
-                        <Text style={styles.docUniversityName}>DAVAO ORIENTAL</Text>
-                        <Text style={styles.docUniversityName}>STATE UNIVERSITY</Text>
-                        <Text style={styles.docMotto}>"A university of excellence, innovation, and inclusion"</Text>
-                        <View style={styles.blueLine} />
-                        <Text style={styles.docPassSlipHeader}>{selectedSubmission.type.toUpperCase()}</Text>
-                      </View>
-                      <Image source={require('../../assets/images/dorsulogo-removebg-preview (1).png')} style={styles.docLogo} />
-                    </View>
-                    <View style={styles.docMetaRow}>
-                      {selectedSubmission.trackingNo && (
-                        <Text style={styles.docField}>Tracking No.: <Text style={styles.docValue}>{selectedSubmission.trackingNo}</Text></Text>
+                    <PassSlipForm
+                      slip={{
+                        employee: selectedSubmission.employee,
+                        date: selectedSubmission.date,
+                        trackingNo: selectedSubmission.trackingNo,
+                        timeOut: selectedSubmission.timeOut,
+                        estimatedTimeBack: selectedSubmission.estimatedTimeBack,
+                        arrivalTime: selectedSubmission.arrivalTime,
+                        overdueMinutes: selectedSubmission.overdueMinutes,
+                        destination: selectedSubmission.destination,
+                        additionalInfo: selectedSubmission.additionalInfo,
+                        purpose: selectedSubmission.purpose,
+                        signature: selectedSubmission.signature,
+                        approverSignature: selectedSubmission.approverSignature,
+                        approvedBy: selectedSubmission.approvedBy,
+                        approvedBySignedAsOicFor: selectedSubmission.approvedBySignedAsOicFor,
+                        status: selectedSubmission.status,
+                        arrivalStatus: selectedSubmission.arrivalStatus,
+                      }}
+                      viewerRole={user?.role}
+                    />
+                    {selectedSubmission.status === 'Rejected' &&
+                      selectedSubmission.rejectionReason != null &&
+                      String(selectedSubmission.rejectionReason).trim() !== '' && (
+                        <View style={[styles.reasonNote, styles.reasonNoteModal]}>
+                          <Text style={styles.reasonNoteLabel}>Rejection reason</Text>
+                          <Text style={styles.reasonNoteText}>{String(selectedSubmission.rejectionReason).trim()}</Text>
+                        </View>
                       )}
-                      <Text style={styles.docField}>Date: <Text style={styles.docValue}>{selectedSubmission.date ? new Date(selectedSubmission.date).toLocaleDateString() : 'No Date'}</Text></Text>
-                    </View>
-                    <View style={styles.docMainTitleContainer}>
-                      <Text style={styles.docMainTitle}>PASS SLIP</Text>
-                      <Text style={styles.docSubTitle}>(Within Mati City)</Text>
-                    </View>
-                    <View style={styles.docRow}><Text style={styles.docField}>Name of Employee: <Text style={styles.docValue}>{selectedSubmission.employee?.name}</Text></Text></View>
-                    <View style={styles.docRow}><Text style={styles.docField}>Time Out: <Text style={styles.docValue}>{selectedSubmission.timeOut}</Text></Text></View>
-                    <View style={styles.docRow}><Text style={styles.docField}>Estimated Time to be Back: <Text style={styles.docValue}>{selectedSubmission.estimatedTimeBack}</Text></Text></View>
-                    {selectedSubmission.arrivalTime && (
-                      <View style={styles.docRow}><Text style={styles.docField}>Actual Time Back: <Text style={styles.docValue}>{new Date(selectedSubmission.arrivalTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</Text></Text></View>
-                    )}
-                    {typeof selectedSubmission.overdueMinutes === 'number' && selectedSubmission.overdueMinutes > 0 && (
-                      <View style={styles.docRow}><Text style={styles.docField}>Overdue: <Text style={[styles.docValue, styles.overdueValue]}>{Math.round(selectedSubmission.overdueMinutes)} min</Text></Text></View>
-                    )}
-                    <View style={styles.docRow}><Text style={styles.docField}>Additional Information: <Text style={styles.docValue}>{selectedSubmission.additionalInfo}</Text></Text></View>
-                    <View style={styles.docRow}><Text style={styles.docField}>Purpose/s: <Text style={styles.docValue}>{selectedSubmission.purpose}</Text></Text></View>
-
-                    {(selectedSubmission.status === 'Approved' || selectedSubmission.status === 'Completed' || selectedSubmission.status === 'Verified') && (
-                      <View style={styles.approvedStampContainer}>
-                        <Text style={styles.approvedStamp}>APPROVED</Text>
-                      </View>
-                    )}
-                    {selectedSubmission.status === 'Rejected' && (
-                      <>
-                        <View style={styles.rejectedStampContainer}>
-                          <Text style={styles.rejectedStamp}>REJECTED</Text>
-                        </View>
-                        {(selectedSubmission.rejectionReason != null && String(selectedSubmission.rejectionReason).trim() !== '') && (
-                          <View style={[styles.reasonNote, styles.reasonNoteModal]}>
-                            <Text style={styles.reasonNoteLabel}>Rejection reason</Text>
-                            <Text style={styles.reasonNoteText}>{String(selectedSubmission.rejectionReason).trim()}</Text>
-                          </View>
-                        )}
-                      </>
-                    )}
-                    <View style={styles.docSignatureContainer}>
-                      <View style={styles.docSignatureBox}>
-                        <Text style={styles.docField}>Requested by:</Text>
-                        <View style={styles.docSignatureDisplay}>
-                          {selectedSubmission.signature && <Image source={{ uri: selectedSubmission.signature }} style={styles.docSignatureImage} />}
-                          <Text style={styles.docSignatureName}>{selectedSubmission.employee?.name}</Text>
-                        </View>
-                                                <Text style={styles.docSignatureUnderline}>{user?.role === 'Program Head' ? 'Program Head' : user?.role === 'Faculty Dean' ? 'Faculty Dean' : 'Faculty Staff'}</Text>
-                      </View>
-                      <View style={styles.docSignatureBox}>
-                        <Text style={styles.docField}>Approved by:</Text>
-                        <View style={styles.docSignatureDisplay}>
-                          {selectedSubmission.approverSignature && <Image source={{ uri: selectedSubmission.approverSignature }} style={styles.docSignatureImage} />}
-                          <Text style={styles.docSignatureName}>{selectedSubmission.approvedBy?.name || 'N/A'}</Text>
-                        </View>
-                                                <Text style={styles.docSignatureUnderline}>{user?.role === 'Program Head' ? 'Faculty Dean' : user?.role === 'Faculty Dean' ? 'President' : 'Immediate Head'}</Text>
-                        {selectedSubmission.approvedBySignedAsOicFor?.name && (
-                          <Text style={styles.docOicNote}>(OIC for {selectedSubmission.approvedBySignedAsOicFor.name})</Text>
-                        )}
-                      </View>
-                    </View>
                   </>
                 )}
 

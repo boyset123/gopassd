@@ -13,6 +13,8 @@ import { useSocket } from '../../config/SocketContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { NotificationsModal, type Notification } from '../../components/NotificationsModal';
 import TravelOrderForm from '../../components/TravelOrderForm';
+import PassSlipForm from '../../components/PassSlipForm';
+import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { getAxiosErrorMessage, isStaleApprovalRequestError } from '../../utils/approvalErrors';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
@@ -458,7 +460,7 @@ export default function FacultyDeanDashboard() {
                 numberOfLines={3}
                 editable={!isRejecting}
               />
-              <View style={styles.rejectModalButtons}>
+              <ModalActionFooter style={styles.rejectModalButtons}>
                 <Pressable
                   style={[styles.rejectModalButton, styles.rejectModalCancel]}
                   onPress={() => { if (!isRejecting) { setRejectModalVisible(false); setRejectTarget(null); setRejectComment(''); } }}
@@ -473,7 +475,7 @@ export default function FacultyDeanDashboard() {
                 >
                   <Text style={styles.rejectModalConfirmText}>{isRejecting ? 'Rejecting…' : 'Confirm Rejection'}</Text>
                 </Pressable>
-              </View>
+              </ModalActionFooter>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -498,70 +500,27 @@ export default function FacultyDeanDashboard() {
             {selectedItem && (
               <View style={styles.modalContent}>
                 {selectedItemType === 'slip' && (
-                  <>
-                    <View style={styles.docHeader}>
-                      <View>
-                        <View style={styles.blueLine} />
-                        <Text style={styles.docUniversityName}>DAVAO ORIENTAL</Text>
-                        <Text style={styles.docUniversityName}>STATE UNIVERSITY</Text>
-                        <Text style={styles.docMotto}>"A university of excellence, innovation, and inclusion"</Text>
-                        <View style={styles.blueLine} />
-                        <Text style={styles.docPassSlipHeader}>PASS SLIP</Text>
-                      </View>
-                      <Image source={require('../../assets/images/dorsulogo-removebg-preview (1).png')} style={styles.docLogo} />
-                    </View>
-                    <View style={styles.docTitleContainer}>
-                      <View />
-                      <Text style={styles.docField}>Date: <Text style={styles.docValue}>{formatDate(selectedItem.date)}</Text></Text>
-                    </View>
-                    <View style={styles.docMainTitleContainer}>
-                      <Text style={styles.docMainTitle}>PASS SLIP</Text>
-                      <Text style={styles.docSubTitle}>(Within Mati City)</Text>
-                    </View>
-                    <View style={styles.docRow}><Text style={styles.docField}>Name of Employee: <Text style={styles.docValue}>{selectedItem.employee?.name}</Text></Text></View>
-                    <View style={styles.docRow}><Text style={styles.docField}>Time Out: <Text style={styles.docValue}>{(selectedItem as PassSlip).timeOut}</Text></Text></View>
-                    <View style={styles.docRow}><Text style={styles.docField}>Estimated Time to be Back: <Text style={styles.docValue}>{(selectedItem as PassSlip).estimatedTimeBack}</Text></Text></View>
-                    <View style={styles.docRow}><Text style={styles.docField}>Destination: <Text style={styles.docValue}>{(selectedItem as PassSlip).destination}</Text></Text></View>
-                    <View style={styles.docRow}><Text style={styles.docField}>Purpose/s: <Text style={styles.docValue}>{selectedItem.purpose}</Text></Text></View>
-
-                    <View style={styles.docSignatureContainer}>
-                      <View style={styles.docSignatureBox}>
-                        <Text style={styles.docField}>Requested by:</Text>
-                        <View style={styles.docSignatureDisplay}>
-                          {(selectedItem as PassSlip).signature && <Image source={{ uri: (selectedItem as PassSlip).signature }} style={styles.docSignatureImage} />}
-                          <Text style={styles.docSignatureName}>{selectedItem.employee?.name}</Text>
-                        </View>
-                        <Text style={styles.docSignatureUnderline}>Program Head</Text>
-                      </View>
-                      <View style={styles.docSignatureBox}>
-                        <Text style={styles.docField}>Approved by:</Text>
-                        <View style={styles.docSignatureDisplay}>
-                          {approverSignature ? (
-                            <View style={styles.signatureImageContainer}>
-                              <Image source={{ uri: approverSignature }} style={styles.docSignatureImage} />
-                              <Pressable style={styles.redoButton} onPress={() => setApproverSignature(null)}>
-                                <FontAwesome name="undo" size={18} color="#003366" />
-                              </Pressable>
-                            </View>
-                          ) : (
-                            <View style={styles.signatureButtonsContainer}>
-                              <Pressable style={styles.signatureButton} onPress={() => setSignatureType('draw')}>
-                                <FontAwesome name="pencil" size={24} color="#003366" />
-                              </Pressable>
-                              <Pressable style={styles.signatureButton} onPress={() => setSignatureType('upload')}>
-                                <FontAwesome name="upload" size={24} color="#003366" />
-                              </Pressable>
-                            </View>
-                          )}
-                          <Text style={styles.docSignatureName}>{user?.name}</Text>
-                        </View>
-                        <Text style={styles.docSignatureUnderline}>Faculty Dean</Text>
-                        {selectedItem?.nextSigner?.viaOic && selectedItem?.nextSigner?.originalName && (
-                          <Text style={styles.docOicNote}>(OIC for {selectedItem.nextSigner.originalName})</Text>
-                        )}
-                      </View>
-                    </View>
-                  </>
+                  <PassSlipForm
+                    slip={{
+                      employee: selectedItem.employee,
+                      date: selectedItem.date,
+                      trackingNo: (selectedItem as PassSlip).trackingNo,
+                      timeOut: (selectedItem as PassSlip).timeOut,
+                      estimatedTimeBack: (selectedItem as PassSlip).estimatedTimeBack,
+                      destination: (selectedItem as PassSlip).destination,
+                      purpose: selectedItem.purpose,
+                      signature: (selectedItem as PassSlip).signature,
+                      status: selectedItem.status,
+                    }}
+                    requesterRoleLabel="Program Head"
+                    approverCanSign
+                    approverSignature={approverSignature}
+                    onRedoApproverSignature={() => setApproverSignature(null)}
+                    onChooseSignature={(type) => setSignatureType(type)}
+                    approverDisplayName={user?.name}
+                    approverRoleLabel="Faculty Dean"
+                    showStatusOverlay={false}
+                  />
                 )}
 
                 {selectedItemType === 'order' && selectedItem && (
@@ -580,7 +539,7 @@ export default function FacultyDeanDashboard() {
               </View>
             )}
           </ScrollView>
-          <View style={styles.modalButtonContainer}>
+          <ModalActionFooter style={styles.modalButtonContainer}>
             <Pressable 
               style={[
                 styles.button, 
@@ -612,7 +571,7 @@ export default function FacultyDeanDashboard() {
             <Pressable style={[styles.button, styles.cancelButton]} onPress={() => setReviewModalVisible(false)}>
               <Text style={styles.buttonText}>Cancel</Text>
             </Pressable>
-          </View>
+          </ModalActionFooter>
 
           {signatureType === 'draw' && (
             <View style={[StyleSheet.absoluteFillObject, styles.signatureOverlay]}>
@@ -636,14 +595,14 @@ export default function FacultyDeanDashboard() {
                     />
                   )}
                 </View>
-                <View style={styles.signatureActionContainer}>
+                <ModalActionFooter style={styles.signatureActionContainer} basePadding={10}>
                   <Pressable style={[styles.signatureActionButton, styles.cancelButton]} onPress={handleClearSignature}>
                     <Text style={styles.signatureActionButtonText}>Clear</Text>
                   </Pressable>
                   <Pressable style={[styles.signatureActionButton, styles.confirmButton]} onPress={handleConfirmSignature}>
                     <Text style={styles.signatureActionButtonText}>Confirm</Text>
                   </Pressable>
-                </View>
+                </ModalActionFooter>
               </View>
             </View>
           )}
@@ -1133,7 +1092,7 @@ const styles = StyleSheet.create({
   signatureActionContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingVertical: 10,
+    paddingTop: 10,
     paddingHorizontal: 20,
     borderTopWidth: 1,
     borderColor: '#ccc',
@@ -1189,7 +1148,7 @@ const styles = StyleSheet.create({
   modalButtonContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 12,
+    paddingTop: 12,
     paddingHorizontal: 16,
     borderTopWidth: 1,
     borderTopColor: theme.border,

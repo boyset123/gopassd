@@ -14,6 +14,8 @@ import { Picker } from '@react-native-picker/picker';
 import SignatureScreen, { SignatureViewRef } from 'react-native-signature-canvas';
 import * as ImagePicker from 'expo-image-picker';
 import { API_URL } from '../../config/api';
+import { ModalActionFooter } from '../../components/ModalActionFooter';
+import PassSlipForm, { approvedByRoleLabel, requestedByRoleLabel } from '../../components/PassSlipForm';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
@@ -667,7 +669,7 @@ const CreatePassSlipScreen = () => {
                     </View>
                 )}
             </View>
-            <View style={[styles.confirmButtonContainer, { paddingBottom: insets.bottom + 20 }]}>
+            <ModalActionFooter style={styles.confirmButtonContainer} basePadding={20}>
               <Pressable
                 style={({ pressed }) => [
                   styles.mapConfirmButton,
@@ -680,7 +682,7 @@ const CreatePassSlipScreen = () => {
                 <FontAwesome name="check" size={18} color="#fff" style={{ marginRight: 8 }} />
                 <Text style={styles.confirmButtonText}>Confirm Destination</Text>
               </Pressable>
-            </View>
+            </ModalActionFooter>
         </View>
       </Modal>
 
@@ -694,76 +696,23 @@ const CreatePassSlipScreen = () => {
         <View style={styles.previewOverlay}>
           <View style={styles.previewContent}>
             <ScrollView>
-              <View style={styles.docHeader}>
-                <View>
-                  <View style={styles.blueLine} />
-                  <Text style={styles.docUniversityName}>DAVAO ORIENTAL</Text>
-                  <Text style={styles.docUniversityName}>STATE UNIVERSITY</Text>
-                  <Text style={styles.docMotto}>"A university of excellence, innovation, and inclusion"</Text>
-                  <View style={styles.blueLine} />
-                  <Text style={styles.docPassSlipHeader}>PASS SLIP</Text>
-                </View>
-                <Image source={require('../../assets/images/dorsulogo-removebg-preview (1).png')} style={styles.docLogo} />
-              </View>
-
-              <View style={styles.docTitleContainer}>
-                <View />
-                <Text style={styles.docField}>Date: <Text style={styles.docValue}>{date.toLocaleDateString()}</Text></Text>
-              </View>
-
-              <View style={styles.docMainTitleContainer}>
-                  <Text style={styles.docMainTitle}>PASS SLIP</Text>
-                  <Text style={styles.docSubTitle}>(Within Mati City)</Text>
-              </View>
-
-              <View style={styles.docRow}>
-                <Text style={styles.docField}>Name of Employee: <Text style={styles.docValue}>{user?.name}</Text></Text>
-              </View>
-              <View style={styles.docRow}>
-                <Text style={styles.docField}>Time Out: <Text style={styles.docValue}>{timeOut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</Text></Text>
-              </View>
-              <View style={styles.docRow}>
-                <Text style={styles.docField}>Estimated Time to be Back: <Text style={styles.docValue}>{estimatedTimeBack.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</Text></Text>
-              </View>
-              <View style={styles.docRow}>
-                <Text style={styles.docField}>Destination: <Text style={styles.docValue}>{destination}</Text></Text>
-              </View>
-              <View style={styles.docRow}>
-                <Text style={styles.docField}>Purpose/s: <Text style={styles.docValue}>{purpose}</Text></Text>
-              </View>
-
-              <View style={styles.docSignatureContainer}>
-                <View style={styles.docSignatureBox}>
-                  <Text style={styles.docField}>Requested by:</Text>
-                  <View style={styles.docChiefSignatureDisplay}>
-                    {signature ? (
-                      <View style={styles.chiefSignatureImageContainer}>
-                        <Image source={{ uri: signature }} style={styles.docSignatureImage} />
-                      </View>
-                    ) : null}
-                    <View style={styles.chiefSignatureNameContainer}>
-                      <Text style={styles.docSignatureName}>{user?.name}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.docSignatureUnderline}>{user?.role === 'Program Head' ? 'Program Head' : user?.role === 'Faculty Dean' ? 'Faculty Dean' : 'Faculty Staff'}</Text>
-                </View>
-                <View style={styles.docSignatureBox}>
-                  <Text style={styles.docField}>Approved by:</Text>
-                  <View style={styles.docChiefSignatureDisplay}>
-                    <View style={styles.chiefSignatureNameContainer}>
-                      <Text style={styles.docSignatureName}>{immediateHead || '—'}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.docSignatureUnderline}>{user?.role === 'Program Head' ? 'Faculty Dean' : user?.role === 'Faculty Dean' ? 'President' : 'Immediate Head'}</Text>
-                </View>
-              </View>
-
-              <View style={styles.docFooter}>
-                <Text style={styles.docFooterText}>1 copy to security guard on duty</Text>
-                <Text style={styles.docFooterText}>1 copy to be attached to DTR/FSR</Text>
-              </View>
+              <PassSlipForm
+                slip={{
+                  employee: { name: user?.name, role: user?.role },
+                  date: date.toISOString(),
+                  timeOut: timeOut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
+                  estimatedTimeBack: estimatedTimeBack.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
+                  destination,
+                  purpose,
+                  signature: signature || undefined,
+                  approvedBy: { name: immediateHead || '—' },
+                }}
+                requesterRoleLabel={requestedByRoleLabel(user?.role, user?.role)}
+                approverRoleLabel={approvedByRoleLabel(user?.role, user?.role)}
+                showStatusOverlay={false}
+              />
             </ScrollView>
-            <View style={styles.modalButtonContainer}>
+            <ModalActionFooter style={styles.modalButtonContainer}>
               <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setIsPreviewVisible(false)} disabled={isSubmitting}>
                 <Text style={styles.buttonText}>Close</Text>
               </Pressable>
@@ -778,7 +727,7 @@ const CreatePassSlipScreen = () => {
               >
                 {isSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Submit</Text>}
               </Pressable>
-            </View>
+            </ModalActionFooter>
           </View>
         </View>
       </Modal>
@@ -801,14 +750,14 @@ const CreatePassSlipScreen = () => {
                 webStyle={`.m-signature-pad { box-shadow: none; border: none; } .m-signature-pad--body { border-radius: 4px; border: 1px solid #ccc; height: 180px; } .m-signature-pad--footer { display: none; }`}
               />
             </View>
-            <View style={styles.signatureActionContainer}>
+            <ModalActionFooter style={styles.signatureActionContainer}>
               <Pressable style={[styles.signatureActionButton, styles.clearButton]} onPress={handleClearSignature}>
                 <Text style={styles.signatureActionButtonText}>Clear</Text>
               </Pressable>
               <Pressable style={[styles.signatureActionButton, styles.confirmButton]} onPress={handleConfirmSignature}>
                 <Text style={styles.signatureActionButtonText}>Confirm</Text>
               </Pressable>
-            </View>
+            </ModalActionFooter>
           </View>
         </View>
       </Modal>
@@ -1382,7 +1331,7 @@ const styles = StyleSheet.create({
   signatureActionContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingVertical: 12,
+    paddingTop: 12,
     paddingHorizontal: 20,
     borderTopWidth: 1,
     borderColor: theme.border,

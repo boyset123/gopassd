@@ -1,6 +1,6 @@
 const API_ORIGIN = (
-  process.env.EXPO_PUBLIC_API_ORIGIN ||
   process.env.EXPO_PUBLIC_API_BASE_URL ||
+  process.env.EXPO_PUBLIC_API_ORIGIN ||
   'http://192.168.0.247:5000'
 ).replace(/\/$/, '');
 

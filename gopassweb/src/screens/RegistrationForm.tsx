@@ -18,15 +18,14 @@ const theme = {
 };
 
 const FACULTY_ROLES = ['Faculty Staff', 'Program Head', 'Faculty Dean'];
-const DORSU_EMAIL_HINT = 'Use your official @dorsu.edu.ph email address.';
+const EMAIL_HINT = 'Use an email address the user can access for account notifications.';
 
 interface ApiResponse {
   message: string;
 }
 
-function isValidDorsuEmail(email: string): boolean {
-  const normalized = email.trim().toLowerCase();
-  return normalized.endsWith('@dorsu.edu.ph') || normalized.endsWith('@dorsu');
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+$/.test(email.trim().toLowerCase());
 }
 
 const RegistrationForm = () => {
@@ -101,8 +100,8 @@ const RegistrationForm = () => {
       return;
     }
 
-    if (!isValidDorsuEmail(email)) {
-      setModalMessage(DORSU_EMAIL_HINT);
+    if (!isValidEmail(email)) {
+      setModalMessage('Please enter a valid email address.');
       setModalType('error');
       setModalVisible(true);
       return;
@@ -230,13 +229,13 @@ const RegistrationForm = () => {
 
       <TextInput
         style={styles.input}
-        placeholder="Email Address (@dorsu.edu.ph)"
+        placeholder="Email Address"
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
         autoCapitalize="none"
       />
-      <Text style={styles.hint}>{DORSU_EMAIL_HINT}</Text>
+      <Text style={styles.hint}>{EMAIL_HINT}</Text>
 
       <TextInput
         style={styles.input}

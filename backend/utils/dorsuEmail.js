@@ -1,31 +1,15 @@
-const DEFAULT_ALLOWED_DOMAINS = ['@dorsu.edu.ph'];
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/;
 
-function getAllowedDomains() {
-  const env = process.env.ALLOWED_EMAIL_DOMAINS;
-  if (env && String(env).trim()) {
-    return String(env)
-      .split(',')
-      .map((d) => d.trim().toLowerCase())
-      .filter(Boolean);
-  }
-  return DEFAULT_ALLOWED_DOMAINS;
-}
-
-function isValidDorsuEmail(email, { allowLegacy = false } = {}) {
+function isValidDorsuEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
-  if (!normalized || !normalized.includes('@')) {
+  if (!normalized) {
     return false;
   }
-  if (allowLegacy && normalized.endsWith('@dorsu')) {
-    return true;
-  }
-  const domains = getAllowedDomains();
-  return domains.some((domain) => normalized.endsWith(domain.toLowerCase()));
+  return EMAIL_PATTERN.test(normalized);
 }
 
 function dorsuEmailErrorMessage() {
-  const domains = getAllowedDomains().join(', ');
-  return `Email must use an official DOrSU address (${domains}).`;
+  return 'Please enter a valid email address.';
 }
 
 function validatePhone(phone) {
@@ -41,7 +25,6 @@ function validatePhone(phone) {
 }
 
 module.exports = {
-  getAllowedDomains,
   isValidDorsuEmail,
   dorsuEmailErrorMessage,
   validatePhone,

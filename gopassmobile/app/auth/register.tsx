@@ -19,10 +19,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL } from '../../config/api';
 
 const FACULTY_ROLES = ['Faculty Staff', 'Program Head', 'Faculty Dean'];
-const DORSU_EMAIL_HINT = 'Use your official @dorsu.edu.ph email address.';
+const EMAIL_HINT = 'Use an email address you can access for account notifications.';
 
-function isValidDorsuEmail(email: string): boolean {
-  return email.trim().toLowerCase().endsWith('@dorsu.edu.ph');
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+$/.test(email.trim().toLowerCase());
 }
 
 export default function RegisterScreen() {
@@ -87,8 +87,8 @@ export default function RegisterScreen() {
       Alert.alert('Error', 'Password must be at least 6 characters.');
       return;
     }
-    if (!isValidDorsuEmail(email)) {
-      Alert.alert('Error', DORSU_EMAIL_HINT);
+    if (!isValidEmail(email)) {
+      Alert.alert('Error', 'Please enter a valid email address.');
       return;
     }
     if (showFacultyInput && !faculty) {
@@ -154,13 +154,13 @@ export default function RegisterScreen() {
                 <TextInput style={styles.input} placeholder="Suffix" value={suffix} onChangeText={setSuffix} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Email (@dorsu.edu.ph)"
+                  placeholder="Email address"
                   value={email}
                   onChangeText={setEmail}
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
-                <Text style={styles.hint}>{DORSU_EMAIL_HINT}</Text>
+                <Text style={styles.hint}>{EMAIL_HINT}</Text>
                 <TextInput style={styles.input} placeholder="Employee ID Number" value={employeeId} onChangeText={setEmployeeId} autoCapitalize="characters" />
                 <TextInput style={styles.input} placeholder="Phone Number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
                 <TextInput style={styles.input} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />

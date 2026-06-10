@@ -6,7 +6,7 @@ import * as Location from 'expo-location';
 import { WebView } from 'react-native-webview';
 import polyline from '@mapbox/polyline';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useRouter, Stack, useFocusEffect } from 'expo-router';
+import { useRouter, Stack } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { FontAwesome } from '@expo/vector-icons';
@@ -14,6 +14,9 @@ import { Picker } from '@react-native-picker/picker';
 import SignatureScreen, { SignatureViewRef } from 'react-native-signature-canvas';
 import * as ImagePicker from 'expo-image-picker';
 import { API_URL } from '../../config/api';
+import { useSocket } from '../../config/SocketContext';
+import { useServerTime } from '../../hooks/useServerTime';
+import { formatManilaDateYmd, getManilaTodayStart, isSameManilaDay, parseMeridiemTimeInManilaDate } from '../../utils/manilaDate';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 import PassSlipForm, { approvedByRoleLabel, requestedByRoleLabel } from '../../components/PassSlipForm';
 
@@ -33,6 +36,7 @@ const theme = {
 };
 
 interface User {
+  _id?: string;
   name: string;
   role: string;
   faculty?: string;
@@ -57,24 +61,31 @@ interface Suggestion {
 const CreatePassSlipScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const socket = useSocket();
+  const { getServerNow } = useServerTime();
   const [user, setUser] = useState<User | null>(null);
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
-
-  const todayStart = useRef(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }).current();
-
-  const startOfDay = (d: Date) => {
-    const x = new Date(d);
-    x.setHours(0, 0, 0, 0);
-    return x;
-  };
-
   const [timeOut, setTimeOut] = useState(new Date());
   const [estimatedTimeBack, setEstimatedTimeBack] = useState(new Date());
+
+  const slipDayStart = (d: Date) => getManilaTodayStart(d);
+
+  const formatTimeMeridiem = (d: Date) =>
+    d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+
+  const getDepartureMomentForForm = () => {
+    const timeStr = formatTimeMeridiem(timeOut);
+    return parseMeridiemTimeInManilaDate(date, timeStr);
+  };
+
+  const isDepartureInPast = () => {
+    const today = getManilaTodayStart(getServerNow());
+    if (slipDayStart(date).getTime() > today.getTime()) return false;
+    const departure = getDepartureMomentForForm();
+    if (!departure) return false;
+    return departure.getTime() < getServerNow().getTime();
+  };
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<'timeOut' | 'estimatedTimeBack' | null>(null);
   const [duration, setDuration] = useState('');
@@ -109,7 +120,8 @@ const CreatePassSlipScreen = () => {
   const onChangeDate = (event: any, selectedDate?: Date) => {
     setShowDatePicker(false);
     if (selectedDate) {
-      setDate(startOfDay(selectedDate).getTime() < todayStart.getTime() ? todayStart : selectedDate);
+      const today = getManilaTodayStart(getServerNow());
+      setDate(slipDayStart(selectedDate).getTime() < today.getTime() ? today : selectedDate);
     }
   };
 
@@ -117,7 +129,14 @@ const CreatePassSlipScreen = () => {
     setShowTimePicker(false);
     if (selectedTime) {
       if (activeTimePicker === 'timeOut') {
-        setTimeOut(selectedTime);
+        let next = selectedTime;
+        if (isSameManilaDay(date, getServerNow())) {
+          const candidate = parseMeridiemTimeInManilaDate(date, formatTimeMeridiem(selectedTime));
+          if (candidate && candidate.getTime() < getServerNow().getTime()) {
+            next = getServerNow();
+          }
+        }
+        setTimeOut(next);
       } else if (activeTimePicker === 'estimatedTimeBack') {
         setEstimatedTimeBack(selectedTime);
       }
@@ -161,46 +180,6 @@ const CreatePassSlipScreen = () => {
     setSignatureType(null);
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      const checkOngoingSubmissions = async () => {
-        try {
-          const token = await AsyncStorage.getItem('userToken');
-          if (!token) {
-            router.replace('/');
-            return;
-          }
-          const headers = { 'x-auth-token': token };
-
-          const [slipsResponse, ordersResponse] = await Promise.all([
-            axios.get(`${API_URL}/pass-slips/my-slips`, { headers }),
-            axios.get(`${API_URL}/travel-orders/my-orders`, { headers }),
-          ]);
-
-          const combinedSubmissions = [
-            ...slipsResponse.data.map((slip: any) => ({ ...slip, type: 'Pass Slip' })),
-            ...ordersResponse.data.map((order: any) => ({ ...order, type: 'Travel Order' })),
-          ];
-
-          const ongoingStatuses = ['Pending', 'Recommended', 'Approved', 'Verified', 'For President Approval'];
-          const hasOngoing = combinedSubmissions.some(s => ongoingStatuses.includes(s.status));
-
-          if (hasOngoing) {
-            Alert.alert(
-              'Ongoing Submission',
-              'You cannot create a new pass slip while another submission is in progress.',
-              [{ text: 'OK', onPress: () => router.back() }]
-            );
-          }
-        } catch (error) {
-          console.error('Failed to check ongoing submissions:', error);
-        }
-      };
-
-      checkOngoingSubmissions();
-    }, [router])
-  );
-
   useEffect(() => {
     const fetchUserData = async () => {
       const token = await AsyncStorage.getItem('userToken');
@@ -215,6 +194,39 @@ const CreatePassSlipScreen = () => {
     };
     fetchUserData();
   }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+    const handler = async (payload: { userId?: string; passSlipMinutes?: number; reset?: boolean }) => {
+      if (payload.reset) {
+        const token = await AsyncStorage.getItem('userToken');
+        if (!token) return;
+        try {
+          const response = await axios.get(`${API_URL}/users/me`, { headers: { 'x-auth-token': token } });
+          setUser(response.data);
+        } catch (error) {
+          console.error('Failed to refresh user balance after reset:', error);
+        }
+        return;
+      }
+      const stored = await AsyncStorage.getItem('userData');
+      const storedUser = stored ? JSON.parse(stored) : null;
+      const myId = user?._id ? String(user._id) : storedUser?._id ? String(storedUser._id) : null;
+      if (!myId || !payload.userId || String(payload.userId) !== myId) return;
+      if (typeof payload.passSlipMinutes !== 'number') return;
+      setUser((prev) => (prev ? { ...prev, passSlipMinutes: payload.passSlipMinutes } : prev));
+      if (storedUser) {
+        await AsyncStorage.setItem(
+          'userData',
+          JSON.stringify({ ...storedUser, passSlipMinutes: payload.passSlipMinutes }),
+        );
+      }
+    };
+    socket.on('passSlipBalanceUpdated', handler);
+    return () => {
+      socket.off('passSlipBalanceUpdated', handler);
+    };
+  }, [socket, user?._id]);
 
   useEffect(() => {
     const findApprover = async () => {
@@ -346,8 +358,14 @@ const CreatePassSlipScreen = () => {
       return;
     }
 
-    if (startOfDay(date).getTime() < todayStart.getTime()) {
+    const today = getManilaTodayStart(getServerNow());
+    if (slipDayStart(date).getTime() < today.getTime()) {
       Alert.alert('Invalid Date', 'Please select today or a future date.');
+      return;
+    }
+
+    if (isDepartureInPast()) {
+      Alert.alert('Invalid Time', 'Time Out cannot be in the past. Please choose a future departure time.');
       return;
     }
 
@@ -373,40 +391,40 @@ const CreatePassSlipScreen = () => {
     setIsPreviewVisible(true);
   };
 
-  const getRoute = async (destination: { latitude: number; longitude: number }) => {
-    console.log('getRoute called with destination:', destination);
-    if (!currentUserLocation) {
-      console.error('getRoute failed: currentUserLocation is null.');
-      return;
-    }
-    console.log('currentUserLocation:', currentUserLocation);
-
+  const fetchRouteGeometry = async (
+    origin: { latitude: number; longitude: number },
+    destination: { latitude: number; longitude: number },
+  ): Promise<string | null> => {
     try {
-      const url = `http://router.project-osrm.org/route/v1/driving/${currentUserLocation.longitude},${currentUserLocation.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=polyline&alternatives=true&steps=false`;
-      console.log('Fetching route from URL:', url);
-
+      const url = `http://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=polyline&alternatives=true&steps=false`;
       const response = await fetch(url);
       const json = await response.json();
-      console.log('OSRM response:', JSON.stringify(json, null, 2));
-
       if (json.routes && json.routes.length > 0) {
         const shortestRoute = [...json.routes].sort(
           (a: { distance: number }, b: { distance: number }) => a.distance - b.distance
         )[0];
-        const geometry = shortestRoute.geometry;
-        setRoutePolyline(geometry);
-        const decoded = polyline.decode(geometry);
-        const coords = decoded.map(point => ({ latitude: point[0], longitude: point[1] }));
-        console.log('Decoded coordinates count:', coords.length);
-        setRouteCoordinates(coords);
-      } else {
-        console.log('No routes found in OSRM response.');
-        setRouteCoordinates([]);
-        setRoutePolyline(null);
+        return shortestRoute.geometry ?? null;
       }
     } catch (error) {
       console.error('Failed to fetch route from OSRM:', error);
+    }
+    return null;
+  };
+
+  const getRoute = async (destination: { latitude: number; longitude: number }) => {
+    if (!currentUserLocation) {
+      console.error('getRoute failed: currentUserLocation is null.');
+      return;
+    }
+
+    const geometry = await fetchRouteGeometry(currentUserLocation, destination);
+    if (geometry) {
+      setRoutePolyline(geometry);
+      const decoded = polyline.decode(geometry);
+      setRouteCoordinates(decoded.map((point) => ({ latitude: point[0], longitude: point[1] })));
+    } else {
       setRouteCoordinates([]);
+      setRoutePolyline(null);
     }
   };
 
@@ -437,6 +455,9 @@ const CreatePassSlipScreen = () => {
   const handleConfirmDestination = () => {
     if (selectedLocation) {
       setLocation(selectedLocation);
+      if (currentUserLocation) {
+        void getRoute(selectedLocation);
+      }
     }
     setIsMapVisible(false);
   };
@@ -472,8 +493,14 @@ const CreatePassSlipScreen = () => {
       return;
     }
 
-    if (startOfDay(date).getTime() < todayStart.getTime()) {
+    const today = getManilaTodayStart(getServerNow());
+    if (slipDayStart(date).getTime() < today.getTime()) {
       Alert.alert('Invalid Date', 'Please select today or a future date.');
+      return;
+    }
+
+    if (isDepartureInPast()) {
+      Alert.alert('Invalid Time', 'Time Out cannot be in the past. Please choose a future departure time.');
       return;
     }
 
@@ -487,14 +514,19 @@ const CreatePassSlipScreen = () => {
         return;
       }
 
+      let finalRoutePolyline = routePolyline;
+      if (location && currentUserLocation && !finalRoutePolyline) {
+        finalRoutePolyline = await fetchRouteGeometry(currentUserLocation, location);
+      }
+
       const passSlipData: any = {
-        date,
+        date: formatManilaDateYmd(date),
         timeOut: formattedTimeOut,
         estimatedTimeBack: formattedEstimatedTimeBack,
         destination,
         purpose,
         signature,
-        routePolyline: routePolyline,
+        routePolyline: finalRoutePolyline ?? undefined,
       };
 
       passSlipData.approvedBy = immediateHeadId;
@@ -502,6 +534,11 @@ const CreatePassSlipScreen = () => {
       if (location) {
         passSlipData.latitude = location.latitude;
         passSlipData.longitude = location.longitude;
+      }
+
+      if (currentUserLocation) {
+        passSlipData.originLatitude = currentUserLocation.latitude;
+        passSlipData.originLongitude = currentUserLocation.longitude;
       }
 
       await axios.post(`${API_URL}/pass-slips`, passSlipData, {
@@ -782,7 +819,7 @@ const CreatePassSlipScreen = () => {
           value={date}
           mode="date"
           display="default"
-          minimumDate={todayStart}
+          minimumDate={getManilaTodayStart(getServerNow())}
           onChange={onChangeDate}
         />
       )}
@@ -824,6 +861,7 @@ const CreatePassSlipScreen = () => {
                   <Text style={styles.inputDisplayText}>{date.toLocaleDateString()}</Text>
                 </View>
               </Pressable>
+              <Text style={styles.helperText}>You may schedule pass slips for future dates.</Text>
             </View>
           </View>
 
@@ -1129,6 +1167,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: theme.text,
     marginBottom: 6,
+  },
+  helperText: {
+    fontSize: 12,
+    color: theme.textMuted,
+    marginTop: 4,
   },
   input: {
     borderWidth: 1,

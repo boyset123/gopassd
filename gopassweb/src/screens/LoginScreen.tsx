@@ -24,6 +24,7 @@ const theme = {
 
 type RootStackParamList = {
   Login: undefined;
+  Register: undefined;
   ForgotPassword: undefined;
   Admin: undefined;
   HrpDashboard: undefined;
@@ -189,6 +190,14 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             disabled={isLoading}
           >
             <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.forgotPasswordWrap}
+            onPress={() => navigation.navigate('Register')}
+            disabled={isLoading}
+          >
+            <Text style={styles.forgotPasswordText}>Create an account</Text>
           </Pressable>
         </View>
       </ScrollView>

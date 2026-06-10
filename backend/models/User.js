@@ -26,22 +26,31 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: false // Not required for initial OTP setup
   },
+  employeeId: {
+    type: String,
+    trim: true,
+    sparse: true,
+    unique: true,
+  },
+  phone: {
+    type: String,
+    trim: true,
+  },
+  accountStatus: {
+    type: String,
+    enum: ['pending', 'active', 'rejected'],
+    default: 'active',
+    index: true,
+  },
+  rejectionReason: {
+    type: String,
+    trim: true,
+  },
   role: {
     type: String,
-    enum: [
-      'Office Staff',
-      'Faculty Staff',
-      'Program Head',
-      'Human Resource Personnel',
-      'Office Records',
-      'Faculty Dean',
-      'Security Personnel',
-      'admin',
-      'President',
-      'Vice President'
-    ],
     required: true,
-    index: true
+    trim: true,
+    index: true,
   },
   campus: {
     type: String,
@@ -76,11 +85,6 @@ const userSchema = new mongoose.Schema({
   resetPasswordExpires: Date,
   // OIC (Officer-In-Charge) delegation
   oicPrimary: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null
-  },
-  oicFallback: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null

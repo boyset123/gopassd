@@ -43,6 +43,15 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
+    if (user.accountStatus && user.accountStatus !== 'active') {
+      if (user.accountStatus === 'pending') {
+        return res.status(403).json({ message: 'Your account is pending HR approval.' });
+      }
+      if (user.accountStatus === 'rejected') {
+        return res.status(403).json({ message: 'Your account was rejected.' });
+      }
+    }
+
     // Create JWT token
     const token = jwt.sign(
       { userId: user._id, role: user.role },
@@ -90,19 +99,41 @@ const transporter = nodemailer.createTransport({
   },
 });
 console.log('Nodemailer transporter created.');
+const { isValidDorsuEmail, dorsuEmailErrorMessage, validatePhone } = require('../utils/dorsuEmail');
+const { validateRegistrationMetadata } = require('../utils/metadataValidation');
 
 // Register a new user and send OTP (admin only)
 router.post('/register', auth, async (req, res) => {
   try {
-    const { name, email, campus, role, faculty } = req.body;
+    const { name, email, campus, role, faculty, employeeId, phone } = req.body;
 
-    if (!name || !email || !campus || !role) {
+    if (!name || !email || !campus || !role || !employeeId || !phone) {
       return res.status(400).json({ message: 'Please provide all required fields.' });
     }
 
-    const existingUser = await User.findOne({ email });
+    const normalizedEmail = String(email).trim().toLowerCase();
+    if (!isValidDorsuEmail(normalizedEmail, { allowLegacy: true })) {
+      return res.status(400).json({ message: dorsuEmailErrorMessage() });
+    }
+
+    const phoneResult = validatePhone(phone);
+    if (!phoneResult.valid) {
+      return res.status(400).json({ message: phoneResult.message });
+    }
+
+    const meta = await validateRegistrationMetadata({ role, faculty, campus });
+    if (!meta.valid) {
+      return res.status(400).json({ message: meta.message });
+    }
+
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
       return res.status(400).json({ message: 'User with this email already exists.' });
+    }
+
+    const existingEmployeeId = await User.findOne({ employeeId: String(employeeId).trim() });
+    if (existingEmployeeId) {
+      return res.status(400).json({ message: 'Employee ID is already registered.' });
     }
 
     // Generate temporary password
@@ -110,11 +141,14 @@ router.post('/register', auth, async (req, res) => {
 
     const newUser = new User({
       name,
-      email,
-      campus,
-      role,
-      faculty,
-      password: temporaryPassword, // Set the temporary password
+      email: normalizedEmail,
+      campus: meta.campus,
+      role: meta.role,
+      faculty: meta.faculty,
+      employeeId: String(employeeId).trim(),
+      phone: phoneResult.normalized,
+      accountStatus: 'active',
+      password: temporaryPassword,
     });
 
     await newUser.save();
@@ -252,7 +286,7 @@ router.get('/users', auth, async (req, res) => {
 // Update a user (admin only)
 router.put('/users/:id', auth, async (req, res) => {
   try {
-    const { name, email, campus, role, faculty } = req.body;
+    const { name, email, campus, role, faculty, employeeId, phone } = req.body;
     const userId = req.params.id;
 
     const userToUpdate = await User.findById(userId);
@@ -267,13 +301,39 @@ router.put('/users/:id', auth, async (req, res) => {
     }
 
     // Ensure non-admins cannot be promoted to admin
-    if (req.user.role !== 'admin' && req.body.role === 'admin') {
+    if (req.user.role !== 'admin' && role === 'admin') {
         return res.status(403).json({ message: 'Not authorized to make other users admin.' });
+    }
+
+    if (role && campus) {
+      const meta = await validateRegistrationMetadata({ role, faculty, campus });
+      if (!meta.valid) {
+        return res.status(400).json({ message: meta.message });
+      }
+    }
+
+    const updateFields = { name, email, campus, role, faculty, employeeId, phone };
+    if (email) {
+      const normalizedEmail = String(email).trim().toLowerCase();
+      if (!isValidDorsuEmail(normalizedEmail, { allowLegacy: true })) {
+        return res.status(400).json({ message: dorsuEmailErrorMessage() });
+      }
+      updateFields.email = normalizedEmail;
+    }
+    if (phone) {
+      const phoneResult = validatePhone(phone);
+      if (!phoneResult.valid) {
+        return res.status(400).json({ message: phoneResult.message });
+      }
+      updateFields.phone = phoneResult.normalized;
+    }
+    if (employeeId) {
+      updateFields.employeeId = String(employeeId).trim();
     }
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { name, email, campus, role, faculty },
+      updateFields,
       { new: true, runValidators: true }
     ).select('-password');
 

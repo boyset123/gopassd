@@ -6,6 +6,9 @@ const path = require('path');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const User = require('../models/User');
+const PassSlip = require('../models/PassSlip');
+const TravelOrder = require('../models/TravelOrder');
+const RoleChangeRequest = require('../models/RoleChangeRequest');
 const auth = require('../middleware/auth');
 const { isConfigured, uploadProfileImage } = require('../lib/cloudinaryProfile');
 const {
@@ -13,7 +16,6 @@ const {
   isUserOnTravel,
   getEffectiveSigner,
   buildPrimaryCandidateFilter,
-  buildFallbackCandidateFilter,
   getRankBelowRoles,
   getActiveOicForRoles,
 } = require('../utils/oic');
@@ -63,6 +65,105 @@ function getWebResetBaseUrl(req) {
   return `${req.protocol}://${req.get('host')}`;
 }
 
+const { isValidDorsuEmail, dorsuEmailErrorMessage, validatePhone } = require('../utils/dorsuEmail');
+const { validateRegistrationMetadata } = require('../utils/metadataValidation');
+
+async function notifyHrUsers(io, message, type, relatedId) {
+  try {
+    const hrUsers = await User.find({ role: 'Human Resource Personnel', accountStatus: 'active' });
+    for (const hr of hrUsers) {
+      hr.notifications.push({
+        message,
+        read: false,
+        type,
+        relatedId,
+        createdAt: new Date(),
+      });
+      await hr.save();
+    }
+    if (io) {
+      io.emit('hr-notification', { message, type, relatedId });
+    }
+  } catch (err) {
+    console.error('notifyHrUsers failed:', err);
+  }
+}
+
+// Public self-registration
+router.post('/register', async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      password,
+      employeeId,
+      phone,
+      campus,
+      role,
+      faculty,
+    } = req.body;
+
+    if (!name || !email || !password || !employeeId || !phone || !campus || !role) {
+      return res.status(400).json({ message: 'Please provide all required fields.' });
+    }
+
+    if (String(password).length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    if (!isValidDorsuEmail(normalizedEmail)) {
+      return res.status(400).json({ message: dorsuEmailErrorMessage() });
+    }
+
+    const phoneResult = validatePhone(phone);
+    if (!phoneResult.valid) {
+      return res.status(400).json({ message: phoneResult.message });
+    }
+
+    const meta = await validateRegistrationMetadata({ role, faculty, campus });
+    if (!meta.valid) {
+      return res.status(400).json({ message: meta.message });
+    }
+
+    const existingEmail = await User.findOne({ email: normalizedEmail });
+    if (existingEmail) {
+      return res.status(400).json({ message: 'User with this email already exists.' });
+    }
+
+    const existingEmployeeId = await User.findOne({ employeeId: String(employeeId).trim() });
+    if (existingEmployeeId) {
+      return res.status(400).json({ message: 'Employee ID is already registered.' });
+    }
+
+    const newUser = new User({
+      name: String(name).trim(),
+      email: normalizedEmail,
+      password,
+      employeeId: String(employeeId).trim(),
+      phone: phoneResult.normalized,
+      campus: meta.campus,
+      role: meta.role,
+      faculty: meta.faculty,
+      accountStatus: 'pending',
+    });
+
+    await newUser.save();
+
+    await notifyHrUsers(req.io, `New registration pending approval: ${newUser.name} (${newUser.email})`, 'pending-registration', newUser._id);
+
+    res.status(201).json({
+      message: 'Registration submitted successfully. HR will review your account before you can log in.',
+    });
+  } catch (error) {
+    console.error('Self-registration error:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'Email or Employee ID already exists.' });
+    }
+    res.status(500).json({ message: 'Server error during registration.' });
+  }
+});
+
 // User login
 router.post('/login', async (req, res) => {
   try {
@@ -72,6 +173,15 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    if (user.accountStatus === 'pending') {
+      return res.status(403).json({ message: 'Your account is pending HR approval. You will be notified once approved.' });
+    }
+
+    if (user.accountStatus === 'rejected') {
+      const reason = user.rejectionReason ? ` Reason: ${user.rejectionReason}` : '';
+      return res.status(403).json({ message: `Your account registration was rejected.${reason}` });
     }
 
     // Check password
@@ -275,8 +385,7 @@ router.get('/me', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId)
       .select('-password')
-      .populate('oicPrimary', 'name role faculty')
-      .populate('oicFallback', 'name role faculty');
+      .populate('oicPrimary', 'name role faculty');
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -293,16 +402,93 @@ router.get('/me', auth, async (req, res) => {
         profilePicture: user.profilePicture,
         passSlipMinutes: Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0)),
         oicPrimary: user.oicPrimary || null,
-        oicFallback: user.oicFallback || null,
         onTravelManual: !!user.onTravelManual,
         onTravelManualUntil: user.onTravelManualUntil || null,
         onTravel: !!onTravelStatus.onTravel,
         onTravelReason: onTravelStatus.reason || null,
         canAssignOic: isOicCapableRole(user.role),
         activeOicForRoles,
+        employeeId: user.employeeId,
+        phone: user.phone,
+        accountStatus: user.accountStatus,
     });
   } catch (error) {
     console.error('Get user error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.get('/me/role-change-request', auth, async (req, res) => {
+  try {
+    const request = await RoleChangeRequest.findOne({
+      user: req.user.userId,
+      status: 'pending',
+    }).sort({ createdAt: -1 });
+    res.json(request || null);
+  } catch (error) {
+    console.error('Get role change request error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/me/role-change-request', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (user.role === 'admin') {
+      return res.status(403).json({ message: 'Admin accounts cannot request role changes.' });
+    }
+
+    const existing = await RoleChangeRequest.findOne({ user: user._id, status: 'pending' });
+    if (existing) {
+      return res.status(400).json({ message: 'You already have a pending role change request.' });
+    }
+
+    const { requestedRole, requestedFaculty, requestedExtension } = req.body;
+    if (!requestedRole || !requestedExtension) {
+      return res.status(400).json({ message: 'Requested role and campus / extension are required.' });
+    }
+
+    const meta = await validateRegistrationMetadata({
+      role: requestedRole,
+      faculty: requestedFaculty,
+      campus: requestedExtension,
+    });
+    if (!meta.valid) {
+      return res.status(400).json({ message: meta.message });
+    }
+
+    if (
+      user.role === meta.role &&
+      user.campus === meta.campus &&
+      (user.faculty || '') === (meta.faculty || '')
+    ) {
+      return res.status(400).json({ message: 'Requested role and assignment match your current profile.' });
+    }
+
+    const request = await RoleChangeRequest.create({
+      user: user._id,
+      currentRole: user.role,
+      currentFaculty: user.faculty,
+      currentExtension: user.campus,
+      requestedRole: meta.role,
+      requestedFaculty: meta.faculty,
+      requestedExtension: meta.campus,
+      status: 'pending',
+    });
+
+    await notifyHrUsers(
+      req.io,
+      `Role change request from ${user.name}: ${user.role} → ${meta.role}`,
+      'role-change-request',
+      request._id
+    );
+
+    res.status(201).json(request);
+  } catch (error) {
+    console.error('Create role change request error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -525,7 +711,6 @@ router.get('/me/approver', auth, async (req, res) => {
 });
 
 // List eligible OIC candidates for the signed-in user.
-// Query: ?slot=primary|fallback (defaults to primary)
 router.get('/me/oic-candidates', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).lean();
@@ -534,15 +719,9 @@ router.get('/me/oic-candidates', auth, async (req, res) => {
       return res.status(403).json({ message: 'Your role cannot assign an OIC.' });
     }
 
-    const slot = String(req.query.slot || 'primary').toLowerCase();
-    let filter;
-    if (slot === 'fallback') {
-      filter = buildFallbackCandidateFilter(user);
-    } else {
-      filter = buildPrimaryCandidateFilter(user);
-      if (!filter) {
-        return res.status(400).json({ message: 'No rank-below pool defined for your role.' });
-      }
+    const filter = buildPrimaryCandidateFilter(user);
+    if (!filter) {
+      return res.status(400).json({ message: 'No rank-below pool defined for your role.' });
     }
 
     const candidates = await User.find(filter)
@@ -551,8 +730,7 @@ router.get('/me/oic-candidates', auth, async (req, res) => {
       .lean();
 
     res.json({
-      slot,
-      rankBelowRoles: slot === 'primary' ? getRankBelowRoles(user.role) : [],
+      rankBelowRoles: getRankBelowRoles(user.role),
       candidates,
     });
   } catch (error) {
@@ -564,7 +742,7 @@ router.get('/me/oic-candidates', auth, async (req, res) => {
 // Update OIC assignments for the signed-in user.
 router.put('/me/oic', auth, async (req, res) => {
   try {
-    const { oicPrimary, oicFallback } = req.body || {};
+    const { oicPrimary } = req.body || {};
 
     const user = await User.findById(req.user.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -599,35 +777,16 @@ router.put('/me/oic', auth, async (req, res) => {
       user.oicPrimary = candidate._id;
     }
 
-    // Validate Fallback OIC: any user except admin/security/self.
-    if (oicFallback === null || oicFallback === '') {
-      user.oicFallback = null;
-    } else if (oicFallback !== undefined) {
-      const fallback = await User.findById(oicFallback).select('_id role').lean();
-      if (!fallback) {
-        return res.status(400).json({ message: 'Fallback OIC user not found.' });
-      }
-      if (fallback._id.toString() === user._id.toString()) {
-        return res.status(400).json({ message: 'You cannot assign yourself as OIC.' });
-      }
-      if (['admin', 'Security Personnel'].includes(fallback.role)) {
-        return res.status(400).json({ message: 'Fallback OIC role is not allowed.' });
-      }
-      user.oicFallback = fallback._id;
-    }
-
     await user.save();
 
     const refreshed = await User.findById(user._id)
-      .select('_id name role oicPrimary oicFallback')
+      .select('_id name role oicPrimary')
       .populate('oicPrimary', 'name role faculty')
-      .populate('oicFallback', 'name role faculty')
       .lean();
 
     res.json({
       message: 'OIC assignments updated.',
       oicPrimary: refreshed.oicPrimary || null,
-      oicFallback: refreshed.oicFallback || null,
     });
   } catch (error) {
     console.error('Update OIC error:', error);
@@ -696,6 +855,92 @@ router.get('/:id/effective-signer', auth, async (req, res) => {
     });
   } catch (error) {
     console.error('Effective signer error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Aggregated activity feed for profile view
+router.get('/me/activity', auth, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = Math.max(0, parseInt(req.query.skip, 10) || 0);
+
+    const user = await User.findById(userId).select('notifications');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const entries = [];
+
+    for (const n of user.notifications || []) {
+      entries.push({
+        id: `notif-${n._id}`,
+        category: 'notification',
+        title: n.type || 'Notification',
+        detail: n.message,
+        createdAt: n.createdAt,
+        relatedId: n.relatedId ? String(n.relatedId) : undefined,
+      });
+    }
+
+    const roleRequests = await RoleChangeRequest.find({ user: userId })
+      .sort({ updatedAt: -1 })
+      .limit(20)
+      .lean();
+
+    for (const r of roleRequests) {
+      const statusLabel =
+        r.status === 'approved' ? 'approved' : r.status === 'rejected' ? 'rejected' : 'pending';
+      entries.push({
+        id: `role-${r._id}`,
+        category: 'role-change',
+        title: `Role change ${statusLabel}`,
+        detail: `Requested ${r.requestedRole}${r.requestedFaculty ? ` (${r.requestedFaculty})` : ''}`,
+        createdAt: r.updatedAt || r.createdAt,
+        relatedId: String(r._id),
+      });
+    }
+
+    const [slips, orders] = await Promise.all([
+      PassSlip.find({ employee: userId })
+        .sort({ createdAt: -1 })
+        .limit(15)
+        .select('destination purpose status date createdAt')
+        .lean(),
+      TravelOrder.find({ employee: userId })
+        .sort({ createdAt: -1 })
+        .limit(15)
+        .select('to purpose status date createdAt')
+        .lean(),
+    ]);
+
+    for (const s of slips) {
+      entries.push({
+        id: `slip-${s._id}`,
+        category: 'submission',
+        title: 'Pass Slip',
+        detail: `${s.status} — ${s.destination || 'No destination'}`,
+        createdAt: s.createdAt,
+        relatedId: String(s._id),
+      });
+    }
+
+    for (const o of orders) {
+      entries.push({
+        id: `order-${o._id}`,
+        category: 'submission',
+        title: 'Travel Order',
+        detail: `${o.status} — ${o.to || 'No destination'}`,
+        createdAt: o.createdAt,
+        relatedId: String(o._id),
+      });
+    }
+
+    entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    res.json(entries.slice(skip, skip + limit));
+  } catch (error) {
+    console.error('Error fetching user activity:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

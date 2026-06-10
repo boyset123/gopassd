@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, Modal, Alert, Image, ImageBackground, Animated, TextInput, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, Modal, Alert, Image, ImageBackground, Animated, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import Timer from '../../components/Timer';
@@ -8,10 +8,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import { CameraView, Camera } from 'expo-camera';
 import { FontAwesome } from '@expo/vector-icons';
-import QRCode from 'react-native-qrcode-svg';
 import { API_URL } from '../../config/api';
+import { isFivePmEtb } from '../../utils/manilaDate';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { useSocket } from '../../config/SocketContext';
+import { useServerTime } from '../../hooks/useServerTime';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
@@ -131,17 +132,15 @@ function getDepartureMoment(item: SecurityItem): Date | null {
 }
 
 export default function SecurityDashboard() {
+  const { getServerNow } = useServerTime();
   const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
   // QR is shown inside qrModalContent (width: 90%, padding: 25). Fit it to the
   // visible interior on small phones so the code is never clipped.
-  const returnQrCodeSize = Math.min(250, Math.max(160, Math.floor(windowWidth * 0.9) - 50));
   const [currentlyOut, setCurrentlyOut] = useState<SecurityItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [isScannerVisible, setScannerVisible] = useState(false);
   const [scannedData, setScannedData] = useState<SecurityItem | null>(null);
-  const [returnQrCode, setReturnQrCode] = useState<{ data: string; employeeName: string; } | null>(null);
   const [scanLineAnimation] = useState(new Animated.Value(0));
   const [searchQuery, setSearchQuery] = useState('');
   const [presidentName, setPresidentName] = useState('');
@@ -379,20 +378,12 @@ export default function SecurityDashboard() {
             </View>
           )}
         </View>
-        <View style={styles.cardFooter}>
-          {item.type === 'PassSlip' ? (
-            <Pressable
-              style={styles.qrButton}
-              onPress={() => {
-                const qrCodeData = JSON.stringify({ id: item._id, type: 'ReturnPassSlip' });
-                setReturnQrCode({ data: qrCodeData, employeeName: item.employee?.name || 'Unknown' });
-              }}
-            >
-              <FontAwesome name="qrcode" size={20} color="#fff" />
-              <Text style={styles.qrButtonLabel}>Show return QR</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        {item.type === 'PassSlip' && item.status === 'Verified' && isFivePmEtb(item.estimatedTimeBack) && (
+          <View style={styles.autoReturnBadge}>
+            <FontAwesome name="clock-o" size={14} color={theme.primary} />
+            <Text style={styles.autoReturnBadgeText}>Auto-return at 5:00 PM</Text>
+          </View>
+        )}
       </View>
     );
   };
@@ -414,7 +405,7 @@ export default function SecurityDashboard() {
           <Image source={headerLogo} style={styles.screenHeaderLogo} />
           <View style={styles.screenHeaderInner}>
             <Text style={styles.screenHeaderTitle}>Security Dashboard</Text>
-            <Text style={styles.screenHeaderSubtitle}>Scan and manage departures & arrivals</Text>
+            <Text style={styles.screenHeaderSubtitle}>Scan employee QR at departure and return gates</Text>
           </View>
         </View>
       </ImageBackground>
@@ -505,28 +496,6 @@ export default function SecurityDashboard() {
                 <Text style={styles.closeButtonText}>Close</Text>
               </Pressable>
             )}
-          </View>
-        </Modal>
-      )}
-
-      {returnQrCode && (
-        <Modal
-          visible={!!returnQrCode}
-          transparent={true}
-          onRequestClose={() => setReturnQrCode(null)}
-        >
-          <View style={styles.qrModalContainer}>
-            <View style={styles.qrModalContent}>
-              <Text style={styles.modalTitle}>Employee Return</Text>
-              <Text style={styles.qrEmployeeName}>{returnQrCode.employeeName}</Text>
-              <View style={styles.qrCodeWrapper}>
-                <QRCode value={returnQrCode.data} size={returnQrCodeSize} />
-              </View>
-              <Text style={styles.qrInstruction}>Present this code to the employee to scan for their arrival.</Text>
-              <Pressable style={styles.closeModalButton} onPress={() => setReturnQrCode(null)}>
-                <Text style={styles.buttonText}>Close</Text>
-              </Pressable>
-            </View>
           </View>
         </Modal>
       )}
@@ -760,7 +729,7 @@ export default function SecurityDashboard() {
             <ModalActionFooter style={styles.modalButtonContainer} basePadding={16}>
               {scannedData.status === 'Approved' && (() => {
                 const depMoment = getDepartureMoment(scannedData);
-                const canVerifyDeparture = depMoment != null && new Date() >= depMoment;
+                const canVerifyDeparture = depMoment != null && getServerNow().getTime() >= depMoment.getTime();
                 const depFormatted = depMoment ? formatDateTime(depMoment.toISOString()) : '—';
                 return (
                   <>
@@ -807,7 +776,8 @@ export default function SecurityDashboard() {
                   </>
                 );
               })()}
-              {scannedData.status === 'Verified' && (
+              {scannedData.status === 'Verified' &&
+                !(scannedData.type === 'PassSlip' && isFivePmEtb(scannedData.estimatedTimeBack)) && (
                 <Pressable
                   style={[styles.vModalButton, styles.vModalButtonSuccess]}
                   onPress={() => {
@@ -819,6 +789,13 @@ export default function SecurityDashboard() {
                   <FontAwesome name="sign-in" size={18} color="#fff" style={styles.vModalButtonIcon} />
                   <Text style={styles.vModalButtonText}>Verify arrival</Text>
                 </Pressable>
+              )}
+              {scannedData.status === 'Verified' &&
+                scannedData.type === 'PassSlip' &&
+                isFivePmEtb(scannedData.estimatedTimeBack) && (
+                <View style={styles.autoReturnNotice}>
+                  <Text style={styles.autoReturnNoticeText}>This pass slip auto-returns at 5:00 PM. No return scan needed.</Text>
+                </View>
               )}
               <Pressable
                 style={[styles.vModalButton, styles.vModalButtonSecondary]}
@@ -1016,6 +993,36 @@ const styles = StyleSheet.create({
   },
   timerWrapper: {
     marginBottom: 12,
+  },
+  autoReturnBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginHorizontal: 14,
+    marginBottom: 12,
+    backgroundColor: 'rgba(254,206,0,0.2)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(180,140,0,0.35)',
+  },
+  autoReturnBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.primary,
+  },
+  autoReturnNotice: {
+    padding: 12,
+    backgroundColor: 'rgba(254,206,0,0.15)',
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  autoReturnNoticeText: {
+    fontSize: 14,
+    color: theme.text,
+    textAlign: 'center',
   },
   qrButton: {
     flexDirection: 'row',

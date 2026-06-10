@@ -17,11 +17,6 @@ const RANK_BELOW_BY_ROLE = {
  */
 const OIC_CAPABLE_ROLES = new Set(['President', 'Faculty Dean', 'Program Head']);
 
-/**
- * Roles excluded from the "any user" Fallback OIC pool to avoid nonsensical picks.
- */
-const FALLBACK_EXCLUDED_ROLES = new Set(['admin', 'Security Personnel']);
-
 function isOicCapableRole(role) {
   return OIC_CAPABLE_ROLES.has(role);
 }
@@ -84,15 +79,15 @@ async function isUserOnTravel(userOrId) {
 
 /**
  * Returns the user who should currently sign in place of `originalUserId`.
- * Resolution order: original (if not on travel) -> oicPrimary -> oicFallback.
- * Returns { signerId, originalId, viaOic, signer } where viaOic is null|'primary'|'fallback'.
+ * Resolution order: original (if not on travel) -> oicPrimary.
+ * Returns { signerId, originalId, viaOic, signer } where viaOic is null|'primary'.
  * Falls back to the original signer if no OIC is available (caller can still reject).
  */
 async function getEffectiveSigner(originalUserId) {
   if (!originalUserId) return null;
 
   const original = await User.findById(originalUserId)
-    .select('_id name role faculty oicPrimary oicFallback onTravelManual onTravelManualUntil')
+    .select('_id name role faculty oicPrimary onTravelManual onTravelManualUntil')
     .lean();
   if (!original) return null;
 
@@ -119,24 +114,6 @@ async function getEffectiveSigner(originalUserId) {
           originalId: original._id,
           viaOic: 'primary',
           signer: primary,
-          original,
-        };
-      }
-    }
-  }
-
-  if (original.oicFallback) {
-    const fallback = await User.findById(original.oicFallback)
-      .select('_id name role faculty onTravelManual onTravelManualUntil')
-      .lean();
-    if (fallback) {
-      const fallbackStatus = await isUserOnTravel(fallback);
-      if (!fallbackStatus.onTravel) {
-        return {
-          signerId: fallback._id,
-          originalId: original._id,
-          viaOic: 'fallback',
-          signer: fallback,
           original,
         };
       }
@@ -217,19 +194,9 @@ function buildPrimaryCandidateFilter(user) {
 }
 
 /**
- * Build a Mongo filter for the Fallback "any user" pool, excluding admin/security and self.
- */
-function buildFallbackCandidateFilter(user) {
-  return {
-    _id: { $ne: user._id },
-    role: { $nin: Array.from(FALLBACK_EXCLUDED_ROLES) },
-  };
-}
-
-/**
  * Returns the set of distinct roles for which `userId` is currently the
  * effective OIC (i.e., a user with that role has assigned `userId` as their
- * oicPrimary/oicFallback AND is currently on travel AND `userId` resolves as
+ * oicPrimary AND is currently on travel AND `userId` resolves as
  * the active signer via OIC). Used by the mobile shell to decide which
  * dashboard tabs to surface for a user temporarily standing in for an
  * on-travel approver.
@@ -237,7 +204,7 @@ function buildFallbackCandidateFilter(user) {
 async function getActiveOicForRoles(userId) {
   if (!userId) return [];
   const delegators = await User.find({
-    $or: [{ oicPrimary: userId }, { oicFallback: userId }],
+    oicPrimary: userId,
   })
     .select('_id role')
     .lean();
@@ -260,7 +227,6 @@ async function getActiveOicForRoles(userId) {
 module.exports = {
   RANK_BELOW_BY_ROLE,
   OIC_CAPABLE_ROLES,
-  FALLBACK_EXCLUDED_ROLES,
   isOicCapableRole,
   getRankBelowRoles,
   isUserOnTravel,
@@ -269,7 +235,6 @@ module.exports = {
   resolvePresidentAccount,
   assertCanSignFor,
   buildPrimaryCandidateFilter,
-  buildFallbackCandidateFilter,
   getActiveOicForRoles,
   toIdString,
 };

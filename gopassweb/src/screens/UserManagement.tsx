@@ -1,13 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, Modal, TextInput, Alert, ScrollView, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  Pressable,
+  Modal,
+  TextInput,
+  Alert,
+  ScrollView,
+  Platform,
+} from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
-import { Picker } from '@react-native-picker/picker';
-import axios from 'axios';
+import axios, { isAxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../config/api';
 import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
+import FormSelect from '../components/FormSelect';
 
-// Theme: match AdminScreen / HrpDashboardScreen (#fece00, darker blue, #ffffff)
 const theme = {
   primary: '#011a6b',
   accent: '#fece00',
@@ -15,12 +25,12 @@ const theme = {
   textMuted: 'rgba(1,26,107,0.75)',
   border: 'rgba(1,26,107,0.22)',
   danger: '#dc3545',
+  success: '#22c55e',
+  warning: '#b45309',
 };
 
-// These should match the lists in your RegistrationForm
-const campuses = ['All Campuses', 'Main Campus', 'Baganga Campus', 'Banaybanay Campus', 'Cateel Campus', 'San Isidro Campus', 'Tarragona Campus'];
-const roles = ['All Roles', 'Office Staff', 'Faculty Staff', 'Program Head', 'Human Resource Personnel', 'Office Records', 'Faculty Dean', 'Security Personnel', 'President', 'Vice President'];
-const faculties = ['All Faculties', 'Faculty of Agriculture and Life Sciences', 'Faculty of Computing, Engineering, and Technology', 'Faculty of Criminal Justice Education', 'Faculty of Nursing and Allied Health Sciences', 'Faculty of Humanities, Social Science, and Communication', 'Faculty of Teacher Education', 'Faculty of Business Management'];
+const FACULTY_ROLES = ['Faculty Staff', 'Program Head', 'Faculty Dean'];
+const PAGE_SIZE = 10;
 
 interface User {
   _id: string;
@@ -29,6 +39,47 @@ interface User {
   campus: string;
   role: string;
   faculty?: string;
+  employeeId?: string;
+  phone?: string;
+  accountStatus?: string;
+}
+
+function showMessage(title: string, message: string) {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+}
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (isAxiosError(error) && error.response?.data?.message) {
+    return error.response.data.message as string;
+  }
+  return fallback;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const normalized = (status || 'active').toLowerCase();
+  const badgeStyle =
+    normalized === 'pending'
+      ? styles.statusPending
+      : normalized === 'rejected'
+        ? styles.statusRejected
+        : styles.statusActive;
+  const textStyle =
+    normalized === 'pending'
+      ? styles.statusTextPending
+      : normalized === 'rejected'
+        ? styles.statusTextRejected
+        : styles.statusTextActive;
+  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+
+  return (
+    <View style={[styles.statusBadge, badgeStyle]}>
+      <Text style={[styles.statusBadgeText, textStyle]}>{label}</Text>
+    </View>
+  );
 }
 
 const UserManagement = () => {
@@ -38,10 +89,32 @@ const UserManagement = () => {
   const [selectedCampus, setSelectedCampus] = useState('All Campuses');
   const [selectedRole, setSelectedRole] = useState('All Roles');
   const [selectedFaculty, setSelectedFaculty] = useState('All Faculties');
+  const [roles, setRoles] = useState<string[]>(['All Roles']);
+  const [faculties, setFaculties] = useState<string[]>(['All Faculties']);
+  const [extensions, setExtensions] = useState<string[]>(['All Campuses']);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
+
+  useEffect(() => {
+    const loadMetadata = async () => {
+      try {
+        const [rolesRes, facultiesRes, extensionsRes] = await Promise.all([
+          axios.get<string[]>(`${API_URL}/metadata/roles`),
+          axios.get<string[]>(`${API_URL}/metadata/faculties`),
+          axios.get<string[]>(`${API_URL}/metadata/extensions`),
+        ]);
+        setRoles(['All Roles', ...rolesRes.data]);
+        setFaculties(['All Faculties', ...facultiesRes.data]);
+        setExtensions(['All Campuses', ...extensionsRes.data]);
+      } catch (error) {
+        console.error('Failed to load metadata:', error);
+      }
+    };
+    loadMetadata();
+  }, []);
 
   useEffect(() => {
     fetchUsers();
@@ -73,13 +146,13 @@ const UserManagement = () => {
     }
   };
 
-  const totalPages = Math.max(1, Math.ceil(users.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(users.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
-  const startIndex = (safePage - 1) * pageSize;
-  const pagedUsers = users.slice(startIndex, startIndex + pageSize);
+  const startIndex = (safePage - 1) * PAGE_SIZE;
+  const pagedUsers = users.slice(startIndex, startIndex + PAGE_SIZE);
 
   const openEditModal = (user: User) => {
-    setEditingUser(JSON.parse(JSON.stringify(user))); // Create a copy to avoid direct state mutation
+    setEditingUser(JSON.parse(JSON.stringify(user)));
     setIsEditModalVisible(true);
   };
 
@@ -91,185 +164,210 @@ const UserManagement = () => {
       await axios.put(`${API_URL}/admin/users/${editingUser._id}`, editingUser, {
         headers: { 'x-auth-token': token },
       });
-      Alert.alert('Success', 'User updated successfully.');
+      showMessage('Success', 'User updated successfully.');
       setIsEditModalVisible(false);
       fetchUsers();
     } catch (error) {
       console.error('Failed to update user:', error);
-      Alert.alert('Error', 'Failed to update user.');
+      showMessage('Error', getApiErrorMessage(error, 'Failed to update user.'));
     }
   };
 
-  const confirmDelete = (userId: string) => {
-    Alert.alert(
-      'Confirm Deletion',
-      'Are you sure you want to delete this user?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => handleDeleteUser(userId) },
-      ]
-    );
-  };
+  const handleDeleteUser = async () => {
+    if (!deleteTarget) return;
 
-  const handleDeleteUser = async (userId: string) => {
+    setIsDeleting(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      await axios.delete(`${API_URL}/admin/users/${userId}`, {
+      await axios.delete(`${API_URL}/admin/users/${deleteTarget._id}`, {
         headers: { 'x-auth-token': token },
       });
-      Alert.alert('Success', 'User deleted successfully.');
+      setDeleteTarget(null);
+      showMessage('Success', 'User deleted successfully.');
       fetchUsers();
     } catch (error) {
       console.error('Failed to delete user:', error);
-      Alert.alert('Error', 'Failed to delete user.');
+      showMessage('Error', getApiErrorMessage(error, 'Failed to delete user.'));
+    } finally {
+      setIsDeleting(false);
     }
   };
 
-  const renderHeader = () => (
-    <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableHorizontalScroll}>
-      <View style={[styles.tableInner, styles.tableHeader]}>
-        <Text numberOfLines={1} style={[styles.headerText, styles.colName]}>Name</Text>
-        <Text numberOfLines={1} style={[styles.headerText, styles.colEmail]}>Email</Text>
-        <Text numberOfLines={1} style={[styles.headerText, styles.colCampus]}>Campus</Text>
-        <Text numberOfLines={1} style={[styles.headerText, styles.colRole]}>Role</Text>
-        <Text numberOfLines={1} style={[styles.headerText, styles.colFaculty]}>Faculty</Text>
-        <Text numberOfLines={1} style={[styles.headerText, styles.colActions]}>Actions</Text>
-      </View>
-    </ScrollView>
-  );
-
-  const renderItem = ({ item, index }: { item: User; index: number }) => (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableHorizontalScroll}>
-      <View style={[styles.tableInner, styles.tableRow, index % 2 === 1 && styles.tableRowAlt]}>
-        <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.rowText, styles.colName]}>{item.name}</Text>
-        <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.rowText, styles.colEmail]}>{item.email}</Text>
-        <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.rowText, styles.colCampus]}>{item.campus}</Text>
-        <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.rowText, styles.colRole]}>{item.role}</Text>
-        <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.rowText, styles.colFaculty]}>{item.faculty || 'N/A'}</Text>
-        <View style={styles.colActions}>
-          {item.role !== 'admin' && (
-            <>
-              <Pressable
-                style={[styles.actionButton, styles.editButton]}
-                onPress={() => openEditModal(item)}
-                accessibilityLabel="Edit user"
-                {...(Platform.OS === 'web' ? ({ title: 'Edit' } as any) : {})}
-              >
-                <FontAwesome name="pencil" size={16} color="#667085" />
-              </Pressable>
-              <Pressable
-                style={[styles.actionButton, styles.deleteButton]}
-                onPress={() => confirmDelete(item._id)}
-                accessibilityLabel="Delete user"
-                {...(Platform.OS === 'web' ? ({ title: 'Delete' } as any) : {})}
-              >
-                <FontAwesome name="trash" size={16} color="#667085" />
-              </Pressable>
-            </>
-          )}
-        </View>
-      </View>
-    </ScrollView>
-  );
-
-  const renderFooter = () => (
-    <View style={styles.paginationFooter}>
-      <Text style={styles.paginationInfo}>
-        Page {safePage} of {totalPages} • Showing {users.length === 0 ? 0 : startIndex + 1}-{Math.min(startIndex + pageSize, users.length)} of {users.length}
-      </Text>
-      <View style={styles.paginationActions}>
-        <Pressable
-          style={[styles.paginationButton, safePage <= 1 && styles.paginationButtonDisabled]}
-          disabled={safePage <= 1}
-          onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
-        >
-          <Text style={styles.paginationButtonText}>Prev</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.paginationButton, safePage >= totalPages && styles.paginationButtonDisabled]}
-          disabled={safePage >= totalPages}
-          onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-        >
-          <Text style={styles.paginationButtonText}>Next</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-
   return (
     <View style={styles.container}>
-      {/* Edit Modal */}
-      <Modal
-        visible={isEditModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setIsEditModalVisible(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, isCompact && styles.modalContentCompact]}>
+      <View style={styles.toolbar}>
+        <View style={styles.filtersRow}>
+          <FormSelect value={selectedCampus} options={extensions} onChange={setSelectedCampus} style={styles.filterSelect} />
+          <FormSelect value={selectedRole} options={roles} onChange={setSelectedRole} style={styles.filterSelect} />
+          <FormSelect value={selectedFaculty} options={faculties} onChange={setSelectedFaculty} style={styles.filterSelect} />
+        </View>
+        <Text style={styles.resultCount}>
+          {users.length} {users.length === 1 ? 'user' : 'users'}
+        </Text>
+      </View>
+
+      {isLoading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={theme.primary} />
+        </View>
+      ) : (
+        <View style={styles.tableCard}>
+          <View style={styles.tableTopBar} />
+          <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableHScroll}>
+            <View style={styles.tableInner}>
+              <View style={[styles.tableRow, styles.tableHeader]}>
+                <Text style={[styles.headerText, styles.colName]}>Name</Text>
+                <Text style={[styles.headerText, styles.colEmail]}>Email</Text>
+                <Text style={[styles.headerText, styles.colId]}>Employee ID</Text>
+                <Text style={[styles.headerText, styles.colPhone]}>Phone</Text>
+                <Text style={[styles.headerText, styles.colStatus]}>Status</Text>
+                <Text style={[styles.headerText, styles.colCampus]}>Campus</Text>
+                <Text style={[styles.headerText, styles.colRole]}>Role</Text>
+                <Text style={[styles.headerText, styles.colFaculty]}>Faculty</Text>
+                <Text style={[styles.headerText, styles.colActions]}>Actions</Text>
+              </View>
+
+              {pagedUsers.length === 0 ? (
+                <View style={styles.emptyRow}>
+                  <Text style={styles.emptyText}>No users match the selected filters.</Text>
+                </View>
+              ) : (
+                pagedUsers.map((item, index) => (
+                  <View key={item._id} style={[styles.tableRow, index % 2 === 1 && styles.tableRowAlt]}>
+                    <Text numberOfLines={1} style={[styles.cellText, styles.colName]}>{item.name}</Text>
+                    <Text numberOfLines={1} style={[styles.cellText, styles.colEmail]}>{item.email}</Text>
+                    <Text numberOfLines={1} style={[styles.cellText, styles.colId]}>{item.employeeId || '—'}</Text>
+                    <Text numberOfLines={1} style={[styles.cellText, styles.colPhone]}>{item.phone || '—'}</Text>
+                    <View style={styles.colStatus}>
+                      <StatusBadge status={item.accountStatus || 'active'} />
+                    </View>
+                    <Text numberOfLines={1} style={[styles.cellText, styles.colCampus]}>{item.campus}</Text>
+                    <Text numberOfLines={1} style={[styles.cellText, styles.colRole]}>{item.role}</Text>
+                    <Text numberOfLines={1} style={[styles.cellText, styles.colFaculty]}>{item.faculty || '—'}</Text>
+                    <View style={styles.colActions}>
+                      {item.role === 'admin' ? (
+                        <Text style={styles.protectedLabel}>Protected</Text>
+                      ) : (
+                        <>
+                          <Pressable
+                            style={styles.iconBtn}
+                            onPress={() => openEditModal(item)}
+                            accessibilityLabel="Edit user"
+                            {...(Platform.OS === 'web' ? ({ title: 'Edit' } as object) : {})}
+                          >
+                            <FontAwesome name="pencil" size={15} color="#667085" />
+                          </Pressable>
+                          <Pressable
+                            style={styles.iconBtn}
+                            onPress={() => setDeleteTarget(item)}
+                            accessibilityLabel="Delete user"
+                            {...(Platform.OS === 'web' ? ({ title: 'Delete' } as object) : {})}
+                          >
+                            <FontAwesome name="trash" size={15} color="#667085" />
+                          </Pressable>
+                        </>
+                      )}
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+          </ScrollView>
+
+          <View style={styles.paginationFooter}>
+            <Text style={styles.paginationInfo}>
+              Page {safePage} of {totalPages}
+              {users.length > 0
+                ? ` · ${startIndex + 1}–${Math.min(startIndex + PAGE_SIZE, users.length)} of ${users.length}`
+                : ''}
+            </Text>
+            <View style={styles.paginationActions}>
+              <Pressable
+                style={[styles.pageBtn, safePage <= 1 && styles.pageBtnDisabled]}
+                disabled={safePage <= 1}
+                onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                <Text style={styles.pageBtnText}>Previous</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.pageBtn, safePage >= totalPages && styles.pageBtnDisabled]}
+                disabled={safePage >= totalPages}
+                onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                <Text style={styles.pageBtnText}>Next</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      )}
+
+      <Modal visible={isEditModalVisible} transparent animationType="fade" onRequestClose={() => setIsEditModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, isCompact && styles.modalCardCompact]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Edit User</Text>
-              <Pressable onPress={() => setIsEditModalVisible(false)}>
-                <FontAwesome name="close" size={22} color={theme.primary} />
+              <Text style={styles.modalTitle}>Edit user</Text>
+              <Pressable onPress={() => setIsEditModalVisible(false)} hitSlop={8}>
+                <FontAwesome name="times" size={20} color={theme.primary} />
               </Pressable>
             </View>
             {editingUser && (
-              <ScrollView contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
-                <Text style={styles.label}>Name</Text>
+              <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+                <Text style={styles.fieldLabel}>Name</Text>
                 <TextInput
                   style={styles.input}
                   value={editingUser.name}
                   onChangeText={(text) => setEditingUser({ ...editingUser, name: text })}
                   placeholder="Name"
                 />
-                <Text style={styles.label}>Email</Text>
+                <Text style={styles.fieldLabel}>Email</Text>
                 <TextInput
                   style={styles.input}
                   value={editingUser.email}
                   onChangeText={(text) => setEditingUser({ ...editingUser, email: text })}
                   placeholder="Email"
+                  autoCapitalize="none"
                 />
-                <Text style={styles.label}>Campus</Text>
-                <View style={styles.pickerContainerModal}>
-                  <Picker
-                    selectedValue={editingUser.campus}
-                    onValueChange={(itemValue) => setEditingUser({ ...editingUser, campus: itemValue })}
-                    style={styles.picker}
-                  >
-                    {campuses.slice(1).map(c => <Picker.Item key={c} label={c} value={c} />)}
-                  </Picker>
-                </View>
-                <Text style={styles.label}>Role</Text>
-                <View style={styles.pickerContainerModal}>
-                  <Picker
-                    selectedValue={editingUser.role}
-                    onValueChange={(itemValue) => setEditingUser({ ...editingUser, role: itemValue })}
-                    style={styles.picker}
-                  >
-                    {roles.slice(1).map(r => <Picker.Item key={r} label={r} value={r} />)}
-                  </Picker>
-                </View>
-                {['Faculty Staff', 'Program Head', 'Faculty Dean'].includes(editingUser.role) && (
-                  <>
-                    <Text style={styles.label}>Faculty</Text>
-                    <View style={styles.pickerContainerModal}>
-                      <Picker
-                          selectedValue={editingUser.faculty}
-                          onValueChange={(itemValue) => setEditingUser({ ...editingUser, faculty: itemValue })}
-                          style={styles.picker}
-                      >
-                          {faculties.slice(1).map(f => <Picker.Item key={f} label={f} value={f} />)}
-                      </Picker>
-                    </View>
-                  </>
+                <Text style={styles.fieldLabel}>Employee ID</Text>
+                <TextInput
+                  style={styles.input}
+                  value={editingUser.employeeId || ''}
+                  onChangeText={(text) => setEditingUser({ ...editingUser, employeeId: text })}
+                  placeholder="Employee ID"
+                />
+                <Text style={styles.fieldLabel}>Phone</Text>
+                <TextInput
+                  style={styles.input}
+                  value={editingUser.phone || ''}
+                  onChangeText={(text) => setEditingUser({ ...editingUser, phone: text })}
+                  placeholder="Phone"
+                  keyboardType="phone-pad"
+                />
+                <FormSelect
+                  label="Campus / Extension"
+                  value={editingUser.campus}
+                  options={extensions.slice(1)}
+                  onChange={(campus) => setEditingUser({ ...editingUser, campus })}
+                />
+                <FormSelect
+                  label="Role"
+                  value={editingUser.role}
+                  options={roles.slice(1)}
+                  onChange={(role) => setEditingUser({ ...editingUser, role })}
+                />
+                {FACULTY_ROLES.includes(editingUser.role) && (
+                  <FormSelect
+                    label="Faculty"
+                    value={editingUser.faculty || ''}
+                    options={faculties.slice(1)}
+                    onChange={(faculty) => setEditingUser({ ...editingUser, faculty })}
+                  />
                 )}
-
-                <View style={styles.modalButtonContainer}>
-                  <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setIsEditModalVisible(false)}>
-                    <Text style={styles.modalButtonText}>Cancel</Text>
+                <View style={styles.modalActions}>
+                  <Pressable style={styles.modalCancel} onPress={() => setIsEditModalVisible(false)}>
+                    <Text style={styles.modalCancelText}>Cancel</Text>
                   </Pressable>
-                  <Pressable style={[styles.modalButton, styles.saveButton]} onPress={handleUpdateUser}>
-                    <Text style={styles.modalButtonText}>Save Changes</Text>
+                  <Pressable style={styles.modalSave} onPress={handleUpdateUser}>
+                    <Text style={styles.modalSaveText}>Save changes</Text>
                   </Pressable>
                 </View>
               </ScrollView>
@@ -278,74 +376,78 @@ const UserManagement = () => {
         </View>
       </Modal>
 
-      <View style={styles.filtersContainer}>
-        {/* Campus Filter */}
-        <Picker
-          selectedValue={selectedCampus}
-          onValueChange={(itemValue) => setSelectedCampus(itemValue)}
-          style={styles.picker}
-        >
-          {campuses.map(c => <Picker.Item key={c} label={c} value={c} />)}
-        </Picker>
-
-        {/* Role Filter */}
-        <Picker
-          selectedValue={selectedRole}
-          onValueChange={(itemValue) => setSelectedRole(itemValue)}
-          style={styles.picker}
-        >
-          {roles.map(r => <Picker.Item key={r} label={r} value={r} />)}
-        </Picker>
-
-        {/* Faculty Filter */}
-        <Picker
-          selectedValue={selectedFaculty}
-          onValueChange={(itemValue) => setSelectedFaculty(itemValue)}
-          style={styles.picker}
-        >
-          {faculties.map(f => <Picker.Item key={f} label={f} value={f} />)}
-        </Picker>
-      </View>
-
-      {isLoading ? (
-        <ActivityIndicator size="large" color={theme.primary} />
-      ) : (
-        <View style={styles.tableCard}>
-          <FlatList
-            data={pagedUsers}
-            renderItem={renderItem}
-            keyExtractor={(item) => item._id}
-            ListHeaderComponent={renderHeader}
-            ListFooterComponent={renderFooter}
-            contentContainerStyle={styles.tableListContent}
-            showsVerticalScrollIndicator
-          />
+      <Modal visible={!!deleteTarget} transparent animationType="fade" onRequestClose={() => !isDeleting && setDeleteTarget(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, styles.deleteModal]}>
+            <Text style={styles.modalTitle}>Delete user?</Text>
+            <Text style={styles.deleteMessage}>
+              Permanently remove <Text style={styles.deleteName}>{deleteTarget?.name}</Text> ({deleteTarget?.email})?
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalCancel} onPress={() => setDeleteTarget(null)} disabled={isDeleting}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.modalDelete, isDeleting && styles.btnDisabled]} onPress={handleDeleteUser} disabled={isDeleting}>
+                {isDeleting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.modalSaveText}>Delete</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
         </View>
-      )}
+      </Modal>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  label: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: theme.primary,
-    marginBottom: 6,
-    marginTop: 12,
-  },
   container: {
-    flex: 1,
-    padding: 0,
+    gap: 16,
+    ...Platform.select({
+      web: {
+        flexGrow: 0,
+      },
+      default: {
+        flex: 1,
+        minHeight: 0,
+      },
+    }),
   },
-  filtersContainer: {
+  toolbar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  filtersRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    marginBottom: 24,
+    flex: 1,
+    minWidth: 280,
+  },
+  filterSelect: {
+    flex: 1,
+    minWidth: 160,
+    maxWidth: 220,
+    marginBottom: 0,
+  },
+  resultCount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.textMuted,
+    paddingBottom: 4,
+  },
+  loadingWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 200,
+    paddingVertical: 48,
   },
   tableCard: {
-    flex: 1,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: '#EAECF0',
@@ -353,229 +455,259 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...Platform.select({
       web: {
-        boxShadow: '0 1px 2px rgba(16,24,40,0.05), 0 1px 3px rgba(16,24,40,0.10)',
+        boxShadow: '0 1px 3px rgba(16,24,40,0.08)',
+        display: 'flex' as any,
+        flexDirection: 'column' as any,
       },
     }),
   },
-  tableListContent: {
-    paddingBottom: 0,
+  tableTopBar: {
+    height: 3,
+    backgroundColor: theme.accent,
   },
-  paginationFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#EAECF0',
-    backgroundColor: '#FFFFFF',
-  },
-  paginationInfo: {
-    color: '#475467',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  paginationActions: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-  },
-  paginationButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D0D5DD',
-    backgroundColor: '#FFFFFF',
+  tableHScroll: {
     ...Platform.select({
       web: {
-        cursor: 'pointer',
-        boxShadow: '0 1px 2px rgba(16,24,40,0.05)',
+        overflowX: 'auto' as any,
+        maxWidth: '100%' as any,
       },
     }),
-  },
-  paginationButtonDisabled: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#EAECF0',
-    ...Platform.select({
-      web: {
-        cursor: 'not-allowed' as any,
-        boxShadow: 'none' as any,
-      },
-    }),
-  },
-  paginationButtonText: {
-    color: '#344054',
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  tableHorizontalScroll: {
-    flexGrow: 0,
   },
   tableInner: {
-    minWidth: 980,
-  },
-  picker: {
-    flex: 1,
-    minWidth: 160,
-    height: 44,
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EAECF0',
-    paddingVertical: 12,
-    backgroundColor: '#F9FAFB',
-    paddingHorizontal: 20,
-    alignItems: 'center',
-  },
-  headerText: {
-    fontWeight: '600',
-    fontSize: 12,
-    color: '#475467',
-    textAlign: 'left',
+    minWidth: 1080,
   },
   tableRow: {
     flexDirection: 'row',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#EAECF0',
-    alignItems: 'center',
     backgroundColor: '#FFFFFF',
   },
-  tableRowAlt: {
+  tableHeader: {
     backgroundColor: '#F9FAFB',
+    paddingVertical: 10,
   },
-  rowText: {
-    fontSize: 14,
-    color: '#101828',
+  tableRowAlt: {
+    backgroundColor: '#FAFBFC',
+  },
+  headerText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475467',
+    textTransform: 'uppercase',
+    letterSpacing: 0.35,
+  },
+  cellText: {
+    fontSize: 13,
     fontWeight: '500',
-    textAlign: 'left',
+    color: '#101828',
   },
-  colName: { width: 180, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
-  colEmail: { width: 260, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
-  colCampus: { width: 150, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
-  colRole: { width: 200, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
-  colFaculty: { width: 280, flexGrow: 0, flexShrink: 0, paddingRight: 14 },
+  colName: { width: 150, paddingRight: 12, flexShrink: 0 },
+  colEmail: { width: 190, paddingRight: 12, flexShrink: 0 },
+  colId: { width: 96, paddingRight: 12, flexShrink: 0 },
+  colPhone: { width: 108, paddingRight: 12, flexShrink: 0 },
+  colStatus: { width: 88, paddingRight: 12, flexShrink: 0 },
+  colCampus: { width: 120, paddingRight: 12, flexShrink: 0 },
+  colRole: { width: 150, paddingRight: 12, flexShrink: 0 },
+  colFaculty: { width: 170, paddingRight: 12, flexShrink: 0 },
   colActions: {
-    width: 120,
-    flexGrow: 0,
+    width: 80,
     flexShrink: 0,
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 2,
   },
-  /** ButtonUtility xs tertiary — transparent, hover bg, slate icon */
-  actionButton: {
+  statusBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  statusTextActive: { color: '#15803d' },
+  statusTextPending: { color: '#92400e' },
+  statusTextRejected: { color: '#b42318' },
+  statusActive: {
+    backgroundColor: 'rgba(34,197,94,0.12)',
+  },
+  statusPending: {
+    backgroundColor: 'rgba(254,206,0,0.35)',
+  },
+  statusRejected: {
+    backgroundColor: 'rgba(220,53,69,0.12)',
+  },
+  iconBtn: {
     width: 32,
     height: 32,
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'transparent',
-    ...Platform.select({
-      web: {
-        cursor: 'pointer',
-        transitionProperty: 'background-color' as any,
-        transitionDuration: '120ms' as any,
-      },
-    }),
+    ...Platform.select({ web: { cursor: 'pointer' as const } }),
   },
-  actionButtonText: {
-    color: '#667085',
+  protectedLabel: {
+    fontSize: 11,
     fontWeight: '600',
-    textAlign: 'center',
+    color: theme.textMuted,
+    fontStyle: 'italic',
   },
-  editButton: {
-    backgroundColor: 'transparent',
+  emptyRow: {
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+    alignItems: 'center',
   },
-  deleteButton: {
-    backgroundColor: 'transparent',
+  emptyText: {
+    fontSize: 14,
+    color: theme.textMuted,
   },
-  modalContainer: {
+  paginationFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#EAECF0',
+    backgroundColor: '#FAFBFC',
+    flexShrink: 0,
+  },
+  paginationInfo: {
+    fontSize: 13,
+    color: '#475467',
+    fontWeight: '500',
+  },
+  paginationActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  pageBtn: {
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    backgroundColor: '#FFFFFF',
+    ...Platform.select({ web: { cursor: 'pointer' as const } }),
+  },
+  pageBtnDisabled: {
+    opacity: 0.45,
+    ...Platform.select({ web: { cursor: 'not-allowed' as const } }),
+  },
+  pageBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#344054',
+  },
+  modalOverlay: {
     flex: 1,
+    backgroundColor: 'rgba(1,26,107,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(1,26,107,0.2)',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    padding: 20,
   },
-  modalContent: {
+  modalCard: {
     width: '100%',
-    maxWidth: 560,
+    maxWidth: 520,
     maxHeight: '90%',
     backgroundColor: theme.surface,
-    borderRadius: 16,
-    padding: 28,
-    borderWidth: 2,
+    borderRadius: 14,
+    padding: 24,
+    borderWidth: 1,
     borderTopWidth: 4,
+    borderColor: theme.border,
     borderTopColor: theme.accent,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 20px 50px rgba(1,26,107,0.15)',
-      },
-    }),
+    ...Platform.select({ web: { boxShadow: '0 16px 40px rgba(1,26,107,0.12)' } }),
   },
-  modalContentCompact: {
-    padding: 20,
-    borderRadius: 12,
-  },
+  modalCardCompact: { padding: 20 },
+  deleteModal: { maxWidth: 420 },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
-    borderBottomWidth: 2,
+    paddingBottom: 12,
+    marginBottom: 8,
+    borderBottomWidth: 1,
     borderBottomColor: theme.border,
-    paddingBottom: 14,
   },
+  modalScroll: { maxHeight: 420 },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: theme.primary,
   },
-  input: {
-    borderWidth: 2,
-    borderColor: theme.border,
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 16,
-    fontSize: 15,
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
     color: theme.primary,
+    marginBottom: 6,
+    marginTop: 8,
   },
-  modalButtonContainer: {
+  input: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: theme.primary,
+    marginBottom: 4,
+  },
+  modalActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginTop: 24,
-    gap: 12,
+    gap: 10,
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
   },
-  modalButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 22,
-    borderRadius: 10,
-    minWidth: 120,
-    alignItems: 'center',
+  modalCancel: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    ...Platform.select({ web: { cursor: 'pointer' as const } }),
   },
-  modalButtonText: {
-    color: theme.surface,
+  modalCancelText: {
+    color: theme.textMuted,
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: 14,
   },
-  saveButton: {
+  modalSave: {
     backgroundColor: theme.primary,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    ...Platform.select({ web: { cursor: 'pointer' as const } }),
   },
-  cancelButton: {
-    backgroundColor: 'rgba(1,26,107,0.35)',
+  modalDelete: {
+    backgroundColor: theme.danger,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    minWidth: 88,
+    alignItems: 'center',
+    ...Platform.select({ web: { cursor: 'pointer' as const } }),
   },
-  pickerContainerModal: {
-    borderWidth: 2,
-    borderColor: theme.border,
-    borderRadius: 10,
-    marginBottom: 16,
-    justifyContent: 'center',
+  modalSaveText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
   },
+  deleteMessage: {
+    fontSize: 14,
+    color: theme.textMuted,
+    lineHeight: 21,
+    marginTop: 4,
+  },
+  deleteName: {
+    fontWeight: '700',
+    color: theme.primary,
+  },
+  btnDisabled: { opacity: 0.65 },
 });
 
 export default UserManagement;

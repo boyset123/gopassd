@@ -3,11 +3,11 @@ import { FontAwesome } from '@expo/vector-icons';
 import React, { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-import { View, ActivityIndicator, Platform, Pressable, StyleSheet, Alert, Text, useWindowDimensions } from 'react-native';
+import { View, ActivityIndicator, Platform, Pressable, StyleSheet, Text, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { CreateModalProvider, useCreateModal } from '../../contexts/CreateModalContext';
+import { CreateModalProvider } from '../../contexts/CreateModalContext';
 import { API_URL } from '../../config/api';
 
 const tabTheme = {
@@ -36,7 +36,6 @@ const speedDialActions = [
 function SlipsFAB() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { hasOngoingSubmission } = useCreateModal();
   const [open, setOpen] = useState(false);
   const scale = useSharedValue(1);
   const iconRotation = useSharedValue(0);
@@ -112,15 +111,7 @@ function SlipsFAB() {
   };
 
   const toggleSpeedDial = () => {
-    if (hasOngoingSubmission) {
-      Alert.alert(
-        'Ongoing Submission',
-        'You cannot create a new submission while another one is still in progress.',
-        [{ text: 'OK' }]
-      );
-    } else {
-      setOpen((prev) => !prev);
-    }
+    setOpen((prev) => !prev);
   };
 
   const handleSpeedDialAction = (route: '/forms/createPassSlip' | '/forms/createTravelOrder') => {

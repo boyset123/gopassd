@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, Platform, Alert, TouchableOpacity, Modal, Image, ImageBackground, FlatList, ActivityIndicator, Keyboard, KeyboardAvoidingView } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, Platform, Alert, TouchableOpacity, Modal, Image, ImageBackground, FlatList, ActivityIndicator, Keyboard, KeyboardAvoidingView, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import { WebView } from 'react-native-webview';
 import polyline from '@mapbox/polyline';
-import { useRouter, Stack, useFocusEffect } from 'expo-router';
+import { useRouter, Stack } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
@@ -44,10 +44,25 @@ const theme = {
   warningBg: 'rgba(180, 83, 9, 0.12)',
 };
 
+interface OicUserSummary {
+  _id: string;
+  name: string;
+  role?: string;
+  faculty?: string;
+}
+
 interface User {
   _id: string;
   name: string;
   role: string; // Position
+  faculty?: string;
+  oicPrimary?: OicUserSummary | null;
+}
+
+interface OicCandidate {
+  _id: string;
+  name: string;
+  role?: string;
   faculty?: string;
 }
 
@@ -146,8 +161,18 @@ const CreateTravelOrderScreen = () => {
   const [departureDate, setDepartureDate] = useState(new Date());
   const [arrivalDate, setArrivalDate] = useState(new Date());
   const [additionalInfo, setAdditionalInfo] = useState('');
+  const [travelType, setTravelType] = useState<'OB' | 'OT'>('OB');
+  const [timeOut, setTimeOut] = useState(new Date());
+  const [showTimeOutPicker, setShowTimeOutPicker] = useState(false);
   const [officialBusinessNote, setOfficialBusinessNote] = useState('');
+  const [chargeableAgainstHigherEd, setChargeableAgainstHigherEd] = useState(false);
   const [chargeableAgainstNote, setChargeableAgainstNote] = useState('');
+  const [selectedOic, setSelectedOic] = useState<{ id: string; name: string } | null>(null);
+  const [profileOicId, setProfileOicId] = useState<string | null>(null);
+  const [isOicModalVisible, setIsOicModalVisible] = useState(false);
+  const [oicCandidates, setOicCandidates] = useState<OicCandidate[]>([]);
+  const [oicSearch, setOicSearch] = useState('');
+  const [isLoadingOicCandidates, setIsLoadingOicCandidates] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -194,46 +219,6 @@ const CreateTravelOrderScreen = () => {
     return x;
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      const checkOngoingSubmissions = async () => {
-        try {
-          const token = await AsyncStorage.getItem('userToken');
-          if (!token) {
-            router.replace('/');
-            return;
-          }
-          const headers = { 'x-auth-token': token };
-
-          const [slipsResponse, ordersResponse] = await Promise.all([
-            axios.get(`${API_URL}/pass-slips/my-slips`, { headers }),
-            axios.get(`${API_URL}/travel-orders/my-orders`, { headers }),
-          ]);
-
-          const combinedSubmissions = [
-            ...slipsResponse.data.map((slip: any) => ({ ...slip, type: 'Pass Slip' })),
-            ...ordersResponse.data.map((order: any) => ({ ...order, type: 'Travel Order' })),
-          ];
-
-          const ongoingStatuses = ['Pending', 'Recommended', 'Approved', 'For President Approval'];
-          const hasOngoing = combinedSubmissions.some(s => ongoingStatuses.includes(s.status));
-
-          if (hasOngoing) {
-            Alert.alert(
-              'Ongoing Submission',
-              'You cannot create a new travel order while another submission is in progress.',
-              [{ text: 'OK', onPress: () => router.back() }]
-            );
-          }
-        } catch (error) {
-          console.error('Failed to check ongoing submissions:', error);
-        }
-      };
-
-      checkOngoingSubmissions();
-    }, [router])
-  );
-
   useEffect(() => {
     const fetchUserData = async () => {
       const token = await AsyncStorage.getItem('userToken');
@@ -241,6 +226,14 @@ const CreateTravelOrderScreen = () => {
         try {
           const response = await axios.get(`${API_URL}/users/me`, { headers: { 'x-auth-token': token } });
           setUser(response.data);
+          const primary = response.data?.oicPrimary;
+          if (primary?._id) {
+            setSelectedOic({ id: primary._id, name: primary.name });
+            setProfileOicId(primary._id);
+          } else {
+            setSelectedOic(null);
+            setProfileOicId(null);
+          }
         } catch (error) {
           console.error('Failed to fetch user data:', error);
         }
@@ -447,6 +440,48 @@ const CreateTravelOrderScreen = () => {
     setRecommenders(newRecommenders);
   };
 
+  const openOicPicker = async () => {
+    setOicSearch('');
+    setOicCandidates([]);
+    setIsLoadingOicCandidates(true);
+    setIsOicModalVisible(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await axios.get(`${API_URL}/users/me/oic-candidates`, {
+        headers: { 'x-auth-token': token },
+      });
+      setOicCandidates(response.data?.candidates || []);
+    } catch (error: any) {
+      console.error('Failed to fetch OIC candidates:', error);
+      Alert.alert('Could not load candidates', error?.response?.data?.message || 'Please try again.');
+      setIsOicModalVisible(false);
+    } finally {
+      setIsLoadingOicCandidates(false);
+    }
+  };
+
+  const handleSelectOicCandidate = (candidate: OicCandidate | null) => {
+    if (candidate) {
+      setSelectedOic({ id: candidate._id, name: candidate.name });
+    } else {
+      setSelectedOic(null);
+    }
+    setIsOicModalVisible(false);
+    setOicSearch('');
+  };
+
+  const filteredOicCandidates = oicCandidates.filter((c) => {
+    if (!oicSearch.trim()) return true;
+    const q = oicSearch.trim().toLowerCase();
+    return c.name.toLowerCase().includes(q) || (c.role || '').toLowerCase().includes(q);
+  });
+
+  const travelTypeLabel = travelType === 'OT' ? 'Official Time Travel' : 'Official Business Travel';
+  const travelDirectiveText =
+    travelType === 'OT'
+      ? 'You are hereby directed to travel on official time:'
+      : 'You are hereby directed to travel on official business:';
+
   const alertOversizedSupportingFiles = useCallback(() => {
     const oversized = supportingFiles.filter((f) => isSupportingFileOversized(f.sizeBytes));
     if (oversized.length === 0) return false;
@@ -557,6 +592,43 @@ const CreateTravelOrderScreen = () => {
     const normalized = new Date(d);
     normalized.setSeconds(0, 0);
     return normalized.toISOString();
+  };
+
+  const appendCoreTravelOrderFields = (target: Record<string, string>) => {
+    target.employeeAddress = employeeAddress;
+    target.travelOrderNo = travelOrderNo ?? '';
+    target.date = toISOStringAtMinute(date);
+    target.address = address;
+    target.salary = salary ?? '';
+    target.to = address;
+    target.purpose = purpose;
+    target.departureDate = toISOStringAtMinute(departureDate);
+    target.arrivalDate = toISOStringAtMinute(arrivalDate);
+    target.additionalInfo = additionalInfo ?? '';
+    target.travelType = travelType;
+    target.officialBusinessNote = travelType === 'OB' ? (officialBusinessNote ?? '') : '';
+    target.chargeableAgainstHigherEd = chargeableAgainstHigherEd ? 'true' : 'false';
+    target.chargeableAgainstNote = chargeableAgainstHigherEd ? (chargeableAgainstNote ?? '') : '';
+    if (travelType === 'OT') {
+      target.timeOut = timeOut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+    if (location?.latitude != null && location?.longitude != null) {
+      target.latitude = String(location.latitude);
+      target.longitude = String(location.longitude);
+    }
+    if (routePolyline) target.routePolyline = routePolyline;
+  };
+
+  const syncProgramHeadOicIfNeeded = async (token: string) => {
+    if (user?.role !== 'Program Head') return;
+    const selectedId = selectedOic?.id || null;
+    if (selectedId === profileOicId) return;
+    await axios.put(
+      `${API_URL}/users/me/oic`,
+      { oicPrimary: selectedId },
+      { headers: { 'x-auth-token': token } }
+    );
+    setProfileOicId(selectedId);
   };
 
   /** Show card at 0% immediately, then animate while file metadata is read. */
@@ -735,28 +807,14 @@ const CreateTravelOrderScreen = () => {
       const recommenderPayload = JSON.stringify(recommenders.map((r) => r.id).filter((id) => id));
       const participantsPayload = JSON.stringify(participants.filter((p) => p.trim() !== ''));
 
+      await syncProgramHeadOicIfNeeded(token);
+
       if (supportingFiles.length === 0) {
         const body: Record<string, string> = {
-          employeeAddress,
-          travelOrderNo: travelOrderNo ?? '',
-          date: toISOStringAtMinute(date),
-          address,
-          salary: salary ?? '',
-          to: address,
-          purpose,
-          departureDate: toISOStringAtMinute(departureDate),
-          arrivalDate: toISOStringAtMinute(arrivalDate),
-          additionalInfo: additionalInfo ?? '',
-          officialBusinessNote: officialBusinessNote ?? '',
-          chargeableAgainstNote: chargeableAgainstNote ?? '',
           recommendedBy: recommenderPayload,
           participants: participantsPayload,
         };
-        if (location?.latitude != null && location?.longitude != null) {
-          body.latitude = String(location.latitude);
-          body.longitude = String(location.longitude);
-        }
-        if (routePolyline) body.routePolyline = routePolyline;
+        appendCoreTravelOrderFields(body);
 
         await axios.post(`${API_URL}/travel-orders`, body, {
           headers: {
@@ -767,27 +825,11 @@ const CreateTravelOrderScreen = () => {
         });
       } else {
         const formData = new FormData();
-        formData.append('employeeAddress', employeeAddress);
-        formData.append('travelOrderNo', travelOrderNo ?? '');
-        formData.append('date', toISOStringAtMinute(date));
-        formData.append('address', address);
-        formData.append('salary', salary ?? '');
-        formData.append('to', address);
-        formData.append('purpose', purpose);
-        formData.append('departureDate', toISOStringAtMinute(departureDate));
-        formData.append('arrivalDate', toISOStringAtMinute(arrivalDate));
-        formData.append('additionalInfo', additionalInfo ?? '');
-        formData.append('officialBusinessNote', officialBusinessNote ?? '');
-        formData.append('chargeableAgainstNote', chargeableAgainstNote ?? '');
+        const coreFields: Record<string, string> = {};
+        appendCoreTravelOrderFields(coreFields);
+        Object.entries(coreFields).forEach(([key, value]) => formData.append(key, value));
         formData.append('recommendedBy', recommenderPayload);
         formData.append('participants', participantsPayload);
-        if (location?.latitude != null && location?.longitude != null) {
-          formData.append('latitude', String(location.latitude));
-          formData.append('longitude', String(location.longitude));
-        }
-        if (routePolyline) {
-          formData.append('routePolyline', routePolyline);
-        }
         for (const f of supportingFiles) {
           formData.append('documents', {
             uri: f.uri,
@@ -1015,6 +1057,71 @@ const CreateTravelOrderScreen = () => {
         </View>
       </Modal>
 
+      <Modal visible={isOicModalVisible} animationType="slide" onRequestClose={() => setIsOicModalVisible(false)}>
+        <View style={[styles.userModalContainer, { paddingTop: insets.top + 8 }]}>
+          <View style={styles.recommenderModalHeader}>
+            <View style={styles.recommenderModalTitleRow}>
+              <View style={styles.recommenderModalIconWrap}>
+                <FontAwesome name="user-circle" size={22} color={theme.primary} />
+              </View>
+              <View>
+                <Text style={styles.recommenderModalTitle}>Choose OIC</Text>
+                <Text style={styles.recommenderModalSubtitle}>Faculty Staff from your faculty</Text>
+              </View>
+            </View>
+            <Pressable onPress={() => setIsOicModalVisible(false)} style={styles.recommenderModalCloseBtn} hitSlop={12}>
+              <FontAwesome name="times" size={22} color={theme.textMuted} />
+            </Pressable>
+          </View>
+          <TextInput
+            style={styles.oicSearchInput}
+            placeholderTextColor={theme.placeholder}
+            value={oicSearch}
+            onChangeText={setOicSearch}
+            placeholder="Search by name or role"
+          />
+          {isLoadingOicCandidates ? (
+            <ActivityIndicator color={theme.primary} style={{ marginVertical: 16 }} />
+          ) : (
+            <FlatList
+              data={filteredOicCandidates}
+              keyExtractor={(item) => item._id}
+              contentContainerStyle={styles.recommenderListContent}
+              ListEmptyComponent={
+                <Text style={styles.oicEmptyText}>
+                  {oicSearch ? 'No matches found.' : 'No eligible candidates available.'}
+                </Text>
+              }
+              renderItem={({ item }) => (
+                <Pressable
+                  style={({ pressed }) => [styles.userItem, pressed && styles.userItemPressed]}
+                  onPress={() => handleSelectOicCandidate(item)}
+                >
+                  <View style={styles.userItemIconWrap}>
+                    <FontAwesome name="user" size={18} color={theme.primary} />
+                  </View>
+                  <View style={styles.userItemTextWrap}>
+                    <Text style={styles.userName}>{item.name}</Text>
+                    <Text style={styles.userDetails}>
+                      {item.role}
+                      {item.faculty ? ` · ${item.faculty}` : ''}
+                    </Text>
+                  </View>
+                </Pressable>
+              )}
+            />
+          )}
+          <ModalActionFooter style={styles.modalButtonContainer}>
+            <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setIsOicModalVisible(false)}>
+              <Text style={styles.buttonText}>Cancel</Text>
+            </Pressable>
+            <Pressable style={[styles.modalButton, styles.submitButton]} onPress={() => handleSelectOicCandidate(null)}>
+              <Text style={styles.buttonText}>Clear</Text>
+            </Pressable>
+          </ModalActionFooter>
+        </View>
+      </Modal>
+
       {/* Map Modal - Select Destination */}
       <Modal visible={isMapVisible} animationType="slide" onRequestClose={() => setIsMapVisible(false)}>
         <View style={[styles.mapModalContainer, { paddingTop: insets.top + 8 }]}>
@@ -1111,7 +1218,7 @@ const CreateTravelOrderScreen = () => {
             <Image source={headerLogo} style={styles.screenHeaderLogo} />
             <View style={styles.screenHeaderInner}>
               <Text style={styles.screenHeaderTitle}>Create Travel Order</Text>
-              <Text style={styles.screenHeaderSubtitle}>Official Business Travel</Text>
+              <Text style={styles.screenHeaderSubtitle}>{travelTypeLabel}</Text>
             </View>
           </View>
         </ImageBackground>
@@ -1155,6 +1262,46 @@ const CreateTravelOrderScreen = () => {
                     <Text style={styles.inputDisplayTextReadOnly}>{date.toLocaleDateString()}</Text>
                   </View>
                 </Pressable>
+              </View>
+            </View>
+
+            <View style={[styles.fieldContainer, styles.fieldContainerTight]}>
+              <Text style={styles.label}>Travel Type:</Text>
+              <View style={styles.travelTypeSegmentRow}>
+                {(['OB', 'OT'] as const).map((type) => {
+                  const selected = travelType === type;
+                  const label = type === 'OB' ? 'Official Business' : 'Official Time';
+                  return (
+                    <Pressable
+                      key={type}
+                      onPress={() => setTravelType(type)}
+                      style={({ pressed }) => [
+                        styles.travelTypeSegment,
+                        selected && styles.travelTypeSegmentSelected,
+                        pressed && !selected && styles.travelTypeSegmentPressed,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                    >
+                      <Text
+                        style={[
+                          styles.travelTypeSegmentCode,
+                          selected && styles.travelTypeSegmentTextSelected,
+                        ]}
+                      >
+                        {type}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.travelTypeSegmentLabel,
+                          selected && styles.travelTypeSegmentTextSelected,
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             </View>
 
@@ -1214,7 +1361,7 @@ const CreateTravelOrderScreen = () => {
               />
             </View>
 
-            <Text style={styles.sectionText}>You are hereby directed to travel on official business:</Text>
+            <Text style={styles.sectionText}>{travelDirectiveText}</Text>
 
             <View style={[styles.fieldContainer, styles.fieldContainerTight]}>
               <Text style={styles.label}>To (Address / Destination)</Text>
@@ -1321,12 +1468,171 @@ const CreateTravelOrderScreen = () => {
               </View>
             </View>
 
+            {travelType === 'OT' && (
+              <View style={[styles.fieldContainer, styles.fieldContainerTight]}>
+                <Text style={styles.label}>Time Out:</Text>
+                <Pressable onPress={() => setShowTimeOutPicker(true)}>
+                  <View style={[styles.input, styles.inputReadOnly]}>
+                    <Text style={styles.inputDisplayTextReadOnly}>
+                      {timeOut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+            )}
+
             <Text style={styles.sectionText}>You shall be guided further by the following additional instruction and information on</Text>
             <View style={[styles.fieldContainer, styles.fieldContainerTight]}>
               <TextInput style={styles.input} value={additionalInfo} onChangeText={setAdditionalInfo} placeholder="Additional instructions" placeholderTextColor={theme.placeholder} />
             </View>
 
-            <View style={[styles.fieldContainer, styles.fieldContainerTight]}>
+            {location && (
+              <View style={[styles.fieldContainer, styles.fieldContainerTight]}>
+                <Text style={styles.label}>Selected Location:</Text>
+                <Text style={styles.locationCoordsText}>Latitude: {location.latitude.toFixed(4)}, Longitude: {location.longitude.toFixed(4)}</Text>
+              </View>
+            )}
+            {locationError && (
+              <View style={styles.locationErrorRow}>
+                <FontAwesome name="exclamation-circle" size={14} color={theme.danger} style={styles.locationErrorIcon} />
+                <Text style={[styles.errorText, styles.locationErrorText]}>{locationError}</Text>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.retryLocationBtn,
+                    isLocatingUser && styles.retryLocationBtnDisabled,
+                    pressed && !isLocatingUser && styles.retryLocationBtnPressed,
+                  ]}
+                  onPress={fetchUserLocation}
+                  disabled={isLocatingUser}
+                  accessibilityLabel="Retry detecting current location"
+                >
+                  {isLocatingUser ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <FontAwesome name="refresh" size={14} color="#fff" style={styles.retryLocationBtnIcon} />
+                      <Text style={styles.retryLocationBtnText}>Retry</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            )}
+
+            {travelType === 'OB' && (
+              <View style={styles.expenseNoteRow}>
+                <Text style={[styles.staticTextFirst, styles.expenseNotePrefix]}>
+                  Your travelling expenses in the field will be authorized or allowed under Official Business
+                </Text>
+                <TextInput
+                  style={styles.inlineInput}
+                  value={officialBusinessNote}
+                  onChangeText={setOfficialBusinessNote}
+                  placeholder="Optional"
+                  placeholderTextColor={theme.placeholder}
+                />
+              </View>
+            )}
+            <View style={styles.fundingToggleRow}>
+              <Text style={[styles.staticText, styles.fundingToggleLabel]}>
+                Chargeable against Higher Education funds
+              </Text>
+              <Switch
+                value={chargeableAgainstHigherEd}
+                onValueChange={setChargeableAgainstHigherEd}
+                trackColor={{ true: theme.primary, false: '#cbd5e1' }}
+                thumbColor={chargeableAgainstHigherEd ? theme.accent : '#f4f4f5'}
+              />
+            </View>
+            {chargeableAgainstHigherEd && (
+              <View style={styles.expenseNoteRow}>
+                <Text style={[styles.staticText, styles.expenseNotePrefix]}>Fund details (optional)</Text>
+                <TextInput
+                  style={styles.inlineInput}
+                  value={chargeableAgainstNote}
+                  onChangeText={setChargeableAgainstNote}
+                  placeholder="Optional"
+                  placeholderTextColor={theme.placeholder}
+                />
+              </View>
+            )}
+            <Text style={styles.staticText}>Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.</Text>
+
+            <View style={[styles.signatureContainer, styles.sectionGap]}>
+              <View style={styles.recommenderHeaderRow}>
+                <Text style={styles.signatureLabel}>Recommended by:</Text>
+                <Pressable onPress={handleAddRecommender} style={styles.addButton}>
+                  <FontAwesome name="plus" size={20} color={theme.primary} />
+                </Pressable>
+              </View>
+              {recommenders[0] && (
+                <View style={styles.recommenderRow}>
+                  <TextInput
+                    style={styles.signatureNameInput}
+                    value={recommenders[0].name}
+                    onChangeText={(text) => handleRecommenderChange(text, 0)}
+                    placeholder="Immediate Chief"
+                    placeholderTextColor={theme.placeholder}
+                    editable={user?.role !== 'Faculty Staff'}
+                  />
+                  {user?.role !== 'Faculty Staff' && (
+                    <Pressable onPress={() => { setSelectingRecommenderIndex(0); setIsUserModalVisible(true); }} style={styles.selectUserButton}>
+                      <FontAwesome name="search" size={20} color={theme.primary} />
+                    </Pressable>
+                  )}
+                </View>
+              )}
+              <Text style={styles.signatureTitle}>Immediate Chief</Text>
+
+              {recommenders.slice(1).map((recommender, index) => (
+                <View key={index + 1}>
+                  <View style={styles.recommenderRow}>
+                    <TextInput
+                      style={styles.signatureNameInput}
+                      value={recommender.name}
+                      onChangeText={(text) => handleRecommenderChange(text, index + 1)}
+                      placeholder={`Recommender ${index + 2}`}
+                      placeholderTextColor={theme.placeholder}
+                    />
+                    <Pressable onPress={() => { setSelectingRecommenderIndex(index + 1); setIsUserModalVisible(true); }} style={styles.selectUserButton}>
+                      <FontAwesome name="search" size={20} color={theme.primary} />
+                    </Pressable>
+                    <Pressable onPress={() => handleRemoveRecommender(index + 1)} style={styles.removeButton}>
+                      <FontAwesome name="minus" size={20} color={theme.danger} />
+                    </Pressable>
+                  </View>
+                  <Text style={styles.signatureTitle}>Immediate Chief</Text>
+                </View>
+              ))}
+            </View>
+
+            {user?.role === 'Program Head' && (
+              <View style={[styles.signatureContainer, styles.sectionGap]}>
+                <Text style={styles.signatureLabel}>Officer-In-Charge (OIC)</Text>
+                <Text style={styles.oicHelperText}>
+                  This person can sign on your behalf when you are on travel.
+                </Text>
+                <Pressable style={styles.oicPickerButton} onPress={() => void openOicPicker()}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.oicPickerName}>
+                      {selectedOic ? selectedOic.name : 'Not assigned'}
+                    </Text>
+                  </View>
+                  <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
+                </Pressable>
+              </View>
+            )}
+
+            <View style={styles.signatureContainerSpaced}>
+              <Text style={styles.signatureLabel}>Approved by:</Text>
+              <TextInput
+                style={[styles.signatureNameInput, styles.signatureNameInputDisabled]}
+                value={presidentName}
+                editable={false}
+              />
+              <Text style={styles.signatureTitle}>President</Text>
+            </View>
+
+            <View style={[styles.fieldContainer, styles.fieldContainerTight, styles.sectionGap]}>
               <Text style={styles.label}>Supporting files (optional)</Text>
               <Text style={styles.supportingDocHint}>
                 Invitation, program, or other proof — up to {MAX_SUPPORTING_FILES} files (PDF, Word .docx, or images; max 5 MB each).
@@ -1482,120 +1788,6 @@ const CreateTravelOrderScreen = () => {
               })}
             </View>
 
-            {location && (
-              <View style={[styles.fieldContainer, styles.fieldContainerTight]}>
-                <Text style={styles.label}>Selected Location:</Text>
-                <Text style={styles.locationCoordsText}>Latitude: {location.latitude.toFixed(4)}, Longitude: {location.longitude.toFixed(4)}</Text>
-              </View>
-            )}
-            {locationError && (
-              <View style={styles.locationErrorRow}>
-                <FontAwesome name="exclamation-circle" size={14} color={theme.danger} style={styles.locationErrorIcon} />
-                <Text style={[styles.errorText, styles.locationErrorText]}>{locationError}</Text>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.retryLocationBtn,
-                    isLocatingUser && styles.retryLocationBtnDisabled,
-                    pressed && !isLocatingUser && styles.retryLocationBtnPressed,
-                  ]}
-                  onPress={fetchUserLocation}
-                  disabled={isLocatingUser}
-                  accessibilityLabel="Retry detecting current location"
-                >
-                  {isLocatingUser ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <>
-                      <FontAwesome name="refresh" size={14} color="#fff" style={styles.retryLocationBtnIcon} />
-                      <Text style={styles.retryLocationBtnText}>Retry</Text>
-                    </>
-                  )}
-                </Pressable>
-              </View>
-            )}
-
-            <View style={styles.expenseNoteRow}>
-              <Text style={[styles.staticTextFirst, styles.expenseNotePrefix]}>
-                Your travelling expenses in the field will be authorized or allowed under Official Business
-              </Text>
-              <TextInput
-                style={styles.inlineInput}
-                value={officialBusinessNote}
-                onChangeText={setOfficialBusinessNote}
-                placeholder="Optional"
-                placeholderTextColor={theme.placeholder}
-              />
-            </View>
-            <View style={styles.expenseNoteRow}>
-              <Text style={[styles.staticText, styles.expenseNotePrefix]}>Chargeable against Higher Education</Text>
-              <TextInput
-                style={styles.inlineInput}
-                value={chargeableAgainstNote}
-                onChangeText={setChargeableAgainstNote}
-                placeholder="Optional"
-                placeholderTextColor={theme.placeholder}
-              />
-            </View>
-            <Text style={styles.staticText}>Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.</Text>
-
-            <View style={[styles.signatureContainer, styles.sectionGap]}>
-              <View style={styles.recommenderHeaderRow}>
-                <Text style={styles.signatureLabel}>Recommended by:</Text>
-                <Pressable onPress={handleAddRecommender} style={styles.addButton}>
-                  <FontAwesome name="plus" size={20} color={theme.primary} />
-                </Pressable>
-              </View>
-              {recommenders[0] && (
-                <View style={styles.recommenderRow}>
-                  <TextInput
-                    style={styles.signatureNameInput}
-                    value={recommenders[0].name}
-                    onChangeText={(text) => handleRecommenderChange(text, 0)}
-                    placeholder="Immediate Chief"
-                    placeholderTextColor={theme.placeholder}
-                    editable={user?.role !== 'Faculty Staff'}
-                  />
-                  {user?.role !== 'Faculty Staff' && (
-                    <Pressable onPress={() => { setSelectingRecommenderIndex(0); setIsUserModalVisible(true); }} style={styles.selectUserButton}>
-                      <FontAwesome name="search" size={20} color={theme.primary} />
-                    </Pressable>
-                  )}
-                </View>
-              )}
-              <Text style={styles.signatureTitle}>Immediate Chief</Text>
-
-              {recommenders.slice(1).map((recommender, index) => (
-                <View key={index + 1}>
-                  <View style={styles.recommenderRow}>
-                    <TextInput
-                      style={styles.signatureNameInput}
-                      value={recommender.name}
-                      onChangeText={(text) => handleRecommenderChange(text, index + 1)}
-                      placeholder={`Recommender ${index + 2}`}
-                      placeholderTextColor={theme.placeholder}
-                    />
-                    <Pressable onPress={() => { setSelectingRecommenderIndex(index + 1); setIsUserModalVisible(true); }} style={styles.selectUserButton}>
-                      <FontAwesome name="search" size={20} color={theme.primary} />
-                    </Pressable>
-                    <Pressable onPress={() => handleRemoveRecommender(index + 1)} style={styles.removeButton}>
-                      <FontAwesome name="minus" size={20} color={theme.danger} />
-                    </Pressable>
-                  </View>
-                  <Text style={styles.signatureTitle}>Immediate Chief</Text>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.signatureContainerSpaced}>
-              <Text style={styles.signatureLabel}>Approved by:</Text>
-              <TextInput
-                style={[styles.signatureNameInput, styles.signatureNameInputDisabled]}
-                value={presidentName}
-                editable={false}
-              />
-              <Text style={styles.signatureTitle}>President</Text>
-            </View>
-
             {showDatePicker && (
               <DateTimePicker
                 value={date}
@@ -1647,6 +1839,17 @@ const CreateTravelOrderScreen = () => {
             )}
             {showArrivalTimePicker && (
               <DateTimePicker value={arrivalDate} mode="time" display="default" onChange={(event, selectedDate) => { setShowArrivalTimePicker(false); if (selectedDate) setArrivalDate(mergeTimeIntoDate(arrivalDate, selectedDate)); }} />
+            )}
+            {showTimeOutPicker && (
+              <DateTimePicker
+                value={timeOut}
+                mode="time"
+                display="default"
+                onChange={(event, selectedDate) => {
+                  setShowTimeOutPicker(false);
+                  if (selectedDate) setTimeOut(selectedDate);
+                }}
+              />
             )}
 
             <View style={[styles.buttonContainer, styles.sectionGap]}>
@@ -1740,7 +1943,7 @@ const CreateTravelOrderScreen = () => {
                   </Text>
                 </View>
 
-                <Text style={styles.directiveText}>You are hereby directed to travel on official business:</Text>
+                <Text style={styles.directiveText}>{travelDirectiveText}</Text>
 
                 <View style={styles.formRow}>
                   <Text style={styles.formLabel}>TO:</Text>
@@ -1761,28 +1964,38 @@ const CreateTravelOrderScreen = () => {
                   <Text style={styles.formLabel}>Date of Arrival:</Text>
                   <Text style={styles.formValue}>{`${arrivalDate.toLocaleDateString()} ${arrivalDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}`}</Text>
                 </View>
+                {travelType === 'OT' && (
+                  <View style={styles.formRow}>
+                    <Text style={styles.formLabel}>Time Out:</Text>
+                    <Text style={styles.formValue}>
+                      {timeOut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                    </Text>
+                  </View>
+                )}
 
                 <Text style={styles.infoText}>You shall be guided further by the following additional instruction and information on <Text style={{ textDecorationLine: 'underline', textDecorationColor: '#000' }}>{additionalInfo}</Text></Text>
+                {travelType === 'OB' && (
+                  <Text style={styles.infoText}>
+                    Your travelling expenses in the field will be authorized or allowed under Official Business,{' '}
+                    <Text style={styles.previewOptionalNote}>
+                      {officialBusinessNote.trim() || BLANK_OPTIONAL_NOTE_LINE}
+                    </Text>
+                    .
+                  </Text>
+                )}
+                <Text style={styles.infoText}>
+                  Chargeable against Higher Education{chargeableAgainstHigherEd ? '' : ' (not applicable)'},{' '}
+                  <Text style={styles.previewOptionalNote}>
+                    {chargeableAgainstHigherEd ? (chargeableAgainstNote.trim() || BLANK_OPTIONAL_NOTE_LINE) : BLANK_OPTIONAL_NOTE_LINE}
+                  </Text>
+                  .
+                </Text>
                 {supportingFiles.length > 0 ? (
                   <Text style={styles.infoText}>
                     Supporting files attached ({supportingFiles.length}):{' '}
                     {supportingFiles.map((f) => f.name).join(', ')}
                   </Text>
                 ) : null}
-                <Text style={styles.infoText}>
-                  Your travelling expenses in the field will be authorized or allowed under Official Business,{' '}
-                  <Text style={styles.previewOptionalNote}>
-                    {officialBusinessNote.trim() || BLANK_OPTIONAL_NOTE_LINE}
-                  </Text>
-                  .
-                </Text>
-                <Text style={styles.infoText}>
-                  Chargeable against Higher Education,{' '}
-                  <Text style={styles.previewOptionalNote}>
-                    {chargeableAgainstNote.trim() || BLANK_OPTIONAL_NOTE_LINE}
-                  </Text>
-                  .
-                </Text>
                 <Text style={styles.infoText}>Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.</Text>
 
                 <View style={styles.signatureSection}>
@@ -2807,6 +3020,56 @@ const styles = StyleSheet.create({
   staticTextFirst: { fontSize: 14, color: theme.textMuted, marginTop: 20, marginBottom: 4, fontStyle: 'italic' },
   expenseNoteRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginBottom: 4 },
   expenseNotePrefix: { marginBottom: 0, flexShrink: 1 },
+  fundingToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 4,
+    gap: 12,
+  },
+  fundingToggleLabel: { flex: 1, marginTop: 0, marginBottom: 0 },
+  oicHelperText: {
+    fontSize: 13,
+    color: theme.textMuted,
+    marginBottom: 10,
+    lineHeight: 18,
+  },
+  oicPickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(1,26,107,0.04)',
+    width: '100%',
+  },
+  oicPickerName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: theme.text,
+  },
+  oicSearchInput: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: theme.text,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: '#fff',
+  },
+  oicEmptyText: {
+    textAlign: 'center',
+    color: theme.textMuted,
+    fontSize: 14,
+    marginVertical: 24,
+    paddingHorizontal: 16,
+  },
   inlineInput: {
     flex: 1,
     minWidth: 120,
@@ -2955,6 +3218,46 @@ const styles = StyleSheet.create({
     height: '100%',
     width: '100%',
     color: theme.text,
+  },
+  travelTypeSegmentRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  travelTypeSegment: {
+    flex: 1,
+    minHeight: 72,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(1,26,107,0.04)',
+  },
+  travelTypeSegmentSelected: {
+    borderColor: theme.primary,
+    backgroundColor: theme.primary,
+  },
+  travelTypeSegmentPressed: {
+    opacity: 0.88,
+  },
+  travelTypeSegmentCode: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.primary,
+    marginBottom: 4,
+  },
+  travelTypeSegmentLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.textMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  travelTypeSegmentTextSelected: {
+    color: '#fff',
   },
   userItem: {
     flexDirection: 'row',

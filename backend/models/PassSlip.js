@@ -74,6 +74,13 @@ const passSlipSchema = new mongoose.Schema({
   longitude: {
     type: Number,
   },
+  /** Employee / origin coordinates at time of submission (start of route). */
+  originLatitude: {
+    type: Number,
+  },
+  originLongitude: {
+    type: Number,
+  },
   routePolyline: {
     type: String,
   },

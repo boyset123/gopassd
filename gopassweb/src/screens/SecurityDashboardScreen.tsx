@@ -7,6 +7,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { API_URL } from '../config/api';
 import { useServerEvents } from '../hooks/useServerEvents';
+import Timer from '../components/Timer';
 
 // --- Type Definitions ---
 interface Employee {
@@ -45,57 +46,6 @@ type RootStackParamList = {
 };
 
 type SecurityDashboardNavigationProp = StackNavigationProp<RootStackParamList, 'SecurityDashboard'>;
-
-const Timer = ({ departureTime, estimatedTimeBack }: { departureTime: string, estimatedTimeBack: string }) => {
-  const calculateRemainingTime = () => {
-    if (!departureTime || !estimatedTimeBack) return { hours: 0, minutes: 0, seconds: 0 };
-
-    const departure = new Date(departureTime);
-    if (isNaN(departure.getTime())) return { hours: 0, minutes: 0, seconds: 0 };
-
-    // estimatedTimeBack is stored as "h:mm AM/PM" (e.g. "2:30 PM") - same day as departure
-    const match = estimatedTimeBack.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (!match) return { hours: 0, minutes: 0, seconds: 0 };
-    let hours = parseInt(match[1], 10);
-    const minutes = parseInt(match[2], 10);
-    const ampm = (match[3] || '').toUpperCase();
-    if (ampm === 'PM' && hours < 12) hours += 12;
-    if (ampm === 'AM' && hours === 12) hours = 0;
-
-    const estimatedReturn = new Date(departure.getTime());
-    estimatedReturn.setHours(hours, minutes, 0, 0);
-    if (estimatedReturn.getTime() < departure.getTime()) estimatedReturn.setDate(estimatedReturn.getDate() + 1);
-
-    const now = new Date();
-    const diff = estimatedReturn.getTime() - now.getTime();
-
-    if (diff <= 0) return { hours: 0, minutes: 0, seconds: 0 };
-
-    return {
-      hours: Math.floor(diff / (1000 * 60 * 60)),
-      minutes: Math.floor((diff / 1000 / 60) % 60),
-      seconds: Math.floor((diff / 1000) % 60),
-    };
-  };
-
-  const [remainingTime, setRemainingTime] = useState(calculateRemainingTime);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setRemainingTime(calculateRemainingTime);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [departureTime, estimatedTimeBack]);
-
-  return (
-    <Text style={styles.timerText}>
-      {String(remainingTime.hours).padStart(2, '0')}:
-      {String(remainingTime.minutes).padStart(2, '0')}:
-      {String(remainingTime.seconds).padStart(2, '0')}
-    </Text>
-  );
-};
 
 // --- Main Component ---
 const SecurityDashboardScreen = () => {

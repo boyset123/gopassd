@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import {
+  dayFieldFromManilaDate,
+  getManilaWeekKey,
+  getManilaWeekLabel,
+  parseMeridiemTimeInManilaDate,
+} from '../utils/manilaDate';
+import { useServerTime } from '../hooks/useServerTime';
 
 type PassSlipLike = {
   _id: string;
@@ -13,8 +20,6 @@ type PassSlipLike = {
     name?: string;
   };
 };
-
-type TrackerDayField = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
 
 type TrackerRow = {
   id: string;
@@ -63,69 +68,22 @@ const webExportButtonStyle = {
   boxShadow: '0 1px 2px rgba(16,24,40,0.05)',
 };
 
-const getMondayOfWeek = (date: Date): Date => {
-  const value = new Date(date);
-  const day = value.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  value.setDate(value.getDate() + diff);
-  value.setHours(0, 0, 0, 0);
-  return value;
-};
-
-const getWeekKey = (date: Date): string => getMondayOfWeek(date).toISOString().slice(0, 10);
-
-const getWeekLabel = (weekKey: string): string => {
-  const monday = new Date(`${weekKey}T00:00:00`);
-  if (Number.isNaN(monday.getTime())) return weekKey;
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  return `${monday.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - ${sunday.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })}`;
-};
-
-const parseTimeInDate = (baseDate: Date, timeValue?: string): Date | null => {
-  if (!timeValue) return null;
-  const match = String(timeValue).match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-  if (!match) return null;
-  let hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  const meridiem = match[3].toUpperCase();
-  if (meridiem === 'PM' && hours < 12) hours += 12;
-  if (meridiem === 'AM' && hours === 12) hours = 0;
-  const parsed = new Date(baseDate);
-  parsed.setHours(hours, minutes, 0, 0);
-  return parsed;
-};
-
 const getSlipDurationHours = (slip: PassSlipLike): number => {
   const baseDate = new Date(slip.date);
   if (Number.isNaN(baseDate.getTime())) return 0;
-  const start = parseTimeInDate(baseDate, slip.timeOut);
-  const end = parseTimeInDate(baseDate, slip.estimatedTimeBack);
+  const start = parseMeridiemTimeInManilaDate(baseDate, slip.timeOut);
+  const end = parseMeridiemTimeInManilaDate(baseDate, slip.estimatedTimeBack);
   if (!start || !end) return 0;
   const durationMs = end.getTime() - start.getTime();
   if (durationMs <= 0) return 0;
   return durationMs / (1000 * 60 * 60);
 };
 
-const dayFieldFromDate = (date: Date): TrackerDayField | null => {
-  const day = date.getDay();
-  if (day === 1) return 'monday';
-  if (day === 2) return 'tuesday';
-  if (day === 3) return 'wednesday';
-  if (day === 4) return 'thursday';
-  if (day === 5) return 'friday';
-  return null;
-};
-
-const blankSheetForCurrentWeek = (): WeeklyTrackerSheet => {
-  const currentWeekKey = getWeekKey(new Date());
+const blankSheetForCurrentWeek = (now: Date): WeeklyTrackerSheet => {
+  const currentWeekKey = getManilaWeekKey(now);
   return {
     weekKey: currentWeekKey,
-    weekLabel: getWeekLabel(currentWeekKey),
+    weekLabel: getManilaWeekLabel(currentWeekKey),
     rows: [],
     totalApprovedSlips: 0,
   };
@@ -146,6 +104,7 @@ const csvEscape = (value: string): string => `"${value.replace(/"/g, '""')}"`;
 export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScreenProps) {
   const { width } = useWindowDimensions();
   const isCompactTable = width < 1100;
+  const { getServerNow } = useServerTime();
 
   const weekSheets = useMemo<WeeklyTrackerSheet[]>(() => {
     const perWeek = new Map<string, { rowsByEmployee: Map<string, TrackerRow>; totalApprovedSlips: number }>();
@@ -156,7 +115,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
       if (!slip.status && !slip.hrApprovedBy) continue;
       const slipDate = new Date(slip.date);
       if (Number.isNaN(slipDate.getTime())) continue;
-      const field = dayFieldFromDate(slipDate);
+      const field = dayFieldFromManilaDate(slipDate);
       if (!field) continue;
 
       const employeeName = slip.employee?.name?.trim() || 'Unknown Employee';
@@ -166,7 +125,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
       const totalHours = plannedHours + overdueHours;
       if (totalHours <= 0) continue;
 
-      const weekKey = getWeekKey(slipDate);
+      const weekKey = getManilaWeekKey(slipDate);
       if (!perWeek.has(weekKey)) {
         perWeek.set(weekKey, { rowsByEmployee: new Map<string, TrackerRow>(), totalApprovedSlips: 0 });
       }
@@ -194,34 +153,36 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
     const result = Array.from(perWeek.entries())
       .map(([weekKey, week]) => ({
         weekKey,
-        weekLabel: getWeekLabel(weekKey),
+        weekLabel: getManilaWeekLabel(weekKey),
         rows: Array.from(week.rowsByEmployee.values()).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
         totalApprovedSlips: week.totalApprovedSlips,
       }))
       .sort((a, b) => (a.weekKey < b.weekKey ? 1 : -1));
 
-    if (!result.length) return [blankSheetForCurrentWeek()];
+    if (!result.length) return [blankSheetForCurrentWeek(getServerNow())];
 
-    const currentWeekKey = getWeekKey(new Date());
+    const currentWeekKey = getManilaWeekKey(getServerNow());
     if (!result.some((sheet) => sheet.weekKey === currentWeekKey)) {
-      result.unshift(blankSheetForCurrentWeek());
+      result.unshift(blankSheetForCurrentWeek(getServerNow()));
     }
     return result;
-  }, [passSlips]);
+  }, [passSlips, getServerNow]);
 
-  const [selectedWeekKey, setSelectedWeekKey] = useState<string>(weekSheets[0]?.weekKey || getWeekKey(new Date()));
+  const [selectedWeekKey, setSelectedWeekKey] = useState<string>(
+    weekSheets[0]?.weekKey || getManilaWeekKey(new Date()),
+  );
 
   useEffect(() => {
     if (weekSheets.some((sheet) => sheet.weekKey === selectedWeekKey)) return;
-    setSelectedWeekKey(weekSheets[0]?.weekKey || getWeekKey(new Date()));
-  }, [weekSheets, selectedWeekKey]);
+    setSelectedWeekKey(weekSheets[0]?.weekKey || getManilaWeekKey(getServerNow()));
+  }, [weekSheets, selectedWeekKey, getServerNow]);
 
   const selectedSheet = useMemo(
     () => weekSheets.find((sheet) => sheet.weekKey === selectedWeekKey) || weekSheets[0],
     [weekSheets, selectedWeekKey]
   );
   const historyCount = Math.max(0, weekSheets.length - 1);
-  const isCurrentWeekSelected = selectedSheet?.weekKey === getWeekKey(new Date());
+  const isCurrentWeekSelected = selectedSheet?.weekKey === getManilaWeekKey(getServerNow());
 
   const exportSelectedWeekToCsv = () => {
     if (typeof document === 'undefined' || !selectedSheet) return;
@@ -296,7 +257,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
             {weekSheets.map((sheet) => (
               <option key={sheet.weekKey} value={sheet.weekKey}>
                 {sheet.weekLabel}
-                {sheet.weekKey === getWeekKey(new Date()) ? ' (Current Week)' : ''}
+                {sheet.weekKey === getManilaWeekKey(getServerNow()) ? ' (Current Week)' : ''}
               </option>
             ))}
           </select>

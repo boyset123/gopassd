@@ -3,12 +3,13 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import axios from 'axios';
 import { FontAwesome } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
 import { API_URL } from '../../config/api';
+import { useSocket } from '../../config/SocketContext';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 
 function resolveProfilePictureUri(pathOrUrl: string, apiUrl: string): string {
@@ -48,6 +49,7 @@ interface OicUserSummary {
 }
 
 interface User {
+  _id?: string;
   name: string;
   email: string;
   role: string;
@@ -56,7 +58,6 @@ interface User {
   profilePicture?: string;
   passSlipMinutes?: number;
   oicPrimary?: OicUserSummary | null;
-  oicFallback?: OicUserSummary | null;
   onTravelManual?: boolean;
   onTravel?: boolean;
   onTravelReason?: 'manual' | 'travel-order' | null;
@@ -80,10 +81,23 @@ interface OicCandidate {
   profilePicture?: string;
 }
 
+interface ActivityItem {
+  id: string;
+  category: 'notification' | 'role-change' | 'submission';
+  title: string;
+  detail: string;
+  createdAt: string;
+  relatedId?: string;
+}
+
+import { Picker } from '@react-native-picker/picker';
+
+const FACULTY_ROLES = ['Faculty Staff', 'Program Head', 'Faculty Dean'];
 const OIC_CAPABLE_ROLES: ReadonlyArray<string> = ['President', 'Faculty Dean', 'Program Head'];
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const socket = useSocket();
   const [user, setUser] = useState<User | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -100,11 +114,64 @@ export default function ProfileScreen() {
 
   // --- OIC Delegation state ---
   const [isUpdatingOnTravel, setIsUpdatingOnTravel] = useState(false);
-  const [oicPickerSlot, setOicPickerSlot] = useState<'primary' | 'fallback' | null>(null);
+  const [oicPickerSlot, setOicPickerSlot] = useState<'primary' | null>(null);
   const [oicCandidates, setOicCandidates] = useState<OicCandidate[]>([]);
   const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
   const [oicSearch, setOicSearch] = useState('');
   const [isSavingOic, setIsSavingOic] = useState(false);
+
+  const [isRoleChangeModalVisible, setRoleChangeModalVisible] = useState(false);
+  const [roleChangeRoles, setRoleChangeRoles] = useState<string[]>([]);
+  const [roleChangeFaculties, setRoleChangeFaculties] = useState<string[]>([]);
+  const [roleChangeExtensions, setRoleChangeExtensions] = useState<string[]>([]);
+  const [requestedRole, setRequestedRole] = useState('');
+  const [requestedFaculty, setRequestedFaculty] = useState('');
+  const [requestedExtension, setRequestedExtension] = useState('');
+  const [pendingRoleRequest, setPendingRoleRequest] = useState<{
+    status: string;
+    requestedRole: string;
+    requestedFaculty?: string;
+    requestedExtension?: string;
+  } | null>(null);
+  const [isSubmittingRoleChange, setIsSubmittingRoleChange] = useState(false);
+  const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
+  const [isLoadingActivity, setIsLoadingActivity] = useState(false);
+
+  const fetchActivity = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return;
+      setIsLoadingActivity(true);
+      const response = await axios.get<ActivityItem[]>(`${API_URL}/users/me/activity`, {
+        headers: { 'x-auth-token': token },
+        params: { limit: 20 },
+      });
+      setActivityItems(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error('Failed to fetch activity:', error);
+      setActivityItems([]);
+    } finally {
+      setIsLoadingActivity(false);
+    }
+  }, []);
+
+  const formatActivityDate = (value: string) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const activityIcon = (category: ActivityItem['category']) => {
+    if (category === 'role-change') return 'exchange';
+    if (category === 'submission') return 'file-text-o';
+    return 'bell-o';
+  };
 
   const fetchUserData = useCallback(async () => {
     try {
@@ -117,6 +184,14 @@ export default function ProfileScreen() {
         headers: { 'x-auth-token': token },
       });
       setUser(response.data);
+      try {
+        const reqRes = await axios.get(`${API_URL}/users/me/role-change-request`, {
+          headers: { 'x-auth-token': token },
+        });
+        setPendingRoleRequest(reqRes.data);
+      } catch {
+        setPendingRoleRequest(null);
+      }
     } catch (error) {
       console.error('Failed to fetch user data:', error);
       router.replace('/');
@@ -128,8 +203,35 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchUserData();
-    }, [fetchUserData])
+      fetchActivity();
+    }, [fetchUserData, fetchActivity])
   );
+
+  useEffect(() => {
+    if (!socket) return;
+    const handler = async (payload: { userId?: string; passSlipMinutes?: number; reset?: boolean }) => {
+      if (payload.reset) {
+        void fetchUserData();
+        return;
+      }
+      const stored = await AsyncStorage.getItem('userData');
+      const storedUser = stored ? JSON.parse(stored) : null;
+      const myId = user?._id ? String(user._id) : storedUser?._id ? String(storedUser._id) : null;
+      if (!myId || !payload.userId || String(payload.userId) !== myId) return;
+      if (typeof payload.passSlipMinutes !== 'number') return;
+      setUser((prev) => (prev ? { ...prev, passSlipMinutes: payload.passSlipMinutes } : prev));
+      if (storedUser) {
+        await AsyncStorage.setItem(
+          'userData',
+          JSON.stringify({ ...storedUser, passSlipMinutes: payload.passSlipMinutes }),
+        );
+      }
+    };
+    socket.on('passSlipBalanceUpdated', handler);
+    return () => {
+      socket.off('passSlipBalanceUpdated', handler);
+    };
+  }, [socket, user?._id, fetchUserData]);
 
   const handleUpdateName = async () => {
     if (!firstName.trim() || !surname.trim()) {
@@ -214,15 +316,14 @@ export default function ProfileScreen() {
     }
   };
 
-  const openOicPicker = async (slot: 'primary' | 'fallback') => {
-    setOicPickerSlot(slot);
+  const openOicPicker = async () => {
+    setOicPickerSlot('primary');
     setOicSearch('');
     setOicCandidates([]);
     setIsLoadingCandidates(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
       const response = await axios.get(`${API_URL}/users/me/oic-candidates`, {
-        params: { slot },
         headers: { 'x-auth-token': token },
       });
       setOicCandidates(response.data?.candidates || []);
@@ -246,16 +347,14 @@ export default function ProfileScreen() {
     setIsSavingOic(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const body: { oicPrimary?: string | null; oicFallback?: string | null } = {};
-      if (oicPickerSlot === 'primary') body.oicPrimary = candidate ? candidate._id : null;
-      else body.oicFallback = candidate ? candidate._id : null;
+      const body: { oicPrimary?: string | null } = {};
+      body.oicPrimary = candidate ? candidate._id : null;
       const response = await axios.put(`${API_URL}/users/me/oic`, body, {
         headers: { 'x-auth-token': token },
       });
       setUser((prev) => (prev ? {
         ...prev,
         oicPrimary: response.data.oicPrimary || null,
-        oicFallback: response.data.oicFallback || null,
       } : prev));
       closeOicPicker();
       Alert.alert('Saved', candidate ? 'OIC assignment updated.' : 'OIC cleared.');
@@ -340,6 +439,55 @@ export default function ProfileScreen() {
     }
   };
 
+  const openRoleChangeModal = async () => {
+    try {
+      const [rolesRes, facultiesRes, extensionsRes] = await Promise.all([
+        axios.get<string[]>(`${API_URL}/metadata/roles`),
+        axios.get<string[]>(`${API_URL}/metadata/faculties`),
+        axios.get<string[]>(`${API_URL}/metadata/extensions`),
+      ]);
+      setRoleChangeRoles(rolesRes.data);
+      setRoleChangeFaculties(facultiesRes.data);
+      setRoleChangeExtensions(extensionsRes.data);
+      if (!pendingRoleRequest) {
+        setRequestedRole(user?.role || rolesRes.data[0] || '');
+        setRequestedFaculty(user?.faculty || facultiesRes.data[0] || '');
+        setRequestedExtension(user?.campus || extensionsRes.data[0] || '');
+      }
+      setRoleChangeModalVisible(true);
+    } catch (error) {
+      Alert.alert('Error', 'Could not load role options.');
+    }
+  };
+
+  const handleSubmitRoleChange = async () => {
+    setIsSubmittingRoleChange(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      await axios.post(
+        `${API_URL}/users/me/role-change-request`,
+        {
+          requestedRole,
+          requestedFaculty: FACULTY_ROLES.includes(requestedRole) ? requestedFaculty : undefined,
+          requestedExtension,
+        },
+        { headers: { 'x-auth-token': token } }
+      );
+      setRoleChangeModalVisible(false);
+      setPendingRoleRequest({
+        status: 'pending',
+        requestedRole,
+        requestedExtension,
+        requestedFaculty: FACULTY_ROLES.includes(requestedRole) ? requestedFaculty : undefined,
+      });
+      Alert.alert('Submitted', 'Your role change request was sent to HR for review.');
+    } catch (error: any) {
+      Alert.alert('Error', error?.response?.data?.message || 'Could not submit request.');
+    } finally {
+      setIsSubmittingRoleChange(false);
+    }
+  };
+
   const insets = useSafeAreaInsets();
 
   if (isLoading) {
@@ -412,6 +560,123 @@ export default function ProfileScreen() {
                   {isUpdating ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Save</Text>}
                 </Pressable>
               </ModalActionFooter>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Role Change Request Modal */}
+      <Modal
+        animationType="fade"
+        transparent
+        visible={isRoleChangeModalVisible}
+        onRequestClose={() => setRoleChangeModalVisible(false)}
+      >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <ScrollView
+            style={styles.roleChangeModalScroll}
+            contentContainerStyle={styles.roleChangeModalScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.roleChangeModalCard}>
+              <View style={styles.roleChangeModalAccent} />
+              <View style={styles.roleChangeModalHeader}>
+                <View style={styles.roleChangeModalIconWrap}>
+                  <FontAwesome name="exchange" size={22} color={theme.primary} />
+                </View>
+                <Text style={styles.roleChangeModalTitle}>Request Role Change</Text>
+                <Text style={styles.roleChangeModalSubtitle}>
+                  {pendingRoleRequest
+                    ? 'Your request is being reviewed by HR.'
+                    : 'Choose the role and assignment you would like HR to approve.'}
+                </Text>
+              </View>
+
+              <View style={styles.roleChangeSection}>
+                <Text style={styles.roleChangeSectionLabel}>Current assignment</Text>
+                <View style={styles.roleChangeChipRow}>
+                  <View style={styles.roleChangeChip}>
+                    <Text style={styles.roleChangeChipKey}>Role</Text>
+                    <Text style={styles.roleChangeChipValue}>{user?.role || '—'}</Text>
+                  </View>
+                  <View style={styles.roleChangeChip}>
+                    <Text style={styles.roleChangeChipKey}>Campus</Text>
+                    <Text style={styles.roleChangeChipValue}>{user?.campus || '—'}</Text>
+                  </View>
+                  {user?.faculty ? (
+                    <View style={[styles.roleChangeChip, styles.roleChangeChipWide]}>
+                      <Text style={styles.roleChangeChipKey}>Faculty</Text>
+                      <Text style={styles.roleChangeChipValue}>{user.faculty}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+
+              {pendingRoleRequest ? (
+                <>
+                  <View style={styles.roleChangePendingBanner}>
+                    <FontAwesome name="clock-o" size={18} color="#7c5e00" />
+                    <View style={styles.roleChangePendingText}>
+                      <Text style={styles.roleChangePendingTitle}>Awaiting HR review</Text>
+                      <Text style={styles.roleChangePendingBody}>
+                        Requested: {pendingRoleRequest.requestedRole}
+                        {pendingRoleRequest.requestedExtension ? ` @ ${pendingRoleRequest.requestedExtension}` : ''}
+                        {pendingRoleRequest.requestedFaculty ? ` (${pendingRoleRequest.requestedFaculty})` : ''}
+                      </Text>
+                    </View>
+                  </View>
+                  <Pressable style={[styles.modalButton, styles.saveButton, styles.roleChangeCloseButton]} onPress={() => setRoleChangeModalVisible(false)}>
+                    <Text style={styles.modalButtonText}>Close</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <View style={styles.roleChangeSection}>
+                    <Text style={styles.roleChangeSectionLabel}>Requested assignment</Text>
+                    <Text style={styles.fieldLabel}>Role</Text>
+                    <View style={styles.pickerWrap}>
+                      <Picker selectedValue={requestedRole} onValueChange={setRequestedRole}>
+                        {roleChangeRoles.map((r) => (
+                          <Picker.Item key={r} label={r} value={r} />
+                        ))}
+                      </Picker>
+                    </View>
+                    <Text style={styles.fieldLabel}>Campus / Extension</Text>
+                    <View style={styles.pickerWrap}>
+                      <Picker selectedValue={requestedExtension} onValueChange={setRequestedExtension}>
+                        {roleChangeExtensions.map((e) => (
+                          <Picker.Item key={e} label={e} value={e} />
+                        ))}
+                      </Picker>
+                    </View>
+                    {FACULTY_ROLES.includes(requestedRole) && (
+                      <>
+                        <Text style={styles.fieldLabel}>Faculty / Department</Text>
+                        <View style={styles.pickerWrap}>
+                          <Picker selectedValue={requestedFaculty} onValueChange={setRequestedFaculty}>
+                            {roleChangeFaculties.map((f) => (
+                              <Picker.Item key={f} label={f} value={f} />
+                            ))}
+                          </Picker>
+                        </View>
+                      </>
+                    )}
+                  </View>
+                  <View style={styles.roleChangeHrNote}>
+                    <FontAwesome name="info-circle" size={14} color={theme.textMuted} />
+                    <Text style={styles.roleChangeHrNoteText}>HR will review your request before any changes take effect.</Text>
+                  </View>
+                  <ModalActionFooter style={[styles.modalButtonContainer, styles.roleChangeModalFooter]}>
+                    <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={() => setRoleChangeModalVisible(false)}>
+                      <Text style={styles.modalButtonText}>Cancel</Text>
+                    </Pressable>
+                    <Pressable style={[styles.modalButton, styles.saveButton]} onPress={handleSubmitRoleChange} disabled={isSubmittingRoleChange}>
+                      {isSubmittingRoleChange ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalButtonText}>Submit to HR</Text>}
+                    </Pressable>
+                  </ModalActionFooter>
+                </>
+              )}
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -506,9 +771,7 @@ export default function ProfileScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: '85%' }]}>
-            <Text style={styles.modalTitle}>
-              {oicPickerSlot === 'primary' ? 'Choose Primary OIC' : 'Choose Fallback OIC'}
-            </Text>
+            <Text style={styles.modalTitle}>Choose Primary OIC</Text>
             <TextInput
               style={styles.modalInput}
               placeholderTextColor={theme.textMuted}
@@ -677,7 +940,7 @@ export default function ProfileScreen() {
                       ? 'Pick a Program Head from your faculty.'
                       : 'Pick a Faculty Staff from your faculty.'}
                 </Text>
-                <Pressable style={styles.oicPickerButton} onPress={() => openOicPicker('primary')}>
+                <Pressable style={styles.oicPickerButton} onPress={() => void openOicPicker()}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.oicPickerName}>
                       {user?.oicPrimary ? user.oicPrimary.name : 'Not assigned'}
@@ -692,26 +955,6 @@ export default function ProfileScreen() {
                   <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
                 </Pressable>
 
-                <View style={{ height: 12 }} />
-
-                <Text style={styles.oicSlotLabel}>Fallback OIC</Text>
-                <Text style={styles.oicSlotHint}>
-                  Used only when your Primary OIC is also on travel. Can be any user.
-                </Text>
-                <Pressable style={styles.oicPickerButton} onPress={() => openOicPicker('fallback')}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.oicPickerName}>
-                      {user?.oicFallback ? user.oicFallback.name : 'Not assigned'}
-                    </Text>
-                    {user?.oicFallback && (
-                      <Text style={styles.oicPickerRole}>
-                        {user.oicFallback.role}
-                        {user.oicFallback.faculty ? ` — ${user.oicFallback.faculty}` : ''}
-                      </Text>
-                    )}
-                  </View>
-                  <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
-                </Pressable>
               </View>
             </View>
           )}
@@ -756,6 +999,60 @@ export default function ProfileScreen() {
                 <Text style={styles.settingText}>Change Password</Text>
                 <FontAwesome name="angle-right" size={20} color={theme.textMuted} />
               </TouchableOpacity>
+              {user?.role !== 'admin' && (
+                <>
+                  <View style={styles.separator} />
+                  <TouchableOpacity style={styles.settingRow} onPress={openRoleChangeModal}>
+                    <View style={styles.infoIconWrap}>
+                      <FontAwesome name="exchange" size={18} color={theme.primary} />
+                    </View>
+                    <View style={styles.settingTextWrap}>
+                      <Text style={styles.settingText}>Request Role Change</Text>
+                      {pendingRoleRequest ? (
+                        <View style={styles.pendingBadge}>
+                          <FontAwesome name="clock-o" size={11} color="#7c5e00" />
+                          <Text style={styles.pendingBadgeText}>Pending HR review</Text>
+                        </View>
+                      ) : (
+                        <Text style={styles.settingSubtext}>Update role, campus, or faculty</Text>
+                      )}
+                    </View>
+                    <FontAwesome name="angle-right" size={20} color={theme.textMuted} />
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <View style={[styles.cardTopBar, styles.cardTopBarAccent]} />
+            <View style={styles.cardBody}>
+              <Text style={styles.sectionTitle}>Recent Activity</Text>
+              {isLoadingActivity ? (
+                <ActivityIndicator size="small" color={theme.primary} style={styles.activityLoader} />
+              ) : activityItems.length === 0 ? (
+                <Text style={styles.activityEmpty}>No recent activity yet.</Text>
+              ) : (
+                activityItems.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.activityRow}
+                    onPress={() => {
+                      if (item.relatedId) router.push('/(tabs)/slips');
+                    }}
+                    activeOpacity={item.relatedId ? 0.7 : 1}
+                  >
+                    <View style={styles.activityIconWrap}>
+                      <FontAwesome name={activityIcon(item.category) as any} size={16} color={theme.primary} />
+                    </View>
+                    <View style={styles.activityTextWrap}>
+                      <Text style={styles.activityTitle}>{item.title}</Text>
+                      <Text style={styles.activityDetail} numberOfLines={2}>{item.detail}</Text>
+                      <Text style={styles.activityDate}>{formatActivityDate(item.createdAt)}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
             </View>
           </View>
 
@@ -909,6 +1206,48 @@ const styles = StyleSheet.create({
     color: theme.primary,
     marginBottom: 12,
   },
+  activityLoader: {
+    marginVertical: 12,
+  },
+  activityEmpty: {
+    fontSize: 14,
+    color: theme.textMuted,
+  },
+  activityRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  activityIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(1,26,107,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  activityTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  activityTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: theme.text,
+  },
+  activityDetail: {
+    fontSize: 13,
+    color: theme.textMuted,
+    marginTop: 2,
+  },
+  activityDate: {
+    fontSize: 11,
+    color: theme.textMuted,
+    marginTop: 4,
+  },
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -942,6 +1281,199 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: theme.text,
     marginLeft: 0,
+  },
+  settingSubtext: {
+    fontSize: 12,
+    color: theme.textMuted,
+    marginTop: 2,
+  },
+  settingTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  pendingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    marginTop: 4,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(254,206,0,0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(180,140,0,0.35)',
+  },
+  pendingBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#7c5e00',
+  },
+  roleChangeModalScroll: {
+    flex: 1,
+    width: '100%',
+  },
+  roleChangeModalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    width: '100%',
+  },
+  roleChangeModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
+    backgroundColor: theme.surface,
+    borderRadius: 16,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#011a6b',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 12,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  roleChangeModalAccent: {
+    height: 4,
+    backgroundColor: theme.accent,
+  },
+  roleChangeModalHeader: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 8,
+  },
+  roleChangeModalIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(1,26,107,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  roleChangeModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: theme.primary,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  roleChangeModalSubtitle: {
+    fontSize: 14,
+    color: theme.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  roleChangeSection: {
+    marginHorizontal: 20,
+    marginTop: 12,
+    backgroundColor: 'rgba(1,26,107,0.04)',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  roleChangeSectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 10,
+  },
+  roleChangeChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  roleChangeChip: {
+    backgroundColor: theme.surface,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    minWidth: 110,
+    flexGrow: 1,
+  },
+  roleChangeChipWide: {
+    minWidth: '100%',
+    flexBasis: '100%',
+  },
+  roleChangeChipKey: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: theme.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 2,
+  },
+  roleChangeChipValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.primary,
+  },
+  roleChangePendingBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginHorizontal: 20,
+    marginTop: 14,
+    marginBottom: 16,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(254,206,0,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(180,140,0,0.35)',
+  },
+  roleChangePendingText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  roleChangePendingTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#7c5e00',
+    marginBottom: 4,
+  },
+  roleChangePendingBody: {
+    fontSize: 13,
+    color: theme.primary,
+    lineHeight: 18,
+  },
+  roleChangeHrNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginHorizontal: 20,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  roleChangeHrNoteText: {
+    flex: 1,
+    fontSize: 12,
+    color: theme.textMuted,
+    lineHeight: 17,
+  },
+  roleChangeCloseButton: {
+    alignSelf: 'stretch',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    marginTop: 4,
+  },
+  roleChangeModalFooter: {
+    marginHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 8,
   },
   timeLimitText: {
     fontSize: 15,
@@ -1000,6 +1532,25 @@ const styles = StyleSheet.create({
     color: theme.primary,
     marginBottom: 20,
     textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: theme.textMuted,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  fieldLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.primary,
+    marginBottom: 6,
+  },
+  pickerWrap: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 10,
+    marginBottom: 12,
+    overflow: 'hidden',
   },
   modalInput: {
     borderWidth: 1,

@@ -42,7 +42,17 @@ export const styles = StyleSheet.create({
     backgroundColor: colors.sidebar,
     borderTopWidth: 4,
     borderTopColor: colors.accent,
-    ...Platform.select({ web: { boxShadow: '4px 0 24px rgba(0,0,0,0.08)' } }),
+    ...Platform.select({
+      web: {
+        boxShadow: '4px 0 24px rgba(0,0,0,0.08)',
+        position: 'sticky' as any,
+        top: 0,
+        height: '100vh' as any,
+        maxHeight: '100vh' as any,
+        overflow: 'hidden' as any,
+        flexShrink: 0,
+      },
+    }),
   },
   sidebarMobile: {
     width: '100%',
@@ -55,6 +65,14 @@ export const styles = StyleSheet.create({
   sidebarInner: {
     flex: 1,
     paddingHorizontal: 14,
+    flexDirection: 'column',
+    minHeight: 0,
+    ...Platform.select({
+      web: {
+        height: '100%' as any,
+        maxHeight: '100vh' as any,
+      },
+    }),
   },
   sidebarInnerMobile: {
     flexDirection: 'row',
@@ -165,6 +183,7 @@ export const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'column',
     minWidth: 0,
+    minHeight: 0,
   },
   headerMobile: {
     paddingVertical: 14,
@@ -200,6 +219,12 @@ export const styles = StyleSheet.create({
   mainScroll: {
     flex: 1,
     minHeight: 0,
+    ...Platform.select({
+      web: {
+        overflowY: 'auto' as any,
+        WebkitOverflowScrolling: 'touch' as any,
+      },
+    }),
   },
   mainScrollMobile: {
     ...Platform.select({

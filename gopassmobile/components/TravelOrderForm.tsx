@@ -54,7 +54,10 @@ interface TravelOrder {
   departureDate: string;
   arrivalDate: string;
   additionalInfo: string;
+  travelType?: 'OB' | 'OT';
+  timeOut?: string;
   officialBusinessNote?: string;
+  chargeableAgainstHigherEd?: boolean;
   chargeableAgainstNote?: string;
   recommendedBy: Recommender[];
   recommenderSignatures?: { user: UserRef; signature: string; date: string; signedAsOicFor?: UserRef }[];
@@ -497,7 +500,11 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
           </View>
         </View>
 
-        <Text style={styles.directiveText}>You are hereby directed to travel on official business:</Text>
+        <Text style={styles.directiveText}>
+          {order.travelType === 'OT'
+            ? 'You are hereby directed to travel on official time:'
+            : 'You are hereby directed to travel on official business:'}
+        </Text>
 
         <View style={styles.formRow}>
           <Text style={styles.formLabel}>TO:</Text>
@@ -518,6 +525,12 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
           <Text style={styles.formLabel}>Date of Arrival:</Text>
           <Text style={styles.formValueUnderlined}>{formatTravelPeriodDate(order.arrivalDate)}</Text>
         </View>
+        {order.travelType === 'OT' && order.timeOut ? (
+          <View style={styles.formRow}>
+            <Text style={styles.formLabel}>Time Out:</Text>
+            <Text style={styles.formValueUnderlined}>{normalizeInline(order.timeOut)}</Text>
+          </View>
+        ) : null}
 
         <Text style={styles.infoText}>
           You shall be guided further by the following additional instruction and information on{' '}
@@ -525,14 +538,21 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
             {displayOptionalNote(order.additionalInfo)}
           </Text>
         </Text>
-        <Text style={styles.infoText}>
-          Your traveling expenses in the field will be authorized or allowed under Official Business
-        </Text>
-        <Text style={styles.infoText}>
-          Chargeable against{' '}
-          <Text style={styles.inlineUnderlinedText}>
-            {displayOptionalNote(order.chargeableAgainstNote)}
+        {(order.travelType ?? 'OB') === 'OB' && (
+          <Text style={styles.infoText}>
+            Your traveling expenses in the field will be authorized or allowed under Official Business,{' '}
+            <Text style={styles.inlineUnderlinedText}>
+              {displayOptionalNote(order.officialBusinessNote)}
+            </Text>
+            .
           </Text>
+        )}
+        <Text style={styles.infoText}>
+          Chargeable against Higher Education{order.chargeableAgainstHigherEd ? '' : ' (not applicable)'},{' '}
+          <Text style={styles.inlineUnderlinedText}>
+            {displayOptionalNote(order.chargeableAgainstHigherEd ? order.chargeableAgainstNote : '')}
+          </Text>
+          .
         </Text>
         <Text style={styles.infoText}>
           Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.

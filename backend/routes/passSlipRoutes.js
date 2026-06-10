@@ -5,8 +5,16 @@ const auth = require('../middleware/auth'); // Assuming you have an auth middlew
 const authorize = require('../middleware/authorize');
 const QRCode = require('qrcode');
 const admin = require('firebase-admin');
-const { parseMeridiemTimeToDate, parseMeridiemTimeToMillisOfDay } = require('../utils/dateTime');
+const {
+  parseMeridiemTimeToDate,
+  parseMeridiemTimeToMillisOfDay,
+  serverNow,
+  getManilaTodayStart,
+  isFivePmEtb,
+} = require('../utils/dateTime');
 const { getEffectiveSigner, isUserOnTravel, toIdString } = require('../utils/oic');
+const { getScheduledReturnMoment } = require('../utils/passSlipSchedule');
+const { resolvePassSlipMapRoute } = require('../utils/drivingRoute');
 
 /**
  * Format a number of minutes as a clean human-readable string
@@ -22,6 +30,14 @@ function formatMinutes(value) {
 
 /** Weekly pass-slip cap (mirrors HRP tracker WEEKLY_LIMIT_HOURS = 2). */
 const WEEKLY_LIMIT_MINUTES = 120;
+
+function emitBalanceUpdate(io, userId, passSlipMinutes) {
+  if (!io) return;
+  io.emit('passSlipBalanceUpdated', {
+    userId: toIdString(userId),
+    passSlipMinutes: Math.max(0, Math.floor(Number(passSlipMinutes) || 0)),
+  });
+}
 
 /**
  * Extract Manila-intent date parts (year, monthIndex, day) for a value,
@@ -106,7 +122,7 @@ async function approverIdsVisibleToUser(userId) {
   const ids = new Set([toIdString(userId)]);
   const User = require('../models/User');
   const delegators = await User.find({
-    $or: [{ oicPrimary: userId }, { oicFallback: userId }],
+    oicPrimary: userId,
   }).select('_id').lean();
 
   for (const d of delegators) {
@@ -123,7 +139,19 @@ const User = require('../models/User');
 
 router.post('/', auth, async (req, res) => {
   try {
-    const { date, timeOut, estimatedTimeBack, destination, purpose, signature, latitude, longitude, routePolyline } = req.body;
+    const {
+      date,
+      timeOut,
+      estimatedTimeBack,
+      destination,
+      purpose,
+      signature,
+      latitude,
+      longitude,
+      originLatitude,
+      originLongitude,
+      routePolyline,
+    } = req.body;
 
     const user = await User.findById(req.user.userId);
     if (!user) {
@@ -154,6 +182,27 @@ router.post('/', auth, async (req, res) => {
 
     if (!startTime || !endTime || endTime < startTime) {
         return res.status(400).json({ message: 'Invalid time format or range.' });
+    }
+
+    const manilaToday = getManilaTodayStart();
+    if (manilaToday) {
+      const slipDay = parseMeridiemTimeToDate('12:00 AM', date);
+      if (slipDay && slipDay.getTime() < manilaToday.getTime()) {
+        return res.status(400).json({ message: 'Cannot create a pass slip for a date that has already passed.' });
+      }
+    }
+
+    const now = serverNow();
+    const manilaTodayForCreate = getManilaTodayStart();
+    const slipDayForCreate = parseMeridiemTimeToDate('12:00 AM', date);
+    const isSlipToday =
+      manilaTodayForCreate &&
+      slipDayForCreate &&
+      slipDayForCreate.getTime() === manilaTodayForCreate.getTime();
+    if (isSlipToday && startTime.getTime() < now.getTime()) {
+      return res.status(400).json({
+        message: 'Cannot create a pass slip for a scheduled departure time that has already passed.',
+      });
     }
 
     const durationMinutes = (endTime.getTime() - startTime.getTime()) / 60000; // duration in minutes
@@ -189,7 +238,9 @@ router.post('/', auth, async (req, res) => {
       signature,
       latitude,
       longitude,
-      routePolyline
+      originLatitude,
+      originLongitude,
+      routePolyline,
     });
 
     const passSlip = await newPassSlip.save();
@@ -373,6 +424,19 @@ router.put('/:id/status', [auth], async (req, res) => {
             return res.status(400).json({ message: 'Invalid time format or range on the pass slip.' });
         }
 
+        const now = serverNow();
+        const manilaTodayForApproval = getManilaTodayStart();
+        const slipDayForApproval = parseMeridiemTimeToDate('12:00 AM', passSlip.date);
+        const isApprovalToday =
+          manilaTodayForApproval &&
+          slipDayForApproval &&
+          slipDayForApproval.getTime() === manilaTodayForApproval.getTime();
+        if (isApprovalToday && startTime.getTime() < now.getTime()) {
+          return res.status(400).json({
+            message: 'Cannot approve a pass slip whose scheduled departure time has already passed.',
+          });
+        }
+
         const durationMinutes = (endTime.getTime() - startTime.getTime()) / 60000;
 
         if (user.passSlipMinutes < durationMinutes) {
@@ -400,6 +464,7 @@ router.put('/:id/status', [auth], async (req, res) => {
         const deduct = Math.round(durationMinutes);
         user.passSlipMinutes = Math.max(0, baseBalance - deduct);
         await user.save();
+        emitBalanceUpdate(req.io, user._id, user.passSlipMinutes);
 
         passSlip.status = 'Approved';
         passSlip.hrApprovedBy = req.user.userId;
@@ -596,7 +661,7 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
       .populate('employee', 'name email profilePicture')
       .populate('approvedBy', 'name role')
       .populate('approvedBySignedAsOicFor', 'name role')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor signature approverSignature latitude longitude routePolyline overdueMinutes');
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor signature approverSignature latitude longitude originLatitude originLongitude routePolyline overdueMinutes');
     res.json(recommendedSlips);
   } catch (error) {
     console.error('Error fetching recommended pass slips:', error);
@@ -612,7 +677,7 @@ router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async 
       .populate('approvedBy', 'name role')
       .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature hrApproverSignature overdueMinutes');
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature hrApproverSignature latitude longitude originLatitude originLongitude routePolyline overdueMinutes');
     res.json(hrApprovedSlips);
   } catch (error) {
     console.error('Error fetching HR approved pass slips:', error);
@@ -656,7 +721,7 @@ router.get('/verified-hr', [auth, authorize('Human Resource Personnel')], async 
       .populate('approvedBy', 'name role')
       .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature departureTime arrivalTime trackingNo overdueMinutes');
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature departureTime arrivalTime trackingNo latitude longitude originLatitude originLongitude routePolyline overdueMinutes');
     res.json(verifiedSlips);
   } catch (error) {
     console.error('Error fetching verified pass slips for HR:', error);
@@ -737,6 +802,40 @@ router.put('/:id/verify', [auth, authorize('Security Personnel')], async (req, r
   }
 });
 
+// Location / route fields for HR map view (must be registered before /:id).
+router.get('/:id/location', [auth, authorize('Human Resource Personnel')], async (req, res) => {
+  try {
+    const slip = await PassSlip.findById(req.params.id)
+      .select('destination latitude longitude originLatitude originLongitude routePolyline')
+      .lean();
+    if (!slip) {
+      return res.status(404).json({ message: 'Pass slip not found.' });
+    }
+    if (slip.latitude == null || slip.longitude == null) {
+      return res.status(400).json({ message: 'Location data is not available for this pass slip.' });
+    }
+
+    const route = await resolvePassSlipMapRoute(slip);
+    if (!route) {
+      return res.status(400).json({ message: 'Location data is not available for this pass slip.' });
+    }
+
+    res.json({
+      destination: slip.destination,
+      latitude: slip.latitude,
+      longitude: slip.longitude,
+      originLatitude: route.originLatitude,
+      originLongitude: route.originLongitude,
+      originLabel: route.originLabel,
+      routePolyline: slip.routePolyline || undefined,
+      routeCoordinates: route.routeCoordinates,
+    });
+  } catch (error) {
+    console.error('Error fetching pass slip location:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get a single pass slip by ID (for Security)
 router.get('/:id', [auth, authorize('Security Personnel')], async (req, res) => {
   try {
@@ -758,7 +857,7 @@ router.get('/:id', [auth, authorize('Security Personnel')], async (req, res) => 
 });
 
 // Mark a pass slip as Returned (for Security)
-router.put('/:id/return', auth, async (req, res) => {
+router.put('/:id/return', [auth, authorize('Security Personnel')], async (req, res) => {
   try {
     const passSlip = await PassSlip.findById(req.params.id);
     if (!passSlip) {
@@ -769,15 +868,18 @@ router.put('/:id/return', auth, async (req, res) => {
       return res.status(400).json({ message: 'Only verified pass slips can be marked as returned.' });
     }
 
-    const arrival = new Date();
+    if (isFivePmEtb(passSlip.estimatedTimeBack)) {
+      return res.status(400).json({ message: 'This pass slip auto-returns at 5:00 PM.' });
+    }
+
+    const arrival = serverNow();
     passSlip.status = 'Returned';
     passSlip.arrivalTime = arrival;
 
-    // If returned past the scheduled estimatedTimeBack, treat the excess as
-    // additional time spent: persist it on the slip and deduct from the
-    // employee's monthly passSlipMinutes balance (capped at zero).
+    // If returned past the scheduled estimatedTimeBack (anchored to departureTime),
+    // treat the excess as additional time spent and deduct from passSlipMinutes.
     let overdueMinutes = 0;
-    const scheduledReturn = parseMeridiemTimeToDate(passSlip.estimatedTimeBack, passSlip.date);
+    const scheduledReturn = getScheduledReturnMoment(passSlip);
     if (scheduledReturn) {
       const diffMs = arrival.getTime() - scheduledReturn.getTime();
       if (diffMs > 0) {
@@ -791,12 +893,11 @@ router.put('/:id/return', auth, async (req, res) => {
     if (overdueMinutes > 0) {
       const employee = await User.findById(passSlip.employee);
       if (employee) {
-        // Floor any pre-existing fractional residue, then deduct overdue
-        // rounded up to whole minutes (strict: a partial minute counts as 1).
         const currentBalance = Math.max(0, Math.floor(Number(employee.passSlipMinutes) || 0));
         const deduct = Math.ceil(overdueMinutes);
         employee.passSlipMinutes = Math.max(0, currentBalance - deduct);
         await employee.save();
+        emitBalanceUpdate(req.io, employee._id, employee.passSlipMinutes);
       }
     }
 

@@ -64,21 +64,13 @@ const formatPrintTime = (value?: string) => {
 
 const statusStamp = (item: PassSlipPrintItem) => {
   const raw = String(item.arrivalStatus || item.status || '').toLowerCase();
-  const overdue = typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0;
-  const returned =
-    item.arrivalTime &&
-    (item.status === 'Completed' || item.status === 'Verified' || item.status === 'Returned');
-
-  if (raw.includes('overdue') || overdue) {
-    return '<div class="stamp overdue">OVERDUE</div>';
-  }
-  if (raw.includes('on time') || (returned && !overdue)) {
-    return '<div class="stamp ontime">ON TIME</div>';
-  }
-  if (raw.includes('approved') && item.status === 'Approved') {
+  if (raw.includes('approved') || raw.includes('verified') || raw.includes('completed') || raw.includes('returned')) {
     return '<div class="stamp approved">APPROVED</div>';
   }
   if (raw.includes('rejected')) return '<div class="stamp rejected">REJECTED</div>';
+  if (item.status === 'Approved') {
+    return '<div class="stamp approved">APPROVED</div>';
+  }
   return '';
 };
 

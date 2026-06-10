@@ -1549,6 +1549,18 @@ export const styles = StyleSheet.create({
       width: '100%',
       maxWidth: '100%' as any,
     },
+    mapLoadingOverlay: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+      minHeight: 280,
+    },
+    mapLoadingText: {
+      marginTop: 12,
+      fontSize: 15,
+      color: '#64748b',
+    },
     docLogo: {
       width: 60,
       height: 60,

@@ -131,10 +131,12 @@ function buildTravelOrderQrPayload(doc) {
     to: doc.to,
     purpose: doc.purpose,
     departureDate: doc.departureDate,
+    travelType: doc.travelType || 'OB',
     timeOut: doc.timeOut,
     arrivalDate: doc.arrivalDate,
     additionalInfo: doc.additionalInfo,
     officialBusinessNote: doc.officialBusinessNote,
+    chargeableAgainstHigherEd: !!doc.chargeableAgainstHigherEd,
     chargeableAgainstNote: doc.chargeableAgainstNote,
     employeeAddress: doc.employeeAddress,
     employee: doc.employee ? { name: doc.employee.name, role: doc.employee.role } : undefined,
@@ -207,7 +209,14 @@ router.post(
   },
   async (req, res) => {
   try {
-    const { date, address, salary, to, purpose, departureDate, arrivalDate, additionalInfo, officialBusinessNote, chargeableAgainstNote, timeOut, recommendedBy, participants, employeeAddress } = req.body;
+    const { date, address, salary, to, purpose, departureDate, arrivalDate, additionalInfo, travelType, officialBusinessNote, chargeableAgainstHigherEd, chargeableAgainstNote, timeOut, recommendedBy, participants, employeeAddress } = req.body;
+
+    const normalizedTravelType = travelType === 'OT' ? 'OT' : 'OB';
+    const normalizedChargeableHigherEd =
+      chargeableAgainstHigherEd === true ||
+      chargeableAgainstHigherEd === 'true' ||
+      chargeableAgainstHigherEd === 1 ||
+      chargeableAgainstHigherEd === '1';
 
     const user = await User.findById(req.user.userId);
     if (!user) {
@@ -241,9 +250,11 @@ router.post(
       departureDate: parsedDeparture,
       arrivalDate: parsedArrival,
       additionalInfo,
+      travelType: normalizedTravelType,
       officialBusinessNote,
-      chargeableAgainstNote,
-      timeOut,
+      chargeableAgainstHigherEd: normalizedChargeableHigherEd,
+      chargeableAgainstNote: normalizedChargeableHigherEd ? (chargeableAgainstNote || '') : '',
+      timeOut: normalizedTravelType === 'OT' ? timeOut : undefined,
       status: 'Pending',
       participants: participants ? JSON.parse(participants) : [],
       employeeAddress,

@@ -211,6 +211,14 @@ export default function LoginScreen() {
               >
                 <Text style={styles.secondaryLinkText}>Forgot Password?</Text>
               </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [styles.secondaryLink, pressed && styles.secondaryLinkPressed]}
+                onPress={() => router.push('/auth/register')}
+                disabled={isLoading}
+              >
+                <Text style={styles.secondaryLinkText}>Create an account</Text>
+              </Pressable>
               </View>
             </View>
 

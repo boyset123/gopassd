@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator, Modal, TouchableOpacity, Image, ImageBackground, ScrollView, Alert, TextInput, Animated as RNAnimated, Platform, KeyboardAvoidingView, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator, Modal, TouchableOpacity, Image, ImageBackground, ScrollView, Alert, TextInput, Platform, KeyboardAvoidingView, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Print from 'expo-print';
@@ -7,14 +7,13 @@ import Timer from '../../components/Timer';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import { CameraView } from 'expo-camera';
 import { useState, useEffect, useCallback } from 'react';
+import { isFivePmEtb } from '../../utils/manilaDate';
 import Animated, { useSharedValue, useAnimatedStyle, withSequence, withTiming, withRepeat } from 'react-native-reanimated';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../../config/api';
 import { useSocket } from '../../config/SocketContext';
-import { useCreateModalOptional } from '../../contexts/CreateModalContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { NotificationsModal, type Notification } from '../../components/NotificationsModal';
 import TravelOrderForm from '../../components/TravelOrderForm';
@@ -145,9 +144,6 @@ export default function SlipsScreen() {
   const [isViewModalVisible, setViewModalVisible] = useState(false);
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
   const [isQrModalVisible, setQrModalVisible] = useState(false);
-  const [isScannerVisible, setScannerVisible] = useState(false);
-  const [scanLineAnimation] = useState(new RNAnimated.Value(0));
-  const [hasOngoingSubmission, setHasOngoingSubmission] = useState(false);
   const {
     notifications,
     fetchNotifications,
@@ -166,14 +162,9 @@ export default function SlipsScreen() {
   const [completingTravelOrderId, setCompletingTravelOrderId] = useState<string | null>(null);
   const socket = useSocket();
   const insets = useSafeAreaInsets();
-  const createModalContext = useCreateModalOptional();
   const [presidentName, setPresidentName] = useState('');
   const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());
   const rotation = useSharedValue(0);
-
-  useEffect(() => {
-    createModalContext?.setHasOngoingSubmission(hasOngoingSubmission);
-  }, [createModalContext, hasOngoingSubmission]);
 
   const toggleCardDetails = (id: string) => {
     setExpandedCardIds((prev) => {
@@ -215,32 +206,6 @@ export default function SlipsScreen() {
     };
     fetchPresident();
   }, []);
-
-  useEffect(() => {
-    let animation: RNAnimated.CompositeAnimation | null = null;
-    if (isScannerVisible) {
-      animation = RNAnimated.loop(
-        RNAnimated.sequence([
-          RNAnimated.timing(scanLineAnimation, {
-            toValue: 1,
-            duration: 2500,
-            useNativeDriver: true,
-          }),
-          RNAnimated.timing(scanLineAnimation, {
-            toValue: 0,
-            duration: 2500,
-            useNativeDriver: true,
-          }),
-        ])
-      );
-      animation.start();
-    }
-    return () => {
-      if (animation) {
-        animation.stop();
-      }
-    };
-  }, [isScannerVisible]);
 
   const generatePdf = async (item: Submission) => {
     let logoDataUri: string | undefined;
@@ -345,10 +310,6 @@ export default function SlipsScreen() {
       ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
       setSubmissions(combinedSubmissions);
-
-      const ongoingStatuses = ['Pending', 'Recommended', 'Approved', 'Verified', 'For President Approval'];
-      const hasOngoing = combinedSubmissions.some(s => ongoingStatuses.includes(s.status));
-      setHasOngoingSubmission(hasOngoing);
 
     } catch (error) {
       console.error('Failed to fetch data:', error);
@@ -493,7 +454,7 @@ export default function SlipsScreen() {
     if (notifications.some((n) => n._id === id)) return;
     addNotification({
       _id: id,
-      message: 'Your time is running short. Please scan for arrival on time.',
+      message: 'Your time is running short. Please head back to campus.',
       read: false,
       createdAt: new Date().toISOString(),
     });
@@ -504,7 +465,7 @@ export default function SlipsScreen() {
     if (notifications.some((n) => n._id === id)) return;
     addNotification({
       _id: id,
-      message: 'Warning: You are late. Please scan for arrival immediately.',
+      message: 'Warning: You are late. Please return to campus.',
       read: false,
       createdAt: new Date().toISOString(),
     });
@@ -638,30 +599,6 @@ export default function SlipsScreen() {
     </View>
   );
 
-  const handleArrivalScan = async ({ data }: { data: string }) => {
-    setScannerVisible(false);
-    try {
-      const parsedData = JSON.parse(data);
-      const isPassSlip = parsedData.type === 'ReturnPassSlip';
-      if (!isPassSlip) {
-        Alert.alert('Invalid QR Code', 'This is not a valid return QR code.');
-        return;
-      }
-
-      const token = await AsyncStorage.getItem('userToken');
-      const headers = { 'x-auth-token': token };
-      const url = `${API_URL}/pass-slips/${parsedData.id}/return`;
-      await axios.put(url, {}, { headers });
-
-      Alert.alert('Success', 'You have successfully marked your return.');
-      fetchData();
-    } catch (err: any) {
-      console.error('Arrival scan error:', err);
-      const message = err?.response?.data?.message || 'Failed to process your return. Please try again.';
-      Alert.alert('Error', message);
-    }
-  };
-
   const renderItem = ({ item }: { item: Submission }) => {
     const destinationRaw = item.type === 'Pass Slip' ? item.destination : item.to;
     const destination = destinationRaw ? normalizeInline(destinationRaw) : '';
@@ -720,8 +657,20 @@ export default function SlipsScreen() {
           </View>
           {item.type === 'Pass Slip' && item.status === 'Verified' && item.departureTime && item.estimatedTimeBack && (
             <View style={styles.timerContainer}>
-              <Text style={styles.timerLabel}>Time Remaining:</Text>
-              <Timer timeOut={item.timeOut} estimatedTimeBack={item.estimatedTimeBack} departureTime={item.departureTime} onTimeShort={() => handleTimeShort(item._id)} onTimeOver={() => handleTimeOver(item._id)} />
+              {isFivePmEtb(item.estimatedTimeBack) ? (
+                <Text style={styles.autoReturnNote}>Auto-return at 5:00 PM — no return scan needed.</Text>
+              ) : (
+                <>
+                  <Text style={styles.timerLabel}>Time Remaining:</Text>
+                  <Timer
+                    timeOut={item.timeOut}
+                    estimatedTimeBack={item.estimatedTimeBack}
+                    departureTime={item.departureTime}
+                    onTimeShort={() => handleTimeShort(item._id)}
+                    onTimeOver={() => handleTimeOver(item._id)}
+                  />
+                </>
+              )}
             </View>
           )}
           {item.type === 'Pass Slip' && item.status === 'Returned' && typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0 && (
@@ -742,12 +691,6 @@ export default function SlipsScreen() {
             {item.status === 'Pending' && (
               <Pressable style={styles.cancelButtonSmall} onPress={() => handleCancel(item._id, item.type)}>
                 <Text style={styles.cancelButtonTextSmall}>Cancel</Text>
-              </Pressable>
-            )}
-            {item.type === 'Pass Slip' && item.status === 'Verified' && (
-              <Pressable style={styles.scanArrivalButton} onPress={() => setScannerVisible(true)}>
-                <FontAwesome name="camera" size={14} color="#fff" />
-                <Text style={styles.scanArrivalButtonText}>Scan for Arrival</Text>
               </Pressable>
             )}
             {item.type === 'Travel Order' && item.status === 'Approved' && !isHistoryItem(item) && (
@@ -1079,50 +1022,6 @@ export default function SlipsScreen() {
         onMarkAllRead={markAllRead}
       />
 
-
-      <Modal
-        visible={isScannerVisible}
-        transparent={false}
-        animationType="fade"
-        onRequestClose={() => setScannerVisible(false)}
-      >
-        <View style={styles.scannerContainer}>
-          <CameraView
-            onBarcodeScanned={isScannerVisible ? handleArrivalScan : undefined}
-            style={StyleSheet.absoluteFillObject}
-          />
-          <View style={styles.scannerOverlay}>
-            <View style={styles.overlayTop} />
-            <View style={styles.overlayMiddle}>
-              <View style={styles.overlaySide} />
-              <View style={styles.scanBox}>
-                <RNAnimated.View
-                  style={[
-                    styles.scanLine,
-                    {
-                      transform: [
-                        {
-                          translateY: scanLineAnimation.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [0, 248],
-                          }),
-                        },
-                      ],
-                    },
-                  ]}
-                />
-              </View>
-              <View style={styles.overlaySide} />
-            </View>
-            <View style={styles.overlayBottom}>
-              <Text style={styles.scannerText}>Place QR code within the frame</Text>
-            </View>
-          </View>
-          <Pressable style={styles.scannerCloseButton} onPress={() => setScannerVisible(false)}>
-            <Text style={styles.closeButtonText}>Close</Text>
-          </Pressable>
-        </View>
-      </Modal>
 
     </View>
   );
@@ -1600,6 +1499,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: theme.textMuted,
     marginBottom: 5,
+  },
+  autoReturnNote: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.primary,
+    textAlign: 'center',
+    paddingHorizontal: 8,
   },
   overdueBox: {
     flexDirection: 'row',

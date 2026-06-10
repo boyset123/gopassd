@@ -107,15 +107,7 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
   const requesterRole = requesterRoleLabel ?? requestedByRoleLabel(viewerRole, employeeRole);
   const approverRole = approverRoleLabel ?? approvedByRoleLabel(viewerRole, employeeRole);
   const approverName = approverDisplayName ?? slip.approvedBy?.name ?? ' ';
-  const arrivalStatus = normalizeInline(slip.arrivalStatus).toLowerCase();
-  const showOverdue =
-    arrivalStatus.includes('overdue') ||
-    (typeof slip.overdueMinutes === 'number' && slip.overdueMinutes > 0);
-  const returned =
-    !!slip.arrivalTime &&
-    (slip.status === 'Completed' || slip.status === 'Verified' || slip.status === 'Returned');
-  const showOnTime = arrivalStatus.includes('on time') || (returned && !showOverdue);
-  const showApproved = showStatusOverlay && slip.status === 'Approved' && !showOnTime && !showOverdue;
+  const showApproved = showStatusOverlay && slip.status === 'Approved';
 
   return (
     <View style={styles.slipCard}>
@@ -165,16 +157,6 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
 
       {children}
 
-      {showStatusOverlay && showOnTime ? (
-        <View style={styles.statusStampWrap} pointerEvents="none">
-          <Text style={styles.onTimeStamp}>ON TIME</Text>
-        </View>
-      ) : null}
-      {showStatusOverlay && showOverdue ? (
-        <View style={styles.statusStampWrap} pointerEvents="none">
-          <Text style={styles.overdueStamp}>OVERDUE</Text>
-        </View>
-      ) : null}
       {showApproved ? (
         <View style={styles.statusStampWrap} pointerEvents="none">
           <Text style={styles.approvedStamp}>APPROVED</Text>

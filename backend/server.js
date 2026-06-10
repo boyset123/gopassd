@@ -10,12 +10,16 @@ const travelOrderRoutes = require('./routes/travelOrderRoutes');
 const recordsRoutes = require('./routes/recordsRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const eventsRoutes = require('./routes/eventsRoutes');
+const metadataRoutes = require('./routes/metadataRoutes');
+const hrUserRoutes = require('./routes/hrUserRoutes');
+const timeRoutes = require('./routes/timeRoutes');
 const admin = require('firebase-admin');
 const fs = require('fs');
 const http = require('http');
 const { Server } = require('socket.io');
 const cron = require('node-cron');
 const User = require('./models/User');
+const { autoReturnFivePmSlips } = require('./jobs/autoReturnFivePmSlips');
 
 function loadServiceAccount() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -127,7 +131,10 @@ app.use('/api/pass-slips', passSlipRoutes);
 app.use('/api/travel-orders', travelOrderRoutes);
 app.use('/api/records', recordsRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/metadata', metadataRoutes);
+app.use('/api/hr/users', hrUserRoutes);
 app.use('/api/events', eventsRoutes);
+app.use('/api/time', timeRoutes);
 
 io.on('connection', (socket) => {
   console.log('a user connected:', socket.id);
@@ -137,12 +144,18 @@ io.on('connection', (socket) => {
   });
 });
 
+// Auto-return pass slips with 5:00 PM estimated return (every minute)
+cron.schedule('* * * * *', () => {
+  autoReturnFivePmSlips(io);
+});
+
 // Cron job to reset pass slip minutes every Monday at midnight
 cron.schedule('0 0 * * 1', async () => {
   console.log('Running weekly reset of pass slip minutes...');
   try {
     await User.updateMany({}, { $set: { passSlipMinutes: 120 } });
     console.log('Successfully reset pass slip minutes for all users.');
+    io.emit('passSlipBalanceUpdated', { reset: true, passSlipMinutes: 120 });
   } catch (error) {
     console.error('Error resetting pass slip minutes:', error);
   }
@@ -164,6 +177,8 @@ async function startServer() {
     server.listen(PORT, async () => {
       console.log(`Server running on port ${PORT}`);
       // Create admin and president users only when DB is reachable.
+      const { seedMetadata } = require('./utils/seedMetadata');
+      await seedMetadata();
       await createAdminUser();
       await createPresidentUser();
     });
@@ -188,7 +203,8 @@ async function createAdminUser() {
         password: 'admin123',
         role: 'admin',
         name: 'Admin User',
-        campus: 'Main Campus' // Add a default campus
+        campus: 'Main Campus',
+        accountStatus: 'active',
       });
       
       await adminUser.save();
@@ -212,7 +228,8 @@ async function createPresidentUser() {
         password: 'president123',
         role: 'President',
         name: 'President User',
-        campus: 'Main Campus' // Add a default campus
+        campus: 'Main Campus',
+        accountStatus: 'active',
       });
 
       await presidentUser.save();

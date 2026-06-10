@@ -48,7 +48,10 @@ export interface TravelOrderWebOrder {
   departureDate: string;
   arrivalDate: string;
   additionalInfo: string;
+  travelType?: 'OB' | 'OT';
+  timeOut?: string;
   officialBusinessNote?: string;
+  chargeableAgainstHigherEd?: boolean;
   chargeableAgainstNote?: string;
   recommendedBy?: Recommender[];
   recommenderSignatures?: { user?: WebUserRef; signature?: string; date?: string; signedAsOicFor?: WebUserRef }[];
@@ -645,7 +648,11 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           </View>
         </View>
 
-        <Text style={styles.directiveText}>You are hereby directed to travel on official business:</Text>
+        <Text style={styles.directiveText}>
+          {order.travelType === 'OT'
+            ? 'You are hereby directed to travel on official time:'
+            : 'You are hereby directed to travel on official business:'}
+        </Text>
 
         <View style={styles.formRow}>
           <Text style={styles.formLabel}>TO:</Text>
@@ -672,22 +679,30 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
           <Text style={styles.formLabel}>Date of Arrival:</Text>
           <Text style={styles.formValueUnderlined}>{formatDate(order.arrivalDate, true)}</Text>
         </View>
+        {order.travelType === 'OT' && order.timeOut ? (
+          <View style={styles.formRow}>
+            <Text style={styles.formLabel}>Time Out:</Text>
+            <Text style={styles.formValueUnderlined}>{normalizeInline(order.timeOut)}</Text>
+          </View>
+        ) : null}
 
         <Text style={styles.infoText}>
           You shall be guided further by the following additional instruction and information on{' '}
           <Text style={styles.inlineUnderlinedText}>{normalizeInline(order.additionalInfo)}</Text>
         </Text>
-        <Text style={styles.infoText}>
-          Your travelling expenses in the field will be authorized or allowed under Official Business,{' '}
-          <Text style={styles.inlineUnderlinedText}>
-            {displayOptionalNote(order.officialBusinessNote)}
+        {(order.travelType ?? 'OB') === 'OB' && (
+          <Text style={styles.infoText}>
+            Your travelling expenses in the field will be authorized or allowed under Official Business,{' '}
+            <Text style={styles.inlineUnderlinedText}>
+              {displayOptionalNote(order.officialBusinessNote)}
+            </Text>
+            .
           </Text>
-          .
-        </Text>
+        )}
         <Text style={styles.infoText}>
-          Chargeable against Higher Education,{' '}
+          Chargeable against Higher Education{order.chargeableAgainstHigherEd ? '' : ' (not applicable)'},{' '}
           <Text style={styles.inlineUnderlinedText}>
-            {displayOptionalNote(order.chargeableAgainstNote)}
+            {displayOptionalNote(order.chargeableAgainstHigherEd ? order.chargeableAgainstNote : '')}
           </Text>
           .
         </Text>

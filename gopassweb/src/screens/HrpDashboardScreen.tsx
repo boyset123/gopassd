@@ -9,7 +9,7 @@ import { Modal } from 'react-native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import SignatureCanvas from 'react-signature-canvas';
 import { FontAwesome } from '@expo/vector-icons';
-import { MapContainer, TileLayer, Marker, Polyline as LeafletPolyline, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polyline as LeafletPolyline, Tooltip, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import polyline from '@mapbox/polyline';
@@ -23,6 +23,7 @@ import TravelOrderFormWeb from '../components/TravelOrderFormWeb';
 import MonitoringApprovedTravelOrdersCard, { ApprovedTravelOrder } from '../components/MonitoringApprovedTravelOrdersCard';
 import HrpReportsAnalytics from '../components/HrpReportsAnalytics';
 import PassSlipTrackerScreen from './PassSlipTrackerScreen';
+import HrpUserApprovals from '../components/HrpUserApprovals';
 import { styles } from './HrpDashboardScreen.styles';
 import { profilePictureUri } from '../utils/profilePictureUri';
 
@@ -58,6 +59,8 @@ interface PassSlip {
   arrivalTime?: string;
   latitude?: number;
   longitude?: number;
+  originLatitude?: number;
+  originLongitude?: number;
   routePolyline?: string;
   trackingNo?: string;
   arrivalStatus?: string;
@@ -79,7 +82,10 @@ interface TravelOrder {
   departureDate: string;
   arrivalDate: string;
   additionalInfo: string;
+  travelType?: 'OB' | 'OT';
+  timeOut?: string;
   officialBusinessNote?: string;
+  chargeableAgainstHigherEd?: boolean;
   chargeableAgainstNote?: string;
   timeOut?: string;
   status: string;
@@ -112,7 +118,7 @@ type MonitoringPassSlip = PassSlip & { type: 'slip' };
 type MonitoringItem = MonitoringPassSlip;
 
 type ItemType = 'slip' | 'order';
-type DashboardView = 'dashboard' | 'records' | 'reports' | 'monitoring' | 'passSlipTracker';
+type DashboardView = 'dashboard' | 'records' | 'reports' | 'monitoring' | 'passSlipTracker' | 'userApprovals';
 
 function getApiErrorMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err) && err.response?.data?.message) {
@@ -245,7 +251,10 @@ const buildTravelOrderWebView = (o: TravelOrder) => ({
   departureDate: o.departureDate,
   arrivalDate: o.arrivalDate,
   additionalInfo: o.additionalInfo || '',
+  travelType: o.travelType === 'OT' ? 'OT' : 'OB',
+  timeOut: o.timeOut || '',
   officialBusinessNote: o.officialBusinessNote || '',
+  chargeableAgainstHigherEd: !!o.chargeableAgainstHigherEd,
   chargeableAgainstNote: o.chargeableAgainstNote || '',
   recommendedBy: o.recommendedBy?.map((e) => ({ _id: e._id, id: e._id, name: e.name || '' })),
   recommenderSignatures: o.recommenderSignatures,
@@ -294,6 +303,43 @@ const webStyles = {
 const campuses = ['All Campuses', 'Main Campus', 'Baganga Campus', 'Banaybanay Campus', 'Cateel Campus', 'San Isidro Campus', 'Tarragona Campus'];
 const faculties = ['All Faculties', 'Faculty of Agriculture and Life Sciences', 'Faculty of Computing, Engineering, and Technology', 'Faculty of Criminal Justice Education', 'Faculty of Nursing and Allied Health Sciences', 'Faculty of Humanities, Social Science, and Communication', 'Faculty of Teacher Education', 'Faculty of Business Management'];
 
+/** Default origin for Mati-city pass slips when employee GPS / route were not stored. */
+const DORSU_MATI_ORIGIN = { lat: 7.0731, lon: 126.2167, name: 'DOrSU (Mati area)' };
+
+function decodeStoredPolyline(encoded: string | undefined | null): Array<[number, number]> | null {
+  if (!encoded) return null;
+  try {
+    const decoded = polyline.decode(encoded);
+    if (!decoded?.length) return null;
+    return decoded.map((p) => [p[0], p[1]] as [number, number]);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchDrivingPolyline(
+  startLat: number,
+  startLon: number,
+  destLat: number,
+  destLon: number,
+): Promise<Array<[number, number]> | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${startLon},${startLat};${destLon},${destLat}?overview=full&geometries=polyline`;
+    const response = await fetch(url, { signal: controller.signal });
+    const json = await response.json();
+    const geometry = json?.routes?.[0]?.geometry;
+    if (!geometry) return null;
+    return decodeStoredPolyline(geometry);
+  } catch (error) {
+    console.error('OSRM route fetch failed:', error);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const destIcon = new L.Icon({
   iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
@@ -302,6 +348,41 @@ const destIcon = new L.Icon({
   popupAnchor: [1, -34],
   shadowSize: [41, 41]
 });
+
+function MapRouteFitBounds({
+  destLat,
+  destLon,
+  startLat,
+  startLon,
+  polyline,
+}: {
+  destLat: number;
+  destLon: number;
+  startLat: number | null;
+  startLon: number | null;
+  polyline: Array<[number, number]> | null;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    const points: L.LatLngExpression[] = [[destLat, destLon]];
+    if (startLat != null && startLon != null) {
+      points.push([startLat, startLon]);
+    }
+    if (polyline?.length) {
+      for (const point of polyline) {
+        points.push(point);
+      }
+    }
+    if (points.length <= 1) {
+      map.setView(points[0], 13);
+      return;
+    }
+    map.fitBounds(L.latLngBounds(points), { padding: [48, 48] });
+  }, [map, destLat, destLon, startLat, startLon, polyline]);
+
+  return null;
+}
 
 const SidebarScroll = ({ narrow, children }: { narrow: boolean; children: React.ReactNode }) => {
   if (!narrow) {
@@ -360,6 +441,7 @@ const HrpDashboardScreen = () => {
   let sigPad = React.useRef<any>({});
   const [isSignatureModalVisible, setIsSignatureModalVisible] = useState(false);
   const [isMapModalVisible, setIsMapModalVisible] = useState(false);
+  const [mapLoading, setMapLoading] = useState(false);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [mapData, setMapData] = useState<{ lat: number; lon: number; polyline: Array<[number, number]> | null, startLat: number | null, startLon: number | null, startName: string | null, destName: string | null } | null>(null);
   const [activeTab, setActiveTab] = useState<'slips' | 'orders'>('slips');
@@ -763,57 +845,106 @@ const HrpDashboardScreen = () => {
     setIsCtcModalVisible(true);
   };
 
-  const openMapModal = (item: PassSlip | TravelOrder) => {
-    console.log('Opening map for item:', item._id);
-    if (item.latitude && item.longitude) {
-      // @ts-ignore
-      delete L.Icon.Default.prototype._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
-        iconUrl: require('leaflet/dist/images/marker-icon.png'),
-        shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
-      });
+  const openMapModal = async (item: PassSlip | TravelOrder) => {
+    if (item.latitude == null || item.longitude == null) {
+      Alert.alert('Map Error', 'Location data is not available for this item.');
+      return;
+    }
 
-      let decodedPolyline: Array<[number, number]> | null = null;
-      let startLat = null;
-      let startLon = null;
+    setMapData(null);
+    setIsMapModalVisible(true);
+    setMapLoading(true);
 
-      // @ts-ignore
-      if (item.routePolyline) {
-        console.log('Route polyline found:', item.routePolyline);
-        try {
-          // @ts-ignore
-          const decoded = polyline.decode(item.routePolyline);
-          if (decoded && decoded.length > 0) {
-            startLat = decoded[0][0];
-            startLon = decoded[0][1];
-            decodedPolyline = decoded.map(p => [p[0], p[1]]);
-            console.log('Decoded polyline with', decoded.length, 'points. Start:', [startLat, startLon]);
-          } else {
-            console.warn('Polyline decoded to an empty array.');
-          }
-        } catch (e) {
-          console.error('Failed to decode polyline:', e);
+    let destLat = item.latitude;
+    let destLon = item.longitude;
+    let startLat: number | null = 'originLatitude' in item ? (item.originLatitude ?? null) : null;
+    let startLon: number | null = 'originLongitude' in item ? (item.originLongitude ?? null) : null;
+    let startName = 'Origin';
+    // @ts-ignore
+    let destName: string = item.destination || item.to || 'Destination';
+    let decodedPolyline: Array<[number, number]> | null = null;
+
+    try {
+      if ('destination' in item) {
+        const token = await AsyncStorage.getItem('userToken');
+        const { data } = await axios.get(`${API_URL}/pass-slips/${item._id}/location`, {
+          headers: { 'x-auth-token': token },
+        });
+        destLat = data.latitude;
+        destLon = data.longitude;
+        startLat = data.originLatitude;
+        startLon = data.originLongitude;
+        startName = data.originLabel || 'Origin';
+        if (data.destination) destName = data.destination;
+
+        if (data.routePolyline) {
+          decodedPolyline = decodeStoredPolyline(data.routePolyline);
+        }
+        if ((!decodedPolyline || decodedPolyline.length <= 1) && Array.isArray(data.routeCoordinates)) {
+          decodedPolyline = data.routeCoordinates.map(
+            (p: number[]) => [p[0], p[1]] as [number, number],
+          );
+        }
+        if ((!decodedPolyline || decodedPolyline.length <= 1) && startLat != null && startLon != null) {
+          decodedPolyline = [
+            [startLat, startLon],
+            [destLat, destLon],
+          ];
         }
       } else {
-        console.warn('No routePolyline found for this item.');
+        decodedPolyline = decodeStoredPolyline(item.routePolyline);
+        if (decodedPolyline?.length && (startLat == null || startLon == null)) {
+          startLat = decodedPolyline[0][0];
+          startLon = decodedPolyline[0][1];
+        }
+        if (startLat == null || startLon == null) {
+          startLat = DORSU_MATI_ORIGIN.lat;
+          startLon = DORSU_MATI_ORIGIN.lon;
+          startName = DORSU_MATI_ORIGIN.name;
+        }
+        if (!decodedPolyline || decodedPolyline.length <= 1) {
+          const fetched = await fetchDrivingPolyline(startLat, startLon, destLat, destLon);
+          decodedPolyline = fetched?.length
+            ? fetched
+            : [
+                [startLat, startLon],
+                [destLat, destLon],
+              ];
+        }
       }
-
-      setMapData({
-        lat: item.latitude,
-        lon: item.longitude,
-        polyline: decodedPolyline,
-        startLat: startLat,
-        startLon: startLon,
-        startName: item.employee.name,
-        // @ts-ignore
-        destName: item.destination || item.to
-      });
-      setIsMapModalVisible(true);
-    } else {
-      console.error('No latitude/longitude found for this item.');
-      Alert.alert('Map Error', 'Location data is not available for this item.');
+    } catch (error) {
+      console.warn('Could not load map route from server:', error);
+      if (startLat == null || startLon == null) {
+        startLat = DORSU_MATI_ORIGIN.lat;
+        startLon = DORSU_MATI_ORIGIN.lon;
+        startName = DORSU_MATI_ORIGIN.name;
+      }
+      if (!decodedPolyline || decodedPolyline.length <= 1) {
+        decodedPolyline = [
+          [startLat, startLon],
+          [destLat, destLon],
+        ];
+      }
     }
+
+    // @ts-ignore
+    delete L.Icon.Default.prototype._getIconUrl;
+    L.Icon.Default.mergeOptions({
+      iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
+      iconUrl: require('leaflet/dist/images/marker-icon.png'),
+      shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
+    });
+
+    setMapData({
+      lat: destLat,
+      lon: destLon,
+      polyline: decodedPolyline,
+      startLat,
+      startLon,
+      startName,
+      destName,
+    });
+    setMapLoading(false);
   };
 
   const renderItem = (item: PassSlip | TravelOrder, type: ItemType) => (
@@ -982,6 +1113,19 @@ const HrpDashboardScreen = () => {
               </View>
               <Text style={[styles.navText, activeView === 'passSlipTracker' && styles.activeNavText]}>Pass Slip Tracker</Text>
             </Pressable>
+
+            <Pressable
+              style={getNavItemStyle('userApprovals')}
+              onPress={() => {
+                setActiveView('userApprovals');
+                dismissMobileSidebar();
+              }}
+            >
+              <View style={styles.navIcon}>
+                <FontAwesome name="user-plus" size={20} color={activeView === 'userApprovals' ? '#011a6b' : 'rgba(255,255,255,0.75)'} />
+              </View>
+              <Text style={[styles.navText, activeView === 'userApprovals' && styles.activeNavText]}>User Approvals</Text>
+            </Pressable>
           </View>
           <View style={styles.sidebarBottom}>
             <Pressable
@@ -1029,6 +1173,7 @@ const HrpDashboardScreen = () => {
               {activeView === 'reports' && 'Reports & Analytics'}
               {activeView === 'monitoring' && 'Monitoring'}
               {activeView === 'passSlipTracker' && 'Pass Slip Tracker'}
+              {activeView === 'userApprovals' && 'User Approvals'}
             </Text>
           </View>
         </View>
@@ -1385,6 +1530,7 @@ const HrpDashboardScreen = () => {
             )}
 
             {activeView === 'passSlipTracker' && <PassSlipTrackerScreen passSlips={trackerPassSlips} />}
+            {activeView === 'userApprovals' && <HrpUserApprovals />}
             </ScrollView>
 
         {/* Profile Modal */}
@@ -1577,17 +1723,6 @@ const HrpDashboardScreen = () => {
                           <Pressable style={styles.viewMapButton} onPress={() => openMapModal(selectedItem as PassSlip)}>
                             <Text style={styles.viewMapButtonText}>View on Map</Text>
                           </Pressable>
-                        )}
-
-                        {selectedItem.arrivalStatus && selectedItem.arrivalStatus.includes('Overdue') && (
-                          <View style={styles.overdueContainer}>
-                            <Text style={styles.overdueStampText}>OVERDUE</Text>
-                          </View>
-                        )}
-                        {selectedItem.arrivalStatus && selectedItem.arrivalStatus.includes('On Time') && (
-                          <View style={styles.onTimeContainer}>
-                            <Text style={styles.onTimeText}>ON TIME</Text>
-                          </View>
                         )}
 
                         {(isApproved || selectedItem.status === 'Approved') && (
@@ -1986,22 +2121,47 @@ const HrpDashboardScreen = () => {
                   <FontAwesome name="close" size={24} color="#333" />
                 </Pressable>
               </View>
-              {mapData && (
-                <MapContainer center={[mapData.lat, mapData.lon]} zoom={13} style={{ height: '100%', width: '100%' }}>
+              {mapLoading && (
+                <View style={styles.mapLoadingOverlay}>
+                  <ActivityIndicator size="large" color="#011a6b" />
+                  <Text style={styles.mapLoadingText}>Loading route…</Text>
+                </View>
+              )}
+              {mapData && !mapLoading && (
+                <MapContainer
+                  key={`${mapData.lat}-${mapData.lon}-${mapData.startLat}-${mapData.startLon}-${mapData.polyline?.length ?? 0}`}
+                  center={[mapData.lat, mapData.lon]}
+                  zoom={13}
+                  style={{ height: '100%', width: '100%' }}
+                >
                   <TileLayer
                     url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                     attribution='&copy; Esri &mdash; source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
                   />
-                  {mapData.startLat && mapData.startLon && (
-                    <Marker position={[mapData.startLat, mapData.startLon]} icon={startIcon}>
-                      <Tooltip permanent>{mapData.startName}</Tooltip>
+                  <MapRouteFitBounds
+                    destLat={mapData.lat}
+                    destLon={mapData.lon}
+                    startLat={mapData.startLat}
+                    startLon={mapData.startLon}
+                    polyline={mapData.polyline}
+                  />
+                  {mapData.startLat != null && mapData.startLon != null && (
+                    <Marker
+                      key="origin"
+                      position={[mapData.startLat, mapData.startLon]}
+                      icon={startIcon}
+                    >
+                      <Tooltip permanent>{mapData.startName || 'Origin'}</Tooltip>
                     </Marker>
                   )}
-                  <Marker position={[mapData.lat, mapData.lon]} icon={destIcon}>
+                  <Marker key="destination" position={[mapData.lat, mapData.lon]} icon={destIcon}>
                     <Tooltip permanent>{mapData.destName}</Tooltip>
                   </Marker>
-                  {mapData.polyline && (
-                    <LeafletPolyline positions={mapData.polyline} color="red" />
+                  {mapData.polyline && mapData.polyline.length > 1 && (
+                    <LeafletPolyline
+                      pathOptions={{ color: '#dc2626', weight: 4, opacity: 0.9 }}
+                      positions={mapData.polyline}
+                    />
                   )}
                 </MapContainer>
               )}

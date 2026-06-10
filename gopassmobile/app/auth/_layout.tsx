@@ -10,6 +10,13 @@ export default function AuthLayout() {
           animation: 'none',
         }}
       />
+      <Stack.Screen
+        name="register"
+        options={{
+          headerShown: false,
+          animation: 'none',
+        }}
+      />
     </Stack>
   );
 }

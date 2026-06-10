@@ -6,6 +6,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { FontAwesome } from '@expo/vector-icons';
 import RegistrationForm from './RegistrationForm';
 import UserManagement from './UserManagement';
+import MasterDataManagement from './MasterDataManagement';
 import { styles } from './AdminScreen.styles';
 
 type RootStackParamList = {
@@ -19,6 +20,12 @@ interface Props {
   navigation: AdminScreenNavigationProp;
 }
 
+const NAV_ITEMS = [
+  { key: 'Dashboard', icon: 'th-large' as const, label: 'Dashboard' },
+  { key: 'Users', icon: 'users' as const, label: 'Users' },
+  { key: 'OrgSetup', icon: 'university' as const, label: 'Roles, Faculties & Campuses' },
+];
+
 const AdminScreen: React.FC<Props> = ({ navigation }) => {
   const { isNarrow } = useResponsiveLayout();
   const [activeNav, setActiveNav] = useState('Dashboard');
@@ -28,9 +35,21 @@ const AdminScreen: React.FC<Props> = ({ navigation }) => {
     navigation.replace('Login');
   };
 
+  const headerTitle =
+    activeNav === 'Dashboard'
+      ? 'Register New User'
+      : activeNav === 'Users'
+        ? 'User Management'
+        : 'Roles, Faculties & Campuses';
+
+  const renderContent = () => {
+    if (activeNav === 'Dashboard') return <RegistrationForm />;
+    if (activeNav === 'Users') return <UserManagement />;
+    return <MasterDataManagement />;
+  };
+
   return (
     <SafeAreaView style={[styles.container, isNarrow && styles.containerMobile]}>
-      {/* Sidebar */}
       <View style={[styles.sidebar, isNarrow && styles.sidebarMobile]}>
         <View style={[styles.sidebarInner, isNarrow && styles.sidebarInnerMobile]}>
           <View style={[styles.sidebarBrand, isNarrow && styles.sidebarBrandMobile]}>
@@ -38,24 +57,22 @@ const AdminScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.logo}>GoPass DOrSU</Text>
           </View>
           <View style={[styles.nav, isNarrow && styles.navMobile]}>
-            <Pressable
-              style={[styles.navItem, activeNav === 'Dashboard' && styles.activeNavItem, isNarrow && styles.navItemMobile]}
-              onPress={() => setActiveNav('Dashboard')}
-            >
-              <View style={styles.navIcon}>
-                <FontAwesome name="th-large" size={20} color={activeNav === 'Dashboard' ? '#fff' : 'rgba(255,255,255,0.75)'} />
-              </View>
-              <Text style={[styles.navText, activeNav === 'Dashboard' && styles.activeNavText]}>Dashboard</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.navItem, activeNav === 'Users' && styles.activeNavItem, isNarrow && styles.navItemMobile]}
-              onPress={() => setActiveNav('Users')}
-            >
-              <View style={styles.navIcon}>
-                <FontAwesome name="users" size={20} color={activeNav === 'Users' ? '#fff' : 'rgba(255,255,255,0.75)'} />
-              </View>
-              <Text style={[styles.navText, activeNav === 'Users' && styles.activeNavText]}>Users</Text>
-            </Pressable>
+            {NAV_ITEMS.map((item) => (
+              <Pressable
+                key={item.key}
+                style={[styles.navItem, activeNav === item.key && styles.activeNavItem, isNarrow && styles.navItemMobile]}
+                onPress={() => setActiveNav(item.key)}
+              >
+                <View style={styles.navIcon}>
+                  <FontAwesome
+                    name={item.icon}
+                    size={20}
+                    color={activeNav === item.key ? '#fff' : 'rgba(255,255,255,0.75)'}
+                  />
+                </View>
+                <Text style={[styles.navText, activeNav === item.key && styles.activeNavText]}>{item.label}</Text>
+              </Pressable>
+            ))}
           </View>
           <View style={[styles.sidebarBottom, isNarrow && styles.sidebarBottomMobile]}>
             <Pressable style={styles.logoutButton} onPress={handleLogout}>
@@ -68,19 +85,16 @@ const AdminScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       </View>
 
-      {/* Main Content */}
       <View style={styles.mainContent}>
         <View style={[styles.header, isNarrow && styles.headerMobile]}>
-          <Text style={[styles.headerTitle, isNarrow && styles.headerTitleMobile]}>
-            {activeNav === 'Dashboard' ? 'Register New User' : 'User Management'}
-          </Text>
+          <Text style={[styles.headerTitle, isNarrow && styles.headerTitleMobile]}>{headerTitle}</Text>
         </View>
         <ScrollView
           style={[styles.mainScroll, isNarrow && styles.mainScrollMobile]}
           contentContainerStyle={[styles.contentContainer, isNarrow && styles.contentContainerMobile]}
+          showsVerticalScrollIndicator
         >
-          {activeNav === 'Dashboard' && <RegistrationForm />}
-          {activeNav === 'Users' && <UserManagement />}
+          {renderContent()}
         </ScrollView>
       </View>
     </SafeAreaView>

@@ -5,6 +5,9 @@ import * as Notifications from 'expo-notifications';
 import axios from 'axios';
 import { useSocket } from '../config/SocketContext';
 import { API_URL } from '../config/api';
+import { useServerTime } from '../hooks/useServerTime';
+import { getPassSlipDeadlineMs } from '../utils/passSlipTimer';
+import { isFivePmEtb } from '../utils/manilaDate';
 import { initializeNotificationSound, playNotificationSound } from '../services/notificationSound';
 import type { Notification } from '../components/NotificationsModal';
 
@@ -66,35 +69,6 @@ type UserPassSlip = {
 
 const PASS_SLIP_ALERTS_STORAGE_KEY = 'passSlipAlertState:v1';
 
-function parseTimeOnBaseDate(timeStr: string | undefined, baseDate: Date): Date | null {
-  if (!timeStr) return null;
-  const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-  if (!match) return null;
-
-  let hours = parseInt(match[1], 10);
-  const minutes = parseInt(match[2], 10);
-  const ampm = match[3].toUpperCase();
-
-  if (ampm === 'PM' && hours < 12) hours += 12;
-  if (ampm === 'AM' && hours === 12) hours = 0;
-
-  const date = new Date(baseDate);
-  date.setHours(hours, minutes, 0, 0);
-  return date;
-}
-
-function getPassSlipEndTime(slip: UserPassSlip): Date | null {
-  if (!slip.departureTime || !slip.estimatedTimeBack) return null;
-  const departureDate = new Date(slip.departureTime);
-  if (Number.isNaN(departureDate.getTime())) return null;
-  const endTime = parseTimeOnBaseDate(slip.estimatedTimeBack, departureDate);
-  if (!endTime) return null;
-  if (endTime.getTime() < departureDate.getTime()) {
-    endTime.setDate(endTime.getDate() + 1);
-  }
-  return endTime;
-}
-
 type NotificationsContextValue = {
   notifications: Notification[];
   fetchNotifications: () => Promise<void>;
@@ -118,6 +92,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const socket = useSocket();
+  const { getServerNow } = useServerTime();
   const appState = useRef<AppStateStatus>(AppState.currentState);
   const initialFetchDone = useRef(false);
   const previousNewestId = useRef<string | null>(null);
@@ -189,7 +164,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
       const allSlips = Array.isArray(data) ? data : [];
       const activeVerified = allSlips.filter((s) => s.status === 'Verified');
-      const now = Date.now();
+      const now = getServerNow().getTime();
 
       const rawState = await AsyncStorage.getItem(PASS_SLIP_ALERTS_STORAGE_KEY);
       const state: PassSlipAlertsMap = rawState ? JSON.parse(rawState) : {};
@@ -197,23 +172,27 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
       for (const slip of activeVerified) {
         if (!slip._id) continue;
+        if (isFivePmEtb(slip.estimatedTimeBack)) continue;
         const slipId = String(slip._id);
         const prev = state[slipId] || { shortSent: false, overSent: false };
-        const endTime = getPassSlipEndTime(slip);
+        const deadlineMs =
+          slip.departureTime && slip.estimatedTimeBack
+            ? getPassSlipDeadlineMs(slip.departureTime, slip.estimatedTimeBack)
+            : null;
 
-        if (!endTime) {
+        if (deadlineMs == null) {
           nextState[slipId] = prev;
           continue;
         }
 
-        const shortAtMs = endTime.getTime() - 5 * 60 * 1000;
-        const overAtMs = endTime.getTime();
+        const shortAtMs = deadlineMs - 5 * 60 * 1000;
+        const overAtMs = deadlineMs;
         const next: PassSlipAlertState = { ...prev };
 
         if (!next.shortSent && now >= shortAtMs) {
           addNotification({
             _id: `time-short-${slipId}`,
-            message: 'Your time is running short. Please head back and scan for arrival on time.',
+            message: 'Your time is running short. Please head back to campus.',
             read: false,
             createdAt: new Date().toISOString(),
           });
@@ -236,7 +215,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         if (!next.overSent && now >= overAtMs) {
           addNotification({
             _id: `time-over-${slipId}`,
-            message: 'Warning: You are late. Please scan for arrival immediately.',
+            message: 'Warning: You are late. Please return to campus.',
             read: false,
             createdAt: new Date().toISOString(),
           });
@@ -249,7 +228,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           next.overScheduleId = await Notifications.scheduleNotificationAsync({
             content: {
               title: 'Pass Slip Late Alert',
-              body: 'Your pass slip time is over. Please return and scan immediately.',
+              body: 'Your pass slip time is over. Please return to campus.',
               data: { type: 'pass-slip-time-over', slipId },
             },
             trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(overAtMs) },
@@ -276,7 +255,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     } finally {
       alertSyncRunningRef.current = false;
     }
-  }, [addNotification]);
+  }, [addNotification, getServerNow]);
 
   const markAllRead = useCallback(async () => {
     try {

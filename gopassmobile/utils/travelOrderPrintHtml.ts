@@ -15,7 +15,10 @@ export interface TravelOrderPrintItem {
   departureDate?: string;
   arrivalDate?: string;
   additionalInfo?: string;
+  travelType?: 'OB' | 'OT';
+  timeOut?: string;
   officialBusinessNote?: string;
+  chargeableAgainstHigherEd?: boolean;
   chargeableAgainstNote?: string;
   participants?: string[];
   recommendedBy?: Array<{ _id?: string; name?: string }>;
@@ -363,7 +366,11 @@ export function getTravelOrderPrintHtml(
         <span class="salary-u">₱${escapeHtml(salaryStr || '—')}</span>
       </div>
 
-      <div class="directive">You are hereby directed to travel on official business:</div>
+      <div class="directive">${
+        item.travelType === 'OT'
+          ? 'You are hereby directed to travel on official time:'
+          : 'You are hereby directed to travel on official business:'
+      }</div>
 
       <div class="form-row">
         <span class="label">TO:</span>
@@ -384,18 +391,27 @@ export function getTravelOrderPrintHtml(
         <span class="label">Date of Arrival:</span>
         <span class="value-u">${escapeHtml(formatDate(item.arrivalDate, true))}</span>
       </div>
+      ${
+        item.travelType === 'OT' && item.timeOut
+          ? `<div class="form-row"><span class="label">Time Out:</span><span class="value-u">${escapeHtml(normalizeInline(item.timeOut))}</span></div>`
+          : ''
+      }
 
       <p class="info">
         You shall be guided further by the following additional instruction and information on
         <span class="inline-u"> ${escapeHtml(normalizeInline(item.additionalInfo) || '—')}</span>
       </p>
-      <p class="info">
+      ${
+        (item.travelType ?? 'OB') === 'OB'
+          ? `<p class="info">
         Your travelling expenses in the field will be authorized or allowed under Official Business,
         ${optionalNoteSpanHtml(item.officialBusinessNote)}.
-      </p>
+      </p>`
+          : ''
+      }
       <p class="info">
-        Chargeable against Higher Education,
-        ${optionalNoteSpanHtml(item.chargeableAgainstNote)}.
+        Chargeable against Higher Education${item.chargeableAgainstHigherEd ? '' : ' (not applicable)'},
+        ${optionalNoteSpanHtml(item.chargeableAgainstHigherEd ? item.chargeableAgainstNote : '')}.
       </p>
       <p class="info">
         Upon completion of your travel, you are required to submit your full report through proper channel; no travel order shall be issued for the succeeding work unless a copy of your accomplishment in the immediate past is herewith attached or presented.

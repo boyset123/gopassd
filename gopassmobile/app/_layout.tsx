@@ -6,6 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SocketProvider } from '../config/SocketContext';
 import { NotificationsProvider } from '../contexts/NotificationsContext';
+import { ServerTimeProvider } from '../hooks/useServerTime';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -31,6 +32,7 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
+      <ServerTimeProvider>
       <SocketProvider>
         <NotificationsProvider>
           <Stack>
@@ -40,6 +42,7 @@ export default function RootLayout() {
           </Stack>
         </NotificationsProvider>
       </SocketProvider>
+      </ServerTimeProvider>
     </SafeAreaProvider>
   );
 }

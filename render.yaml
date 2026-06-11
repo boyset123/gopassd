@@ -1,8 +1,8 @@
 # Optional: in Render → New → Blueprint, connect this repo and apply.
-# Then set environment variables in the Render dashboard (see Render service → Environment).
+# Live service URL: https://gopassd.onrender.com
 services:
   - type: web
-    name: gopassdorsu-api
+    name: gopassd
     runtime: node
     rootDir: backend
     buildCommand: npm install

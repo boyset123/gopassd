@@ -4,7 +4,6 @@ import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import Timer from '../components/Timer';
 import { Modal } from 'react-native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import SignatureCanvas from 'react-signature-canvas';
@@ -21,6 +20,7 @@ import { getPassSlipPrintHtml } from '../utils/passSlipPrintHtml';
 import { stripArrivalStatusDisplaySuffix } from '../utils/arrivalStatusDisplay';
 import TravelOrderFormWeb from '../components/TravelOrderFormWeb';
 import MonitoringApprovedTravelOrdersCard, { ApprovedTravelOrder } from '../components/MonitoringApprovedTravelOrdersCard';
+import MonitoringActivePassSlipsCard from '../components/MonitoringActivePassSlipsCard';
 import HrpReportsAnalytics from '../components/HrpReportsAnalytics';
 import PassSlipTrackerScreen from './PassSlipTrackerScreen';
 import HrpUserApprovals from '../components/HrpUserApprovals';
@@ -431,7 +431,6 @@ const HrpDashboardScreen = () => {
   const [newPassword, setNewPassword] = useState('');
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
-  const [isApproved, setIsApproved] = useState(false);
   const [travelOrderNoSignature, setTravelOrderNoSignature] = useState<string | null>(null);
   const [departureSignature, setDepartureSignature] = useState<string | null>(null);
   const [arrivalSignature, setArrivalSignature] = useState<string | null>(null);
@@ -733,10 +732,8 @@ const HrpDashboardScreen = () => {
         if (selectedItem && type === 'slip') {
           setSelectedItem({ ...selectedItem, status: 'Approved', trackingNo: trackingNoInput });
         }
-        setIsApproved(true);
         setTimeout(() => {
           setIsModalVisible(false);
-          setIsApproved(false);
           setTrackingNoInput('');
           setHrSignatureForPresident(null);
           fetchData({ silent: true });
@@ -1464,59 +1461,11 @@ const HrpDashboardScreen = () => {
             {activeView === 'monitoring' && (
               <View style={styles.itemsGridContainer}>
                 {monitoringSubView === 'slip' ? (
-                  // Pass Slips
-                  <View style={styles.monitoringCard}>
-                    <Text style={styles.sectionTitle}>Active Pass Slips ({monitoringItems.filter(item => item.type === 'slip').length})</Text>
-                    <View style={(styles as any).monitoringTableCard}>
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        style={(styles as any).monitoringTableHorizontalScroll}
-                        contentContainerStyle={{ flexGrow: 1 }}
-                      >
-                        <View style={(styles as any).monitoringTableInner}>
-                          <View style={(styles as any).monitoringTableHeader}>
-                            <Text style={[(styles as any).monitoringHeaderText, (styles as any).monitoringColEmployee]}>Employee</Text>
-                            <Text style={[(styles as any).monitoringHeaderText, (styles as any).monitoringColDestination]}>Destination</Text>
-                            <Text style={[(styles as any).monitoringHeaderText, (styles as any).monitoringColTimeOut]}>Time Out</Text>
-                            <Text style={[(styles as any).monitoringHeaderText, (styles as any).monitoringColTimer]}>Timer</Text>
-                            <Text style={[(styles as any).monitoringHeaderText, (styles as any).monitoringColActions]}>Actions</Text>
-                          </View>
-
-                          {monitoringItems.filter(item => item.type === 'slip').map((item, index) => (
-                            <View
-                              key={item._id}
-                              style={[(styles as any).monitoringTableRow, index % 2 === 1 && (styles as any).monitoringTableRowAlt]}
-                            >
-                              <Text style={[(styles as any).monitoringRowText, (styles as any).monitoringColEmployee]} numberOfLines={1}>
-                                {item.employee?.name || 'N/A'}
-                              </Text>
-                              <Text style={[(styles as any).monitoringRowText, (styles as any).monitoringColDestination]} numberOfLines={1}>
-                                {item.destination}
-                              </Text>
-                              <Text style={[(styles as any).monitoringRowText, (styles as any).monitoringColTimeOut]} numberOfLines={1}>
-                                {item.timeOut}
-                              </Text>
-                              <View style={[(styles as any).monitoringColTimer, { justifyContent: 'center', alignItems: 'center' }]}>
-                                {item.departureTime && item.estimatedTimeBack && (
-                                  <Timer
-                                    timeOut={item.timeOut}
-                                    estimatedTimeBack={item.estimatedTimeBack}
-                                    departureTime={item.departureTime}
-                                  />
-                                )}
-                              </View>
-                              <View style={[(styles as any).monitoringColActions, (styles as any).monitoringActionsCell]}>
-                                <Pressable style={styles.viewButton} onPress={() => openReviewModal(item, item.type)}>
-                                  <Text style={styles.viewButtonText}>View</Text>
-                                </Pressable>
-                              </View>
-                            </View>
-                          ))}
-                        </View>
-                      </ScrollView>
-                    </View>
-                  </View>
+                  <MonitoringActivePassSlipsCard
+                    styles={styles as any}
+                    slips={monitoringItems.filter((item) => item.type === 'slip')}
+                    onView={(item) => openReviewModal(item, item.type)}
+                  />
                 ) : (
                   // Travel Orders
                   <MonitoringApprovedTravelOrdersCard
@@ -1725,16 +1674,6 @@ const HrpDashboardScreen = () => {
                           </Pressable>
                         )}
 
-                        {(isApproved || selectedItem.status === 'Approved') && (
-                          <View style={styles.approvedStampContainer}>
-                            <Text style={styles.approvedStamp}>APPROVED</Text>
-                          </View>
-                        )}
-                        {selectedItem.status === 'Rejected' && (
-                          <View style={styles.rejectedStampContainer}>
-                            <Text style={styles.rejectedStamp}>REJECTED</Text>
-                          </View>
-                        )}
                         {selectedItem.status === 'Rejected' &&
                           (selectedItem as PassSlip).rejectionReason != null &&
                           String((selectedItem as PassSlip).rejectionReason).trim() !== '' && (
@@ -1784,11 +1723,6 @@ const HrpDashboardScreen = () => {
                           </View>
                         )}
                         <View style={styles.travelOrderReviewWrap}>
-                          {selectedItem.status === 'Rejected' && (
-                            <View style={styles.rejectedStampContainer}>
-                              <Text style={styles.rejectedStamp}>REJECTED</Text>
-                            </View>
-                          )}
                           <TravelOrderFormWeb
                             order={buildTravelOrderWebView(selectedItem as TravelOrder)}
                             presidentName={presidentName}

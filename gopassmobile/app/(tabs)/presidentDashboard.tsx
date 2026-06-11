@@ -439,7 +439,6 @@ export default function PresidentDashboard() {
           onChooseSignature={(type) => setSignatureType(type)}
           approverDisplayName={user?.name}
           approverRoleLabel="President"
-          showStatusOverlay={false}
         />
       </View>
     );

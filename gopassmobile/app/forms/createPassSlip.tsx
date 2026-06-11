@@ -746,7 +746,6 @@ const CreatePassSlipScreen = () => {
                 }}
                 requesterRoleLabel={requestedByRoleLabel(user?.role, user?.role)}
                 approverRoleLabel={approvedByRoleLabel(user?.role, user?.role)}
-                showStatusOverlay={false}
               />
             </ScrollView>
             <ModalActionFooter style={styles.modalButtonContainer}>

@@ -20,6 +20,8 @@ import { API_URL } from '../../config/api';
 
 const FACULTY_ROLES = ['Faculty Staff', 'Program Head', 'Faculty Dean'];
 const EMAIL_HINT = 'Use an email address you can access for account notifications.';
+/** Android release builds use the system hint color; without this, placeholders can be invisible on white inputs. */
+const PLACEHOLDER_COLOR = 'rgba(1,26,107,0.45)';
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+$/.test(email.trim().toLowerCase());
@@ -146,23 +148,33 @@ export default function RegisterScreen() {
               <ActivityIndicator size="large" color="#011a6b" style={{ marginVertical: 32 }} />
             ) : (
               <>
-                <TextInput style={styles.input} placeholder="First Name" value={firstName} onChangeText={setFirstName} />
-                <TextInput style={styles.input} placeholder="Middle Name" value={middleName} onChangeText={setMiddleName} />
-                <TextInput style={styles.input} placeholder="Surname" value={surname} onChangeText={setSurname} />
-                <TextInput style={styles.input} placeholder="Suffix" value={suffix} onChangeText={setSuffix} />
+                <Text style={styles.label}>First Name</Text>
+                <TextInput style={styles.input} placeholder="First Name" placeholderTextColor={PLACEHOLDER_COLOR} value={firstName} onChangeText={setFirstName} />
+                <Text style={styles.label}>Middle Name</Text>
+                <TextInput style={styles.input} placeholder="Middle Name (optional)" placeholderTextColor={PLACEHOLDER_COLOR} value={middleName} onChangeText={setMiddleName} />
+                <Text style={styles.label}>Surname</Text>
+                <TextInput style={styles.input} placeholder="Surname" placeholderTextColor={PLACEHOLDER_COLOR} value={surname} onChangeText={setSurname} />
+                <Text style={styles.label}>Suffix</Text>
+                <TextInput style={styles.input} placeholder="Suffix (optional)" placeholderTextColor={PLACEHOLDER_COLOR} value={suffix} onChangeText={setSuffix} />
+                <Text style={styles.label}>Email</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="Email address"
+                  placeholderTextColor={PLACEHOLDER_COLOR}
                   value={email}
                   onChangeText={setEmail}
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
                 <Text style={styles.hint}>{EMAIL_HINT}</Text>
-                <TextInput style={styles.input} placeholder="Employee ID Number" value={employeeId} onChangeText={setEmployeeId} autoCapitalize="characters" />
-                <TextInput style={styles.input} placeholder="Phone Number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-                <TextInput style={styles.input} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />
-                <TextInput style={styles.input} placeholder="Confirm Password" value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry />
+                <Text style={styles.label}>Employee ID Number</Text>
+                <TextInput style={styles.input} placeholder="Employee ID Number" placeholderTextColor={PLACEHOLDER_COLOR} value={employeeId} onChangeText={setEmployeeId} autoCapitalize="characters" />
+                <Text style={styles.label}>Phone Number</Text>
+                <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor={PLACEHOLDER_COLOR} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+                <Text style={styles.label}>Password</Text>
+                <TextInput style={styles.input} placeholder="Password" placeholderTextColor={PLACEHOLDER_COLOR} value={password} onChangeText={setPassword} secureTextEntry />
+                <Text style={styles.label}>Confirm Password</Text>
+                <TextInput style={styles.input} placeholder="Confirm Password" placeholderTextColor={PLACEHOLDER_COLOR} value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry />
 
                 <Text style={styles.label}>Campus / Extension</Text>
                 <View style={styles.pickerWrap}>
@@ -238,7 +250,7 @@ const styles = StyleSheet.create({
     color: '#011a6b',
   },
   hint: { fontSize: 12, color: 'rgba(1,26,107,0.65)', marginTop: -6, marginBottom: 12 },
-  label: { fontSize: 14, fontWeight: '600', color: '#011a6b', marginBottom: 6, marginTop: 4 },
+  label: { fontSize: 14, fontWeight: '600', color: '#011a6b', marginBottom: 6, marginTop: 2 },
   pickerWrap: {
     borderWidth: 1,
     borderColor: 'rgba(1,26,107,0.22)',

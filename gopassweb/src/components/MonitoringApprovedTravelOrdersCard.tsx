@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, Pressable, Image } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, Pressable, Image, Platform } from 'react-native';
 import { API_BASE_URL } from '../config/api';
 import { profilePictureUri } from '../utils/profilePictureUri';
 import { FEATURE_CTC_ENABLED } from '../config/featureFlags';
@@ -62,80 +62,108 @@ export interface MonitoringApprovedTravelOrdersCardProps {
 
 export default function MonitoringApprovedTravelOrdersCard(props: MonitoringApprovedTravelOrdersCardProps) {
   const { styles, orders, onView, onIssueCtc } = props;
+  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+  const s = styles as Record<string, object>;
   const showCtc = FEATURE_CTC_ENABLED && !!onIssueCtc;
   const actionsColStyle = showCtc
-    ? (styles as any).monitoringColActionsTwoButtons
-    : (styles as any).monitoringColActions;
+    ? s.monitoringColActionsTwoButtons
+    : s.monitoringColActions;
 
   return (
     <View style={styles.monitoringCard}>
       <Text style={styles.sectionTitle}>Active Travel Orders ({orders.length})</Text>
-      <View style={(styles as any).monitoringTableCard}>
-        <View style={(styles as any).monitoringTableInner}>
-          <View style={(styles as any).monitoringTableHeader}>
-            <Text style={[(styles as any).monitoringHeaderText, (styles as any).monitoringColEmployee, colFit]}>Employee</Text>
-            <Text style={[(styles as any).monitoringHeaderText, (styles as any).monitoringColDestination, colFit]}>Destination</Text>
-            <Text style={[(styles as any).monitoringHeaderText, (styles as any).monitoringColTimeOut, colFit]}>TO No.</Text>
-            <Text style={[(styles as any).monitoringHeaderText, (styles as any).monitoringColTimer, colFit]}>Schedule</Text>
-            <Text style={[(styles as any).monitoringHeaderText, actionsColStyle]}>Actions</Text>
+      <View style={s.monitoringTableCard}>
+        <View style={s.monitoringTableInner}>
+          <View style={s.monitoringTableHeader}>
+            <Text style={[s.monitoringHeaderText, s.monitoringColEmployee, colFit]}>Employee</Text>
+            <Text style={[s.monitoringHeaderText, s.monitoringColDestination, colFit]}>Destination</Text>
+            <Text style={[s.monitoringHeaderText, s.monitoringColTimeOut, colFit]}>TO No.</Text>
+            <Text style={[s.monitoringHeaderText, s.monitoringColTimer, colFit]}>Schedule</Text>
+            <Text style={[s.monitoringHeaderText, actionsColStyle]}>Actions</Text>
           </View>
 
-          {orders.map((item, index) => (
-            <View
-              key={item._id}
-              style={[(styles as any).monitoringTableRow, index % 2 === 1 && (styles as any).monitoringTableRowAlt]}
-            >
-              <View style={[(styles as any).monitoringColEmployee, colFit, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
-                <Image
-                  source={{
-                    uri: profilePictureUri(
-                      item.employee?.profilePicture,
-                      API_BASE_URL,
-                      'https://via.placeholder.com/48'
-                    ),
-                  }}
-                  style={{ width: 40, height: 40, borderRadius: 999, backgroundColor: '#F2F4F7', borderWidth: 1, borderColor: 'rgba(16,24,40,0.06)' }}
-                />
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text
-                    style={[(styles as any).monitoringRowText, { fontSize: 14, fontWeight: '500', color: '#101828' }]}
-                    numberOfLines={1}
-                  >
-                    {item.employee?.name || 'N/A'}
-                  </Text>
-                  {item.employee?.email ? (
-                    <Text style={{ fontSize: 13, color: '#475467', marginTop: 2 }} numberOfLines={1}>
-                      {item.employee.email}
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
-              <Text style={[(styles as any).monitoringRowText, (styles as any).monitoringColDestination, colFit]} numberOfLines={1}>
-                {item.to || '—'}
+          {orders.length === 0 ? (
+            <View style={s.monitoringEmptyState}>
+              <Text style={s.monitoringEmptyTitle}>No active travel orders</Text>
+              <Text style={s.monitoringEmptySubtitle}>
+                Approved travel orders currently in progress will appear here.
               </Text>
-              <Text style={[(styles as any).monitoringRowText, (styles as any).monitoringColTimeOut, colFit]} numberOfLines={1}>
-                {item.travelOrderNo || '—'}
-              </Text>
-              <View style={[(styles as any).monitoringColTimer, colFit, { justifyContent: 'center' }]}>
-                <Text style={[(styles as any).monitoringRowText, { fontSize: 12, fontWeight: '600' }]} numberOfLines={1}>
-                  {formatDate(item.departureDate || item.date)} → {formatDate(item.arrivalDate || '')}
-                </Text>
-                <Text style={[(styles as any).monitoringRowText, { fontSize: 12, opacity: 0.75 }]} numberOfLines={1}>
-                  {formatTimeOnly(item.departureDate || item.date)} - {formatTimeOnly(item.arrivalDate || '')}
-                </Text>
-              </View>
-              <View style={[actionsColStyle, (styles as any).monitoringActionsCell]}>
-                <Pressable style={styles.viewButton} onPress={() => onView(item)}>
-                  <Text style={styles.viewButtonText}>View</Text>
-                </Pressable>
-                {FEATURE_CTC_ENABLED && onIssueCtc ? (
-                  <Pressable style={styles.issueCtcButton} onPress={() => onIssueCtc(item)}>
-                    <Text style={styles.issueCtcButtonText}>Travel Complete</Text>
-                  </Pressable>
-                ) : null}
-              </View>
             </View>
-          ))}
+          ) : (
+            orders.map((item, index) => {
+              const isHovered = hoveredRow === item._id;
+              return (
+                <Pressable
+                  key={item._id}
+                  onPress={() => onView(item)}
+                  onHoverIn={Platform.OS === 'web' ? () => setHoveredRow(item._id) : undefined}
+                  onHoverOut={Platform.OS === 'web' ? () => setHoveredRow(null) : undefined}
+                  style={[
+                    s.monitoringTableRow,
+                    index % 2 === 1 && s.monitoringTableRowAlt,
+                    isHovered && s.monitoringTableRowHover,
+                  ]}
+                >
+                  <View style={[s.monitoringColEmployee, colFit, s.monitoringEmployeeCell]}>
+                    <Image
+                      source={{
+                        uri: profilePictureUri(
+                          item.employee?.profilePicture,
+                          API_BASE_URL,
+                          'https://via.placeholder.com/48'
+                        ),
+                      }}
+                      style={s.monitoringAvatar}
+                    />
+                    <View style={s.monitoringEmployeeMeta}>
+                      <Text style={s.monitoringEmployeeName} numberOfLines={1}>
+                        {item.employee?.name || 'N/A'}
+                      </Text>
+                      {item.employee?.email ? (
+                        <Text style={s.monitoringEmployeeEmail} numberOfLines={1}>
+                          {item.employee.email}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                  <Text
+                    style={[s.monitoringDestinationText, s.monitoringColDestination, colFit]}
+                    numberOfLines={2}
+                    {...(Platform.OS === 'web' ? ({ title: item.to } as object) : {})}
+                  >
+                    {item.to || '—'}
+                  </Text>
+                  <Text style={[s.monitoringRowText, s.monitoringColTimeOut, colFit]} numberOfLines={1}>
+                    {item.travelOrderNo || '—'}
+                  </Text>
+                  <View style={[s.monitoringColTimer, colFit, s.monitoringScheduleCell]}>
+                    <Text style={s.monitoringSchedulePrimary} numberOfLines={1}>
+                      {formatDate(item.departureDate || item.date)} → {formatDate(item.arrivalDate || '')}
+                    </Text>
+                    <Text style={s.monitoringScheduleSecondary} numberOfLines={1}>
+                      {formatTimeOnly(item.departureDate || item.date)} – {formatTimeOnly(item.arrivalDate || '')}
+                    </Text>
+                  </View>
+                  <View style={[actionsColStyle, s.monitoringActionsCell]}>
+                    <Pressable
+                      style={[styles.viewButton, isHovered && s.viewButtonHover]}
+                      onPress={(e) => {
+                        if (Platform.OS === 'web') (e as unknown as { stopPropagation?: () => void }).stopPropagation?.();
+                        onView(item);
+                      }}
+                    >
+                      <Text style={styles.viewButtonText}>View</Text>
+                    </Pressable>
+                    {FEATURE_CTC_ENABLED && onIssueCtc ? (
+                      <Pressable style={styles.issueCtcButton} onPress={() => onIssueCtc(item)}>
+                        <Text style={styles.issueCtcButtonText}>Travel Complete</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            })
+          )}
         </View>
       </View>
     </View>

@@ -39,7 +39,6 @@ export interface PassSlipFormProps {
   approverRoleLabel?: string;
   /** Role label under requester signature (overrides viewerRole-based default). */
   requesterRoleLabel?: string;
-  showStatusOverlay?: boolean;
   /** When true, show draw/upload controls in the Approved By section. */
   approverCanSign?: boolean;
 }
@@ -84,12 +83,8 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
   approverDisplayName,
   approverRoleLabel,
   requesterRoleLabel,
-  showStatusOverlay = true,
   approverCanSign = false,
 }) => {
-  const approved =
-    slip.status === 'Approved' || slip.status === 'Completed' || slip.status === 'Verified';
-  const rejected = slip.status === 'Rejected';
   const arrivalDisplay = formatTimeOnly(slip.arrivalTime);
   const requesterRole = requesterRoleLabel ?? requestedByRoleLabel(viewerRole);
   const approverRole = approverRoleLabel ?? approvedByRoleLabel(viewerRole);
@@ -135,17 +130,6 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
       ) : null}
       <FieldRow label="Destination:" value={normalizeInline(slip.destination)} />
       <FieldRow label="Purpose/s:" value={normalizeInline(slip.purpose)} />
-
-      {showStatusOverlay && approved ? (
-        <View style={styles.statusStampWrap} pointerEvents="none">
-          <Text style={styles.approvedStamp}>APPROVED</Text>
-        </View>
-      ) : null}
-      {showStatusOverlay && rejected ? (
-        <View style={styles.statusStampWrap} pointerEvents="none">
-          <Text style={styles.rejectedStamp}>REJECTED</Text>
-        </View>
-      ) : null}
 
       <View style={styles.sigRow}>
         <View style={styles.sigCol}>
@@ -313,33 +297,6 @@ const styles = StyleSheet.create({
   },
   overdueValue: {
     color: '#c53030',
-  },
-  statusStampWrap: {
-    position: 'absolute',
-    top: '42%',
-    left: '18%',
-    right: '18%',
-    alignItems: 'center',
-    zIndex: 10,
-    transform: [{ rotate: '-18deg' }],
-  },
-  approvedStamp: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: 'rgba(47, 133, 90, 0.75)',
-    borderWidth: 3,
-    borderColor: 'rgba(47, 133, 90, 0.75)',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-  rejectedStamp: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: 'rgba(197, 48, 48, 0.75)',
-    borderWidth: 3,
-    borderColor: 'rgba(197, 48, 48, 0.75)',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
   },
   sigRow: {
     flexDirection: 'row',

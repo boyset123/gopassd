@@ -4,6 +4,8 @@ import { useRouter } from 'expo-router';
 import axios from 'axios';
 import { API_URL } from '../../config/api';
 
+const PLACEHOLDER_COLOR = 'rgba(1,26,107,0.45)';
+
 const ForgotPasswordScreen = () => {
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -52,9 +54,11 @@ const ForgotPasswordScreen = () => {
           <View style={styles.formContainer}>
             <Text style={styles.title}>Forgot Password</Text>
             <Text style={styles.subtitle}>Enter your email to receive a reset link.</Text>
+            <Text style={styles.label}>Email</Text>
             <TextInput
               style={styles.input}
               placeholder="Enter your email"
+              placeholderTextColor={PLACEHOLDER_COLOR}
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -120,6 +124,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 32,
   },
+  label: {
+    alignSelf: 'flex-start',
+    width: '100%',
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#003366',
+    marginBottom: 6,
+  },
   input: {
     width: '100%',
     backgroundColor: '#f1f5f9',
@@ -127,6 +139,8 @@ const styles = StyleSheet.create({
     height: 50,
     marginBottom: 20,
     paddingHorizontal: 20,
+    fontSize: 15,
+    color: '#003366',
   },
   button: {
     width: '100%',

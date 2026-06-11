@@ -534,7 +534,6 @@ export default function ProgramHeadDashboard() {
                     onChooseSignature={(type) => setSignatureType(type)}
                     approverDisplayName={user?.name}
                     approverRoleLabel="Immediate Head"
-                    showStatusOverlay={false}
                   />
                 )}
 

@@ -40,7 +40,6 @@ export interface PassSlipFormProps {
   approverDisplayName?: string;
   approverRoleLabel?: string;
   requesterRoleLabel?: string;
-  showStatusOverlay?: boolean;
   approverCanSign?: boolean;
   /** Optional content below fields (e.g. security timer). */
   children?: React.ReactNode;
@@ -97,17 +96,14 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
   approverDisplayName,
   approverRoleLabel,
   requesterRoleLabel,
-  showStatusOverlay = true,
   approverCanSign = false,
   children,
 }) => {
   const employeeRole = slip.employee?.role;
-  const rejected = slip.status === 'Rejected';
   const arrivalDisplay = formatTimeOnly(slip.arrivalTime);
   const requesterRole = requesterRoleLabel ?? requestedByRoleLabel(viewerRole, employeeRole);
   const approverRole = approverRoleLabel ?? approvedByRoleLabel(viewerRole, employeeRole);
   const approverName = approverDisplayName ?? slip.approvedBy?.name ?? ' ';
-  const showApproved = showStatusOverlay && slip.status === 'Approved';
 
   return (
     <View style={styles.slipCard}>
@@ -156,17 +152,6 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
       <FieldRow label="Purpose/s:" value={normalizeInline(slip.purpose)} />
 
       {children}
-
-      {showApproved ? (
-        <View style={styles.statusStampWrap} pointerEvents="none">
-          <Text style={styles.approvedStamp}>APPROVED</Text>
-        </View>
-      ) : null}
-      {showStatusOverlay && rejected ? (
-        <View style={styles.statusStampWrap} pointerEvents="none">
-          <Text style={styles.rejectedStamp}>REJECTED</Text>
-        </View>
-      ) : null}
 
       <View style={styles.sigRow}>
         <View style={styles.sigCol}>
@@ -329,47 +314,6 @@ const styles = StyleSheet.create({
   },
   overdueValue: {
     color: '#c53030',
-  },
-  statusStampWrap: {
-    alignItems: 'center',
-    marginVertical: 12,
-    transform: [{ rotate: '-12deg' }],
-  },
-  onTimeStamp: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: 'rgba(43, 108, 176, 0.88)',
-    borderWidth: 2,
-    borderColor: 'rgba(43, 108, 176, 0.88)',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-  overdueStamp: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: 'rgba(197, 48, 48, 0.88)',
-    borderWidth: 2,
-    borderColor: 'rgba(197, 48, 48, 0.88)',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  approvedStamp: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: 'rgba(47, 133, 90, 0.75)',
-    borderWidth: 2,
-    borderColor: 'rgba(47, 133, 90, 0.75)',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  rejectedStamp: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: 'rgba(197, 48, 48, 0.75)',
-    borderWidth: 2,
-    borderColor: 'rgba(197, 48, 48, 0.75)',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
   },
   sigRow: {
     flexDirection: 'row',

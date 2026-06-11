@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Text, StyleSheet } from 'react-native';
+import { Text, StyleSheet, View } from 'react-native';
 import { useServerTime } from '../hooks/useServerTime';
 import { computePassSlipRemaining } from '../utils/passSlipTimer';
 
-const Timer = ({ estimatedTimeBack, departureTime }: { timeOut?: string, estimatedTimeBack: string, departureTime: string }) => {
+interface TimerProps {
+  timeOut?: string;
+  estimatedTimeBack: string;
+  departureTime: string;
+  pill?: boolean;
+}
+
+const Timer = ({ estimatedTimeBack, departureTime, pill }: TimerProps) => {
   const { getServerNow } = useServerTime();
 
   const calculateRemainingTime = () => {
@@ -24,26 +31,47 @@ const Timer = ({ estimatedTimeBack, departureTime }: { timeOut?: string, estimat
   }, [departureTime, estimatedTimeBack, getServerNow]);
 
   const timerStyle = remainingTime.isOverdue ? styles.overdueText : styles.timerText;
+  const label = `${remainingTime.isOverdue ? '-' : ''}${String(remainingTime.hours).padStart(2, '0')}:${String(remainingTime.minutes).padStart(2, '0')}:${String(remainingTime.seconds).padStart(2, '0')}`;
 
-  return (
-    <Text style={timerStyle}>
-      {remainingTime.isOverdue ? '-' : ''}{String(remainingTime.hours).padStart(2, '0')}:
-      {String(remainingTime.minutes).padStart(2, '0')}:
-      {String(remainingTime.seconds).padStart(2, '0')}
-    </Text>
-  );
+  if (pill) {
+    return (
+      <View style={[styles.pill, remainingTime.isOverdue ? styles.pillOverdue : styles.pillActive]}>
+        <Text style={timerStyle}>{label}</Text>
+      </View>
+    );
+  }
+
+  return <Text style={timerStyle}>{label}</Text>;
 };
 
 const styles = StyleSheet.create({
   timerText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#28a745',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#067647',
+    fontVariant: ['tabular-nums'],
   },
   overdueText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#dc3545',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B42318',
+    fontVariant: ['tabular-nums'],
+  },
+  pill: {
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    minWidth: 96,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  pillActive: {
+    backgroundColor: '#ECFDF3',
+    borderColor: '#ABEFC6',
+  },
+  pillOverdue: {
+    backgroundColor: '#FEF3F2',
+    borderColor: '#FECDCA',
   },
 });
 

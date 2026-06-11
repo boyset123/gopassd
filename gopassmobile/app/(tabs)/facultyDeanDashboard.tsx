@@ -519,7 +519,6 @@ export default function FacultyDeanDashboard() {
                     onChooseSignature={(type) => setSignatureType(type)}
                     approverDisplayName={user?.name}
                     approverRoleLabel="Faculty Dean"
-                    showStatusOverlay={false}
                   />
                 )}
 

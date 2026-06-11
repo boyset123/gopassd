@@ -68,6 +68,10 @@ const passSlipSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  /** Minutes between departure and return scans (set when status becomes Returned). */
+  actualMinutesUsed: {
+    type: Number,
+  },
   latitude: {
     type: Number,
   },

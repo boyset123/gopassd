@@ -54,15 +54,6 @@ const approvedRoleLabel = (role: string | undefined) => {
   return 'Immediate Head';
 };
 
-const statusStamp = (item: PassSlipPrintItem) => {
-  const raw = String(item.arrivalStatus || item.status || '').toLowerCase();
-  if (raw.includes('approved') || raw.includes('verified') || raw.includes('completed') || raw.includes('returned')) {
-    return '<div class="stamp approved">APPROVED</div>';
-  }
-  if (raw.includes('rejected')) return '<div class="stamp rejected">REJECTED</div>';
-  return '';
-};
-
 const formatPrintTime = (value?: string) => {
   if (!value) return '';
   const d = new Date(value);
@@ -114,8 +105,6 @@ const renderSlipCard = (item: PassSlipPrintItem, options?: PassSlipPrintOptions)
         : ''}
       <div class="field data-field"><strong>Destination:</strong> ${escapeHtml(normalizeInline(item.destination) || 'N/A')}</div>
       <div class="field data-field"><strong>Purpose/s:</strong> ${escapeHtml(normalizeInline(item.purpose) || 'N/A')}</div>
-
-      ${statusStamp(item)}
 
       <div class="sig-row">
         <div class="sig-col">
@@ -225,21 +214,6 @@ export function getPassSlipPrintHtml(item: PassSlipPrintItem, options?: PassSlip
     .data-field { font-size: 11.8px; line-height: 1.32; margin-bottom: 3px; }
     .overdue-field { color: #c53030; }
     .overdue-field strong { color: #c53030; }
-
-    .stamp {
-      align-self: center;
-      margin: 4px 0 3px;
-      padding: 1px 6px;
-      border: 1px solid currentColor;
-      font-size: 12px;
-      font-weight: 800;
-      transform: rotate(-12deg);
-      opacity: 0.88;
-    }
-    .stamp.approved { color: #2f855a; }
-    .stamp.rejected { color: #c53030; }
-    .stamp.overdue { color: #c53030; }
-    .stamp.ontime { color: #2b6cb0; }
 
     .sig-row {
       margin-top: auto;

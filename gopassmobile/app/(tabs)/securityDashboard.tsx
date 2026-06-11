@@ -580,16 +580,6 @@ export default function SecurityDashboard() {
                       </View>
                     )}
 
-                    {(scannedData.status === 'Approved' || scannedData.status === 'Completed') && scannedData.hrApprovedBy && (
-                      <View style={styles.approvedStampContainer}>
-                        <Text style={styles.approvedStamp}>APPROVED</Text>
-                      </View>
-                    )}
-                    {scannedData.status === 'Rejected' && (
-                      <View style={styles.rejectedStampContainer}>
-                        <Text style={styles.rejectedStamp}>REJECTED</Text>
-                      </View>
-                    )}
                     <View style={styles.signatureSection}>
                       <View style={styles.signatureBlock}>
                         <Text style={styles.signatureHeader}>REQUESTED BY:</Text>
@@ -643,16 +633,6 @@ export default function SecurityDashboard() {
                     <View style={styles.docRow}><Text style={styles.docField}>Departure: <Text style={styles.docValue}>{formatDateTime((scannedData as any).departureDate)}</Text></Text></View>
                     <View style={styles.docRow}><Text style={styles.docField}>Arrival: <Text style={styles.docValue}>{formatDateTime((scannedData as any).arrivalDate)}</Text></Text></View>
 
-                    {(scannedData.status === 'Approved' || scannedData.status === 'Completed') && (
-                      <View style={styles.approvedStampContainer}>
-                        <Text style={styles.approvedStamp}>APPROVED</Text>
-                      </View>
-                    )}
-                    {scannedData.status === 'Rejected' && (
-                      <View style={styles.rejectedStampContainer}>
-                        <Text style={styles.rejectedStamp}>REJECTED</Text>
-                      </View>
-                    )}
                     <View style={styles.signatureSection}>
                       <View style={styles.signatureBlock}>
                         <Text style={styles.signatureHeader}>REQUESTED BY:</Text>
@@ -1486,40 +1466,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: 'bold',
     textAlign: 'left',
-  },
-  approvedStampContainer: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -100 }, { translateY: -50 }, { rotate: '-30deg' }],
-    zIndex: 1000,
-  },
-  approvedStamp: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: 'rgba(0, 128, 0, 0.7)', // Green color
-    borderWidth: 4,
-    borderColor: 'rgba(0, 128, 0, 0.7)', // Green border
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  rejectedStampContainer: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -100 }, { translateY: -50 }, { rotate: '-30deg' }],
-    zIndex: 1000,
-  },
-  rejectedStamp: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: 'rgba(255, 0, 0, 0.7)', // Red color
-    borderWidth: 4,
-    borderColor: 'rgba(255, 0, 0, 0.7)', // Red border
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
   },
   qrModalContainer: {
     flex: 1,

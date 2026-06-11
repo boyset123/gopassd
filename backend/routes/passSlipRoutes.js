@@ -14,6 +14,7 @@ const {
 } = require('../utils/dateTime');
 const { getEffectiveSigner, isUserOnTravel, toIdString } = require('../utils/oic');
 const { getScheduledReturnMoment } = require('../utils/passSlipSchedule');
+const { computeReturnBalanceAdjustment } = require('../utils/passSlipBalance');
 const { resolvePassSlipMapRoute } = require('../utils/drivingRoute');
 
 /**
@@ -873,29 +874,20 @@ router.put('/:id/return', [auth, authorize('Security Personnel')], async (req, r
     }
 
     const arrival = serverNow();
+    const { adjustment, actualMinutes, overdueMinutes } = computeReturnBalanceAdjustment(passSlip, arrival);
+
     passSlip.status = 'Returned';
     passSlip.arrivalTime = arrival;
-
-    // If returned past the scheduled estimatedTimeBack (anchored to departureTime),
-    // treat the excess as additional time spent and deduct from passSlipMinutes.
-    let overdueMinutes = 0;
-    const scheduledReturn = getScheduledReturnMoment(passSlip);
-    if (scheduledReturn) {
-      const diffMs = arrival.getTime() - scheduledReturn.getTime();
-      if (diffMs > 0) {
-        overdueMinutes = diffMs / 60000;
-      }
-    }
     passSlip.overdueMinutes = overdueMinutes;
+    passSlip.actualMinutesUsed = actualMinutes;
 
     await passSlip.save();
 
-    if (overdueMinutes > 0) {
+    if (adjustment !== 0) {
       const employee = await User.findById(passSlip.employee);
       if (employee) {
         const currentBalance = Math.max(0, Math.floor(Number(employee.passSlipMinutes) || 0));
-        const deduct = Math.ceil(overdueMinutes);
-        employee.passSlipMinutes = Math.max(0, currentBalance - deduct);
+        employee.passSlipMinutes = Math.max(0, currentBalance + adjustment);
         await employee.save();
         emitBalanceUpdate(req.io, employee._id, employee.passSlipMinutes);
       }

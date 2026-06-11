@@ -114,6 +114,8 @@ const formatSalary = (salary: string | undefined) =>
 const normalizeInline = (value: string | undefined | null) =>
   (value ?? '').replace(/\s+/g, ' ').trim();
 
+const showPassSlipQr = (status: string) => ['Approved', 'Verified', 'Completed'].includes(status);
+
 const getStatusStyle = (status: string) => {
   switch (status) {
     case 'Approved':
@@ -669,6 +671,9 @@ export default function SlipsScreen() {
                     onTimeShort={() => handleTimeShort(item._id)}
                     onTimeOver={() => handleTimeOver(item._id)}
                   />
+                  {item.qrCode ? (
+                    <Text style={styles.qrReturnHint}>Show QR to guard for return scan.</Text>
+                  ) : null}
                 </>
               )}
             </View>
@@ -717,7 +722,7 @@ export default function SlipsScreen() {
                 <Text style={styles.saveButtonText}>Save File</Text>
               </Pressable>
             )}
-            {item.type === 'Pass Slip' && (item.status === 'Approved' || item.status === 'Completed') && item.qrCode ? (
+            {item.type === 'Pass Slip' && showPassSlipQr(item.status) && item.qrCode ? (
               <Pressable style={styles.qrButton} onPress={() => {
                 setSelectedSubmission(item);
                 setQrModalVisible(true);
@@ -959,19 +964,14 @@ export default function SlipsScreen() {
                       />
                     </View>
 
-                {selectedSubmission.status === 'Rejected' && (
-                  <>
-                    <View style={styles.rejectedStampContainer}>
-                      <Text style={styles.rejectedStamp}>REJECTED</Text>
+                {selectedSubmission.status === 'Rejected' &&
+                  selectedSubmission.rejectionReason != null &&
+                  String(selectedSubmission.rejectionReason).trim() !== '' && (
+                    <View style={[styles.reasonNote, styles.reasonNoteModal]}>
+                      <Text style={styles.reasonNoteLabel}>Rejection reason</Text>
+                      <Text style={styles.reasonNoteText}>{String(selectedSubmission.rejectionReason).trim()}</Text>
                     </View>
-                    {(selectedSubmission.rejectionReason != null && String(selectedSubmission.rejectionReason).trim() !== '') && (
-                      <View style={[styles.reasonNote, styles.reasonNoteModal]}>
-                        <Text style={styles.reasonNoteLabel}>Rejection reason</Text>
-                        <Text style={styles.reasonNoteText}>{String(selectedSubmission.rejectionReason).trim()}</Text>
-                      </View>
-                    )}
-                  </>
-                )}
+                  )}
                   </>
                 )}
                 </ScrollView>
@@ -1505,6 +1505,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: theme.primary,
     textAlign: 'center',
+    paddingHorizontal: 8,
+  },
+  qrReturnHint: {
+    fontSize: 12,
+    color: theme.primary,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 8,
     paddingHorizontal: 8,
   },
   overdueBox: {
@@ -2094,23 +2102,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#fff',
   },
-  approvedStampContainer: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -100 }, { translateY: -50 }, { rotate: '-30deg' }],
-    zIndex: 1000,
-  },
-  approvedStamp: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: 'rgba(0, 128, 0, 0.7)', // Green color
-    borderWidth: 4,
-    borderColor: 'rgba(0, 128, 0, 0.7)', // Green border
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
   reasonNote: {
     marginTop: 14,
     paddingVertical: 12,
@@ -2134,22 +2125,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     color: theme.text,
-  },
-  rejectedStampContainer: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -100 }, { translateY: -50 }, { rotate: '-30deg' }],
-    zIndex: 1000,
-  },
-  rejectedStamp: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: 'rgba(255, 0, 0, 0.7)', // Red color
-    borderWidth: 4,
-    borderColor: 'rgba(255, 0, 0, 0.7)', // Red border
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
   },
 });

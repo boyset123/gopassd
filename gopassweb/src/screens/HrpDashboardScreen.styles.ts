@@ -2019,40 +2019,6 @@ export const styles = StyleSheet.create({
       marginTop: 6,
       fontWeight: '500',
     },
-    approvedStampContainer: {
-      position: 'absolute',
-      top: '50%',
-      left: '50%',
-      transform: [{ translateX: -100 }, { translateY: -50 }, { rotate: '-30deg' }],
-      zIndex: 1000,
-    },
-    approvedStamp: {
-      fontSize: 48,
-      fontWeight: 'bold',
-      color: 'rgba(0, 128, 0, 0.7)', // Green color
-      borderWidth: 4,
-      borderColor: 'rgba(0, 128, 0, 0.7)', // Green border
-      paddingHorizontal: 20,
-      paddingVertical: 10,
-      borderRadius: 8,
-    },
-    rejectedStampContainer: {
-      position: 'absolute',
-      top: '50%',
-      left: '50%',
-      transform: [{ translateX: -100 }, { translateY: -50 }, { rotate: '-30deg' }],
-      zIndex: 1000,
-    },
-    rejectedStamp: {
-      fontSize: 48,
-      fontWeight: 'bold',
-      color: 'rgba(255, 0, 0, 0.7)', // Red color
-      borderWidth: 4,
-      borderColor: 'rgba(255, 0, 0, 0.7)', // Red border
-      paddingHorizontal: 20,
-      paddingVertical: 10,
-      borderRadius: 8,
-    },
     travelOrderReviewWrap: {
       position: 'relative',
       width: '100%',
@@ -2204,7 +2170,7 @@ export const styles = StyleSheet.create({
       flexDirection: 'row',
       borderBottomWidth: 1,
       borderBottomColor: '#EAECF0',
-      paddingVertical: 12,
+      paddingVertical: 14,
       backgroundColor: '#F9FAFB',
       paddingHorizontal: 20,
       alignItems: 'center',
@@ -2214,18 +2180,37 @@ export const styles = StyleSheet.create({
       fontSize: 12,
       color: '#475467',
       textAlign: 'left',
+      letterSpacing: 0.2,
+      ...Platform.select({
+        web: { textTransform: 'uppercase' as const },
+      }),
     },
     monitoringTableRow: {
       flexDirection: 'row',
-      paddingVertical: 14,
+      paddingVertical: 16,
       paddingHorizontal: 20,
       borderBottomWidth: 1,
       borderBottomColor: '#EAECF0',
       alignItems: 'center',
       backgroundColor: '#FFFFFF',
+      ...Platform.select({
+        web: {
+          cursor: 'pointer',
+          transitionProperty: 'background-color, box-shadow',
+          transitionDuration: '120ms',
+        },
+      }),
     },
     monitoringTableRowAlt: {
       backgroundColor: '#F9FAFB',
+    },
+    monitoringTableRowHover: {
+      backgroundColor: '#F0F4FF',
+      ...Platform.select({
+        web: {
+          boxShadow: 'inset 3px 0 0 #011a6b',
+        },
+      }),
     },
     monitoringRowText: {
       fontSize: 14,
@@ -2233,16 +2218,90 @@ export const styles = StyleSheet.create({
       fontWeight: '500',
       textAlign: 'left',
     },
-    monitoringColEmployee: { flex: 2, minWidth: 180, paddingRight: 14 },
-    monitoringColDestination: { flex: 3, minWidth: 220, paddingRight: 14 },
-    monitoringColTimeOut: { flex: 1.2, minWidth: 120, paddingRight: 14 },
-    monitoringColTimer: { flex: 2, minWidth: 200, paddingRight: 14 },
+    monitoringColEmployee: { flex: 2.2, minWidth: 0, paddingRight: 16 },
+    monitoringColDestination: { flex: 2.8, minWidth: 0, paddingRight: 16 },
+    monitoringColTimeOut: { flex: 1.4, minWidth: 0, paddingRight: 16 },
+    monitoringColTimer: { flex: 1.2, minWidth: 0, paddingRight: 16 },
     monitoringColActions: {
-      flex: 1.2,
-      minWidth: 140,
+      flex: 0,
+      flexGrow: 0,
+      flexShrink: 0,
+      minWidth: 88,
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'flex-start',
+      justifyContent: 'flex-end',
+    },
+    monitoringEmployeeCell: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    monitoringAvatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 999,
+      backgroundColor: '#F2F4F7',
+      borderWidth: 1,
+      borderColor: 'rgba(16,24,40,0.06)',
+    },
+    monitoringEmployeeMeta: {
+      flex: 1,
+      minWidth: 0,
+    },
+    monitoringEmployeeName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#101828',
+    },
+    monitoringEmployeeEmail: {
+      fontSize: 12,
+      color: '#667085',
+      marginTop: 2,
+    },
+    monitoringDestinationText: {
+      fontSize: 13,
+      lineHeight: 20,
+      color: '#344054',
+      fontWeight: '500',
+    },
+    monitoringScheduleCell: {
+      justifyContent: 'center',
+    },
+    monitoringSchedulePrimary: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: '#101828',
+    },
+    monitoringScheduleSecondary: {
+      fontSize: 12,
+      color: '#667085',
+      marginTop: 2,
+    },
+    monitoringTimerCell: {
+      justifyContent: 'center',
+      alignItems: 'flex-start',
+    },
+    monitoringEmptyState: {
+      paddingVertical: 48,
+      paddingHorizontal: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    monitoringEmptyTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: '#344054',
+      marginBottom: 6,
+    },
+    monitoringEmptySubtitle: {
+      fontSize: 13,
+      color: '#667085',
+      textAlign: 'center',
+      maxWidth: 360,
+      lineHeight: 20,
+    },
+    viewButtonHover: {
+      backgroundColor: '#F2F4F7',
     },
     /** View + Mark complete (and optional CTC); column width from featureFlags / props */
     monitoringColActionsTwoButtons: {

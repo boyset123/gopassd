@@ -18,7 +18,7 @@ import axios, { isAxiosError } from 'axios';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { FontAwesome } from '@expo/vector-icons';
 import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
-import { API_BASE_URL, apiClient } from '../config/api';
+import { API_URL } from '../config/api';
 import FormSelect from '../components/FormSelect';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -54,25 +54,6 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+$/.test(email.trim().toLowerCase());
 }
 
-function getMetadataLoadErrorMessage(err: unknown): string {
-  if (isAxiosError(err)) {
-    const status = err.response?.status;
-    if (status === 404) {
-      return 'Registration options API not found. Redeploy the backend and try again.';
-    }
-    if (status && status >= 500) {
-      return 'Server error loading registration options. Check backend logs and try again.';
-    }
-    if (err.code === 'ECONNABORTED' || err.message.toLowerCase().includes('timeout')) {
-      return `Cannot reach server at ${API_BASE_URL}. The backend may be starting up (Render free tier) — wait a minute and tap Retry.`;
-    }
-    if (!err.response) {
-      return `Cannot reach server at ${API_BASE_URL}. Check that the backend is running and the API URL is correct.`;
-    }
-  }
-  return 'Could not load registration options. Please try again later.';
-}
-
 function FieldLabel({ children }: { children: string }) {
   return <Text style={styles.fieldLabel}>{children}</Text>;
 }
@@ -100,19 +81,17 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
   const [selectedCampus, setSelectedCampus] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isMetaLoading, setIsMetaLoading] = useState(true);
-  const [metaError, setMetaError] = useState('');
   const [error, setError] = useState('');
   const [successVisible, setSuccessVisible] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const loadMetadata = useCallback(async () => {
     setIsMetaLoading(true);
-    setMetaError('');
     try {
       const [rolesRes, facultiesRes, extensionsRes] = await Promise.all([
-        apiClient.get<string[]>('/metadata/roles'),
-        apiClient.get<string[]>('/metadata/faculties'),
-        apiClient.get<string[]>('/metadata/extensions'),
+        axios.get<string[]>(`${API_URL}/metadata/roles`),
+        axios.get<string[]>(`${API_URL}/metadata/faculties`),
+        axios.get<string[]>(`${API_URL}/metadata/extensions`),
       ]);
       setRoles(rolesRes.data);
       setFaculties(facultiesRes.data);
@@ -122,7 +101,7 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
       if (extensionsRes.data.length) setSelectedCampus(extensionsRes.data[0]);
     } catch (err) {
       console.error('Failed to load metadata:', err);
-      setMetaError(getMetadataLoadErrorMessage(err));
+      setError('Could not load registration options. Please try again later.');
     } finally {
       setIsMetaLoading(false);
     }
@@ -161,7 +140,7 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
     const name = [firstName, middleName, surname, suffix].filter(Boolean).join(' ');
 
     try {
-      await apiClient.post('/users/register', {
+      await axios.post(`${API_URL}/users/register`, {
         name,
         email: email.trim().toLowerCase(),
         password,
@@ -202,16 +181,6 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
         <ActivityIndicator size="large" color={theme.primary} style={styles.loader} />
       ) : (
         <>
-          {metaError ? (
-            <View style={styles.errorBanner}>
-              <FontAwesome name="exclamation-circle" size={16} color={theme.danger} />
-              <Text style={styles.errorText}>{metaError}</Text>
-              <Pressable onPress={loadMetadata} style={styles.retryButton} disabled={isMetaLoading}>
-                <Text style={styles.retryButtonText}>Retry</Text>
-              </Pressable>
-            </View>
-          ) : null}
-
           {error ? (
             <View style={styles.errorBanner}>
               <FontAwesome name="exclamation-circle" size={16} color={theme.danger} />
@@ -481,13 +450,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   errorText: { flex: 1, color: theme.danger, fontSize: 14, lineHeight: 20 },
-  retryButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: theme.primary,
-  },
-  retryButtonText: { color: theme.white, fontSize: 13, fontWeight: '600' },
   section: {
     backgroundColor: theme.sectionBg,
     borderRadius: 12,

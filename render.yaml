@@ -3,9 +3,8 @@
 #
 # Required env vars on Render:
 #   MONGODB_URI, JWT_SECRET, FIREBASE_SERVICE_ACCOUNT_JSON
-#   RESEND_API_KEY — email on Render (Gmail SMTP often ETIMEDOUT; use Resend HTTP API)
-#   Optional EMAIL_FROM after verifying your domain in Resend
-# Local dev can use EMAIL_USER + EMAIL_PASS (Gmail App Password) instead of Resend.
+#   BREVO_API_KEY, EMAIL_USER — email on Render (verify Gmail sender in Brevo first)
+# Local dev can use EMAIL_USER + EMAIL_PASS (Gmail App Password) instead of Brevo.
 # MongoDB Atlas: Network Access must allow 0.0.0.0/0 or Render outbound IPs.
 services:
   - type: web

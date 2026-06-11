@@ -251,7 +251,7 @@ router.post('/register', auth, async (req, res) => {
       }
     } else {
       console.warn('Temporary password email skipped: email not configured on server.');
-      emailErrorDetail = 'Email not configured (EMAIL_USER / EMAIL_PASS or RESEND_API_KEY).';
+      emailErrorDetail = 'Email not configured (EMAIL_USER / EMAIL_PASS or BREVO_API_KEY).';
     }
 
     if (emailSent) {

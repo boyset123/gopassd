@@ -8,6 +8,26 @@ function hasBrevoKey() {
   return Boolean(process.env.BREVO_API_KEY && String(process.env.BREVO_API_KEY).trim());
 }
 
+function getBrevoApiKey() {
+  const key = process.env.BREVO_API_KEY?.trim() || '';
+  if (!key) {
+    const err = new Error('BREVO_API_KEY is not set.');
+    err.code = 'ENOEMAIL';
+    throw err;
+  }
+  if (key.startsWith('xsmtpsib-')) {
+    const err = new Error(
+      'BREVO_API_KEY looks like an SMTP key (xsmtpsib-). Use an API v3 key (xkeysib-) from Brevo → SMTP & API → API keys tab.'
+    );
+    err.code = 'EBREVO_KEY_TYPE';
+    throw err;
+  }
+  if (!key.startsWith('xkeysib-')) {
+    console.warn('Email: BREVO_API_KEY does not start with xkeysib- — it may be invalid or incomplete.');
+  }
+  return key;
+}
+
 function hasSmtpCredentials() {
   return Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
 }
@@ -76,6 +96,15 @@ function formatEmailErrorForClient(error) {
   }
   const message = error?.message || '';
   if (
+    message.toLowerCase().includes('key not found') ||
+    error?.code === 'EBREVO_KEY_TYPE'
+  ) {
+    return (
+      'Invalid Brevo API key. In Brevo go to SMTP & API → API keys (not SMTP keys), generate a new key ' +
+      '(starts with xkeysib-), add it as BREVO_API_KEY in Render → Environment, and redeploy.'
+    );
+  }
+  if (
     message.toLowerCase().includes('sender') &&
     (message.toLowerCase().includes('not valid') ||
       message.toLowerCase().includes('not verified') ||
@@ -90,7 +119,7 @@ function formatEmailErrorForClient(error) {
 }
 
 async function sendViaBrevo({ to, subject, text, html }) {
-  const apiKey = process.env.BREVO_API_KEY.trim();
+  const apiKey = getBrevoApiKey();
   const sender = getBrevoSender();
 
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -172,7 +201,24 @@ async function verifyEmailOnStartup() {
   logEmailConfig();
   const provider = getEmailProvider();
   if (provider === 'brevo') {
-    console.log('Email: Brevo API ready (HTTPS — works on Render). Verify sender at app.brevo.com → Senders.');
+    try {
+      getBrevoApiKey();
+      const response = await fetch('https://api.brevo.com/v3/account', {
+        headers: { 'api-key': getBrevoApiKey(), accept: 'application/json' },
+      });
+      if (response.ok) {
+        console.log('Email: Brevo API key verified OK.');
+      } else {
+        const body = await response.json().catch(() => ({}));
+        console.error('Email: Brevo API key check FAILED —', body.message || response.status);
+        console.error(
+          'Generate a new API v3 key at app.brevo.com → SMTP & API → API keys (xkeysib-), ' +
+            'not an SMTP key (xsmtpsib-). Add as BREVO_API_KEY in Render and redeploy.'
+        );
+      }
+    } catch (error) {
+      console.error('Email: Brevo startup check failed —', error.message);
+    }
     return;
   }
   if (provider === 'smtp') {

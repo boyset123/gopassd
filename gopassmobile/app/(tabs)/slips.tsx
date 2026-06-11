@@ -114,7 +114,15 @@ const formatSalary = (salary: string | undefined) =>
 const normalizeInline = (value: string | undefined | null) =>
   (value ?? '').replace(/\s+/g, ' ').trim();
 
-const showPassSlipQr = (status: string) => ['Approved', 'Verified', 'Completed'].includes(status);
+/** Approved: departure scan. Verified: return scan unless ETB is 5:00 PM (auto-return, no scan-back). */
+const showPassSlipQr = (item: Submission) => {
+  if (item.type !== 'Pass Slip' || !item.qrCode) return false;
+  if (item.status === 'Approved' || item.status === 'Completed') return true;
+  if (item.status === 'Verified') {
+    return !isFivePmEtb(item.estimatedTimeBack);
+  }
+  return false;
+};
 
 const getStatusStyle = (status: string) => {
   switch (status) {
@@ -722,7 +730,7 @@ export default function SlipsScreen() {
                 <Text style={styles.saveButtonText}>Save File</Text>
               </Pressable>
             )}
-            {item.type === 'Pass Slip' && showPassSlipQr(item.status) && item.qrCode ? (
+            {showPassSlipQr(item) ? (
               <Pressable style={styles.qrButton} onPress={() => {
                 setSelectedSubmission(item);
                 setQrModalVisible(true);

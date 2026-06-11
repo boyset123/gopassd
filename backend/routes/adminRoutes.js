@@ -86,18 +86,7 @@ router.get('/dashboard', auth, async (req, res) => {
 });
 
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
-
-console.log('Attempting to create Nodemailer transporter...');
-console.log(`Using Email User: ${process.env.EMAIL_USER ? 'Loaded' : 'NOT LOADED'}`);
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-console.log('Nodemailer transporter created.');
+const { sendEmail, isEmailConfigured, formatEmailErrorForClient } = require('../utils/sendEmail');
 
 const { isValidDorsuEmail, dorsuEmailErrorMessage, validatePhone } = require('../utils/dorsuEmail');
 const { validateRegistrationMetadata } = require('../utils/metadataValidation');
@@ -245,25 +234,24 @@ router.post('/register', auth, async (req, res) => {
     let emailSent = false;
     let emailErrorDetail = null;
 
-    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    if (isEmailConfigured()) {
       try {
         console.log(`Attempting to send temporary password email to ${normalizedEmail}...`);
-        const mailInfo = await transporter.sendMail({
-          from: `"GoPass DOrSU" <${process.env.EMAIL_USER}>`,
+        const mailInfo = await sendEmail({
           to: normalizedEmail,
           subject: 'Your GoPass DOrSU Account Credentials',
           text: emailContent.text,
           html: emailContent.html,
         });
-        console.log('Email sent successfully! Message ID:', mailInfo.messageId);
+        console.log('Email sent successfully!', mailInfo.provider, mailInfo.messageId);
         emailSent = true;
       } catch (emailError) {
         console.error('Email sending error:', emailError);
-        emailErrorDetail = emailError.message || 'Unknown email error.';
+        emailErrorDetail = formatEmailErrorForClient(emailError);
       }
     } else {
-      console.warn('Temporary password email skipped: EMAIL_USER / EMAIL_PASS not configured.');
-      emailErrorDetail = 'EMAIL_USER / EMAIL_PASS not configured on server.';
+      console.warn('Temporary password email skipped: email not configured on server.');
+      emailErrorDetail = 'Email not configured (EMAIL_USER / EMAIL_PASS or RESEND_API_KEY).';
     }
 
     if (emailSent) {

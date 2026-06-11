@@ -5,9 +5,9 @@ const rawBase =
 export const API_BASE_URL = rawBase.replace(/\/$/, '');
 export const API_URL = `${API_BASE_URL}/api`;
 
-/** Shared client — long timeout for Render cold starts and Gmail SMTP on admin register. */
+/** Shared client — admin register waits for Gmail send like the original flow. */
 export const apiClient = axios.create({
-  timeout: 60000,
+  timeout: 90000,
 });
 
 export function getNetworkErrorMessage(error: unknown, action: string): string | null {

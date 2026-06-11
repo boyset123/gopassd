@@ -29,7 +29,8 @@ interface RegistrationOptions {
 
 interface RegisterApiResponse {
   message: string;
-  emailPending?: boolean;
+  emailSent?: boolean;
+  emailError?: string | null;
   temporaryPassword?: string;
   userEmail?: string;
 }
@@ -140,7 +141,7 @@ const RegistrationForm = () => {
     }
 
     setIsLoading(true);
-    setLoadingMessage('Creating account…');
+    setLoadingMessage('Creating account and sending credentials email…');
     setManualCredentials(null);
     setCredentialsNote(null);
     const name = [firstName, middleName, surname, suffix].filter(Boolean).join(' ');
@@ -171,18 +172,16 @@ const RegistrationForm = () => {
       resetForm();
 
       setModalMessage(response.data.message);
-      if (response.data.temporaryPassword) {
+      if (response.data.emailSent === false && response.data.temporaryPassword) {
         setManualCredentials({
           email: response.data.userEmail || payload.email,
           password: response.data.temporaryPassword,
         });
-        setCredentialsNote(
-          response.data.emailPending
-            ? 'A credentials email is also being sent to the user. Check spam/junk if it does not arrive.'
-            : 'Email is not configured on the server — share these credentials manually.'
-        );
-        setModalType(response.data.emailPending ? 'success' : 'warning');
+        setCredentialsNote(response.data.emailError ? `Reason: ${response.data.emailError}` : null);
+        setModalType('warning');
       } else {
+        setManualCredentials(null);
+        setCredentialsNote(null);
         setModalType('success');
       }
       setModalVisible(true);

@@ -86,7 +86,19 @@ router.get('/dashboard', auth, async (req, res) => {
 });
 
 const crypto = require('crypto');
-const { sendEmail, isEmailConfigured } = require('../utils/sendEmail');
+const nodemailer = require('nodemailer');
+
+console.log('Attempting to create Nodemailer transporter...');
+console.log(`Using Email User: ${process.env.EMAIL_USER ? 'Loaded' : 'NOT LOADED'}`);
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+console.log('Nodemailer transporter created.');
+
 const { isValidDorsuEmail, dorsuEmailErrorMessage, validatePhone } = require('../utils/dorsuEmail');
 const { validateRegistrationMetadata } = require('../utils/metadataValidation');
 
@@ -230,31 +242,46 @@ router.post('/register', auth, async (req, res) => {
     await newUser.save();
 
     const emailContent = buildCredentialsEmailContent(normalizedEmail, temporaryPassword);
-    const emailConfigured = isEmailConfigured();
+    let emailSent = false;
+    let emailErrorDetail = null;
 
-    res.status(201).json({
-      message: emailConfigured
-        ? 'User registered successfully. Temporary password is below — a credentials email is also being sent.'
-        : 'User registered successfully. Share the temporary password below (email is not configured on the server).',
-      emailPending: emailConfigured,
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      try {
+        console.log(`Attempting to send temporary password email to ${normalizedEmail}...`);
+        const mailInfo = await transporter.sendMail({
+          from: `"GoPass DOrSU" <${process.env.EMAIL_USER}>`,
+          to: normalizedEmail,
+          subject: 'Your GoPass DOrSU Account Credentials',
+          text: emailContent.text,
+          html: emailContent.html,
+        });
+        console.log('Email sent successfully! Message ID:', mailInfo.messageId);
+        emailSent = true;
+      } catch (emailError) {
+        console.error('Email sending error:', emailError);
+        emailErrorDetail = emailError.message || 'Unknown email error.';
+      }
+    } else {
+      console.warn('Temporary password email skipped: EMAIL_USER / EMAIL_PASS not configured.');
+      emailErrorDetail = 'EMAIL_USER / EMAIL_PASS not configured on server.';
+    }
+
+    if (emailSent) {
+      return res.status(201).json({
+        message: 'User registered successfully. A temporary password has been sent to their email.',
+        emailSent: true,
+        userEmail: normalizedEmail,
+      });
+    }
+
+    return res.status(201).json({
+      message:
+        'User registered, but the credentials email could not be sent. Share the temporary password below manually.',
+      emailSent: false,
+      emailError: emailErrorDetail,
       temporaryPassword,
       userEmail: normalizedEmail,
     });
-
-    if (emailConfigured) {
-      sendEmail({
-        to: normalizedEmail,
-        subject: 'Your GoPass DOrSU Account Credentials',
-        text: emailContent.text,
-        html: emailContent.html,
-      })
-        .then((info) => console.log('Credentials email sent in background:', info.provider, info.messageId))
-        .catch((emailError) => {
-          console.error('Background credentials email failed:', emailError.code, emailError.message);
-        });
-    } else {
-      console.warn('Temporary password email skipped: email not configured on server.');
-    }
 
   } catch (error) {
     console.error('User registration error:', error);

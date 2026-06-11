@@ -4,7 +4,6 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 const User = require('../models/User');
 const PassSlip = require('../models/PassSlip');
 const TravelOrder = require('../models/TravelOrder');
@@ -44,13 +43,7 @@ function requireCloudinaryProfileUpload(req, res, next) {
   next();
 }
 
-const mailTransporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const { sendEmail, isEmailConfigured } = require('../utils/sendEmail');
 
 function getWebResetBaseUrl(req) {
   const explicit =
@@ -240,12 +233,11 @@ router.post('/forgot-password', async (req, res) => {
     user.resetPasswordExpires = expiresAt;
     await user.save();
 
-    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    if (isEmailConfigured()) {
       const resetBaseUrl = getWebResetBaseUrl(req);
       const resetUrl = `${resetBaseUrl}/api/users/reset-password/${plainToken}`;
 
-      await mailTransporter.sendMail({
-        from: `"GoPass DOrSU" <${process.env.EMAIL_USER}>`,
+      await sendEmail({
         to: email,
         subject: 'Reset your GoPass DOrSU password',
         text:

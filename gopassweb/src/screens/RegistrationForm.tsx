@@ -61,6 +61,7 @@ const RegistrationForm = () => {
   const [modalMessage, setModalMessage] = useState('');
   const [modalType, setModalType] = useState<'success' | 'warning' | 'error'>('success');
   const [manualCredentials, setManualCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [emailFailureReason, setEmailFailureReason] = useState<string | null>(null);
 
   const loadMetadata = useCallback(async () => {
     setIsMetaLoading(true);
@@ -94,6 +95,7 @@ const RegistrationForm = () => {
       const timer = setTimeout(() => {
         setModalVisible(false);
         setManualCredentials(null);
+        setEmailFailureReason(null);
       }, 2500);
       return () => clearTimeout(timer);
     }
@@ -141,6 +143,7 @@ const RegistrationForm = () => {
     setIsLoading(true);
     setLoadingMessage('Creating account and sending credentials email…');
     setManualCredentials(null);
+    setEmailFailureReason(null);
     const name = [firstName, middleName, surname, suffix].filter(Boolean).join(' ');
 
     try {
@@ -170,6 +173,7 @@ const RegistrationForm = () => {
 
       if (response.data.emailSent === false && response.data.temporaryPassword) {
         setModalMessage(response.data.message);
+        setEmailFailureReason(response.data.emailError || null);
         setManualCredentials({
           email: response.data.userEmail || payload.email,
           password: response.data.temporaryPassword,
@@ -228,6 +232,9 @@ const RegistrationForm = () => {
               <FontAwesome name="exclamation-triangle" size={48} color={theme.warning} style={{ marginBottom: 15 }} />
             )}
             <Text style={styles.modalText}>{modalMessage}</Text>
+            {emailFailureReason ? (
+              <Text style={styles.emailErrorDetail}>Reason: {emailFailureReason}</Text>
+            ) : null}
             {manualCredentials && (
               <View style={styles.credentialsBox}>
                 <Text style={styles.credentialsLabel}>Share these credentials manually:</Text>
@@ -384,6 +391,14 @@ const styles = StyleSheet.create({
     color: theme.primary,
     fontWeight: '500',
     lineHeight: 22,
+  },
+  emailErrorDetail: {
+    width: '100%',
+    fontSize: 13,
+    color: theme.warning,
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 19,
   },
   credentialsBox: {
     width: '100%',

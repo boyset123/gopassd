@@ -85,23 +85,10 @@ router.get('/dashboard', auth, async (req, res) => {
   }
 });
 
-const nodemailer = require('nodemailer');
 const crypto = require('crypto');
+const { sendEmail, isEmailConfigured, logEmailConfig } = require('../utils/sendEmail');
 
-// Setup Nodemailer transporter
-console.log('Attempting to create Nodemailer transporter...');
-console.log(`Using Email User: ${process.env.EMAIL_USER ? 'Loaded' : 'NOT LOADED'}`);
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-  connectionTimeout: 15000,
-  greetingTimeout: 15000,
-  socketTimeout: 20000,
-});
-console.log('Nodemailer transporter created.');
+logEmailConfig();
 const { isValidDorsuEmail, dorsuEmailErrorMessage, validatePhone } = require('../utils/dorsuEmail');
 const { validateRegistrationMetadata } = require('../utils/metadataValidation');
 
@@ -159,14 +146,13 @@ router.post('/register', auth, async (req, res) => {
     let emailSent = false;
     let emailErrorDetail = null;
 
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    if (!isEmailConfigured()) {
       console.warn('Temporary password email skipped: EMAIL_USER / EMAIL_PASS not configured on server.');
-      emailErrorDetail = 'Email is not configured on the server (EMAIL_USER / EMAIL_PASS).';
+      emailErrorDetail = 'Email is not configured. On Render set RESEND_API_KEY; locally use EMAIL_USER and EMAIL_PASS.';
     } else {
       try {
         console.log(`Attempting to send temporary password email to ${normalizedEmail}...`);
-        const mailInfo = await transporter.sendMail({
-          from: `"GoPass DOrSU" <${process.env.EMAIL_USER}>`,
+        const mailInfo = await sendEmail({
           to: normalizedEmail,
           subject: 'Your GoPass DOrSU Account Credentials',
           text:
@@ -252,12 +238,17 @@ router.post('/register', auth, async (req, res) => {
   </body>
 </html>`,
         });
-        console.log('Email sent successfully! Message ID:', mailInfo.messageId);
+        console.log('Email sent successfully!', mailInfo.provider, mailInfo.messageId);
         emailSent = true;
       } catch (emailError) {
         console.error('Email sending error:', emailError.code, emailError.message, emailError);
         if (emailError.code === 'EAUTH') {
-          emailErrorDetail = 'Gmail credentials are incorrect. Use a Google App Password on Render (EMAIL_PASS).';
+          emailErrorDetail = 'Gmail credentials are incorrect. Use a Google App Password, or set RESEND_API_KEY on Render.';
+        } else if (emailError.code === 'ETIMEDOUT' || emailError.code === 'ESOCKET') {
+          emailErrorDetail =
+            'SMTP connection timed out (common on Render). Add RESEND_API_KEY on Render instead of Gmail SMTP.';
+        } else if (emailError.code === 'ERESEND') {
+          emailErrorDetail = emailError.message;
         } else {
           emailErrorDetail = emailError.message || 'Unknown SMTP error.';
         }

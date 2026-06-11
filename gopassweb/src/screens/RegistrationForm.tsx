@@ -29,10 +29,9 @@ interface RegistrationOptions {
 
 interface RegisterApiResponse {
   message: string;
-  emailSent?: boolean;
+  emailPending?: boolean;
   temporaryPassword?: string;
   userEmail?: string;
-  emailError?: string | null;
 }
 
 function isValidEmail(email: string): boolean {
@@ -61,7 +60,7 @@ const RegistrationForm = () => {
   const [modalMessage, setModalMessage] = useState('');
   const [modalType, setModalType] = useState<'success' | 'warning' | 'error'>('success');
   const [manualCredentials, setManualCredentials] = useState<{ email: string; password: string } | null>(null);
-  const [emailFailureReason, setEmailFailureReason] = useState<string | null>(null);
+  const [credentialsNote, setCredentialsNote] = useState<string | null>(null);
 
   const loadMetadata = useCallback(async () => {
     setIsMetaLoading(true);
@@ -91,15 +90,15 @@ const RegistrationForm = () => {
   }, [loadMetadata]);
 
   useEffect(() => {
-    if (modalVisible && modalType === 'success') {
+    if (modalVisible && modalType === 'success' && !manualCredentials) {
       const timer = setTimeout(() => {
         setModalVisible(false);
         setManualCredentials(null);
-        setEmailFailureReason(null);
+        setCredentialsNote(null);
       }, 2500);
       return () => clearTimeout(timer);
     }
-  }, [modalVisible, modalType]);
+  }, [modalVisible, modalType, manualCredentials]);
 
   const showFacultyInput = FACULTY_ROLES.includes(selectedRole);
 
@@ -141,9 +140,9 @@ const RegistrationForm = () => {
     }
 
     setIsLoading(true);
-    setLoadingMessage('Creating account and sending credentials email…');
+    setLoadingMessage('Creating account…');
     setManualCredentials(null);
-    setEmailFailureReason(null);
+    setCredentialsNote(null);
     const name = [firstName, middleName, surname, suffix].filter(Boolean).join(' ');
 
     try {
@@ -171,16 +170,19 @@ const RegistrationForm = () => {
 
       resetForm();
 
-      if (response.data.emailSent === false && response.data.temporaryPassword) {
-        setModalMessage(response.data.message);
-        setEmailFailureReason(response.data.emailError || null);
+      setModalMessage(response.data.message);
+      if (response.data.temporaryPassword) {
         setManualCredentials({
           email: response.data.userEmail || payload.email,
           password: response.data.temporaryPassword,
         });
-        setModalType('warning');
+        setCredentialsNote(
+          response.data.emailPending
+            ? 'A credentials email is also being sent to the user.'
+            : 'Email is not configured on the server — share these credentials manually.'
+        );
+        setModalType(response.data.emailPending ? 'success' : 'warning');
       } else {
-        setModalMessage(response.data.message);
         setModalType('success');
       }
       setModalVisible(true);
@@ -232,12 +234,10 @@ const RegistrationForm = () => {
               <FontAwesome name="exclamation-triangle" size={48} color={theme.warning} style={{ marginBottom: 15 }} />
             )}
             <Text style={styles.modalText}>{modalMessage}</Text>
-            {emailFailureReason ? (
-              <Text style={styles.emailErrorDetail}>Reason: {emailFailureReason}</Text>
-            ) : null}
+            {credentialsNote ? <Text style={styles.credentialsNote}>{credentialsNote}</Text> : null}
             {manualCredentials && (
-              <View style={styles.credentialsBox}>
-                <Text style={styles.credentialsLabel}>Share these credentials manually:</Text>
+              <View style={[styles.credentialsBox, modalType === 'success' && styles.credentialsBoxSuccess]}>
+                <Text style={styles.credentialsLabel}>Temporary login credentials:</Text>
                 <Text style={styles.credentialsRow}>
                   <Text style={styles.credentialsKey}>Email: </Text>
                   {manualCredentials.email}
@@ -248,7 +248,7 @@ const RegistrationForm = () => {
                 </Text>
               </View>
             )}
-            {(modalType === 'error' || modalType === 'warning') && (
+            {(modalType === 'error' || modalType === 'warning' || manualCredentials) && (
               <Pressable style={[styles.button, styles.buttonClose]} onPress={() => setModalVisible(false)}>
                 <Text style={styles.textStyle}>Close</Text>
               </Pressable>
@@ -392,10 +392,10 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     lineHeight: 22,
   },
-  emailErrorDetail: {
+  credentialsNote: {
     width: '100%',
     fontSize: 13,
-    color: theme.warning,
+    color: theme.textMuted,
     textAlign: 'center',
     marginBottom: 12,
     lineHeight: 19,
@@ -408,6 +408,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 14,
     marginBottom: 16,
+  },
+  credentialsBoxSuccess: {
+    backgroundColor: 'rgba(34,197,94,0.08)',
+    borderColor: 'rgba(34,197,94,0.25)',
   },
   credentialsLabel: {
     fontSize: 13,

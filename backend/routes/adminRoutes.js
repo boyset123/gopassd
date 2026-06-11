@@ -92,76 +92,15 @@ logEmailConfig();
 const { isValidDorsuEmail, dorsuEmailErrorMessage, validatePhone } = require('../utils/dorsuEmail');
 const { validateRegistrationMetadata } = require('../utils/metadataValidation');
 
-// Register a new user and send OTP (admin only)
-router.post('/register', auth, async (req, res) => {
-  try {
-    const { name, email, campus, role, faculty, employeeId, phone } = req.body;
+function buildCredentialsEmailContent(normalizedEmail, temporaryPassword) {
+  const text =
+    `Welcome to GoPass DOrSU!\n\n` +
+    `You can log in to the mobile app with the following credentials:\n\n` +
+    `Email: ${normalizedEmail}\n` +
+    `Temporary Password: ${temporaryPassword}\n\n` +
+    `You will be required to change this password on your first login.\n`;
 
-    if (!name || !email || !campus || !role || !employeeId || !phone) {
-      return res.status(400).json({ message: 'Please provide all required fields.' });
-    }
-
-    const normalizedEmail = String(email).trim().toLowerCase();
-    if (!isValidDorsuEmail(normalizedEmail, { allowLegacy: true })) {
-      return res.status(400).json({ message: dorsuEmailErrorMessage() });
-    }
-
-    const phoneResult = validatePhone(phone);
-    if (!phoneResult.valid) {
-      return res.status(400).json({ message: phoneResult.message });
-    }
-
-    const meta = await validateRegistrationMetadata({ role, faculty, campus });
-    if (!meta.valid) {
-      return res.status(400).json({ message: meta.message });
-    }
-
-    const existingUser = await User.findOne({ email: normalizedEmail });
-    if (existingUser) {
-      return res.status(400).json({ message: 'User with this email already exists.' });
-    }
-
-    const existingEmployeeId = await User.findOne({ employeeId: String(employeeId).trim() });
-    if (existingEmployeeId) {
-      return res.status(400).json({ message: 'Employee ID is already registered.' });
-    }
-
-    // Generate temporary password
-    const temporaryPassword = crypto.randomBytes(4).toString('hex'); // 8 characters
-
-    const newUser = new User({
-      name,
-      email: normalizedEmail,
-      campus: meta.campus,
-      role: meta.role,
-      faculty: meta.faculty,
-      employeeId: String(employeeId).trim(),
-      phone: phoneResult.normalized,
-      accountStatus: 'active',
-      password: temporaryPassword,
-    });
-
-    await newUser.save();
-
-    let emailSent = false;
-    let emailErrorDetail = null;
-
-    if (!isEmailConfigured()) {
-      console.warn('Temporary password email skipped: EMAIL_USER / EMAIL_PASS not configured on server.');
-      emailErrorDetail = 'Email is not configured. On Render set RESEND_API_KEY; locally use EMAIL_USER and EMAIL_PASS.';
-    } else {
-      try {
-        console.log(`Attempting to send temporary password email to ${normalizedEmail}...`);
-        const mailInfo = await sendEmail({
-          to: normalizedEmail,
-          subject: 'Your GoPass DOrSU Account Credentials',
-          text:
-            `Welcome to GoPass DOrSU!\n\n` +
-            `You can log in to the mobile app with the following credentials:\n\n` +
-            `Email: ${normalizedEmail}\n` +
-            `Temporary Password: ${temporaryPassword}\n\n` +
-            `You will be required to change this password on your first login.\n`,
-          html: `<!doctype html>
+  const html = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -236,40 +175,88 @@ router.post('/register', auth, async (req, res) => {
       </tr>
     </table>
   </body>
-</html>`,
-        });
-        console.log('Email sent successfully!', mailInfo.provider, mailInfo.messageId);
-        emailSent = true;
-      } catch (emailError) {
-        console.error('Email sending error:', emailError.code, emailError.message, emailError);
-        if (emailError.code === 'EAUTH') {
-          emailErrorDetail = 'Gmail credentials are incorrect. Use a Google App Password, or set RESEND_API_KEY on Render.';
-        } else if (emailError.code === 'ETIMEDOUT' || emailError.code === 'ESOCKET') {
-          emailErrorDetail =
-            'SMTP connection timed out (common on Render). Add RESEND_API_KEY on Render instead of Gmail SMTP.';
-        } else if (emailError.code === 'ERESEND') {
-          emailErrorDetail = emailError.message;
-        } else {
-          emailErrorDetail = emailError.message || 'Unknown SMTP error.';
-        }
-      }
+</html>`;
+
+  return { text, html };
+}
+
+// Register a new user and send OTP (admin only)
+router.post('/register', auth, async (req, res) => {
+  try {
+    const { name, email, campus, role, faculty, employeeId, phone } = req.body;
+
+    if (!name || !email || !campus || !role || !employeeId || !phone) {
+      return res.status(400).json({ message: 'Please provide all required fields.' });
     }
 
-    if (emailSent) {
-      return res.status(201).json({
-        message: 'User registered successfully. A temporary password has been sent to their email.',
-        emailSent: true,
-      });
+    const normalizedEmail = String(email).trim().toLowerCase();
+    if (!isValidDorsuEmail(normalizedEmail, { allowLegacy: true })) {
+      return res.status(400).json({ message: dorsuEmailErrorMessage() });
     }
 
-    return res.status(201).json({
-      message:
-        'User registered, but the credentials email could not be sent. Share the temporary password below manually, or reset their password in User Management.',
-      emailSent: false,
-      emailError: emailErrorDetail,
+    const phoneResult = validatePhone(phone);
+    if (!phoneResult.valid) {
+      return res.status(400).json({ message: phoneResult.message });
+    }
+
+    const meta = await validateRegistrationMetadata({ role, faculty, campus });
+    if (!meta.valid) {
+      return res.status(400).json({ message: meta.message });
+    }
+
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User with this email already exists.' });
+    }
+
+    const existingEmployeeId = await User.findOne({ employeeId: String(employeeId).trim() });
+    if (existingEmployeeId) {
+      return res.status(400).json({ message: 'Employee ID is already registered.' });
+    }
+
+    // Generate temporary password
+    const temporaryPassword = crypto.randomBytes(4).toString('hex'); // 8 characters
+
+    const newUser = new User({
+      name,
+      email: normalizedEmail,
+      campus: meta.campus,
+      role: meta.role,
+      faculty: meta.faculty,
+      employeeId: String(employeeId).trim(),
+      phone: phoneResult.normalized,
+      accountStatus: 'active',
+      password: temporaryPassword,
+    });
+
+    await newUser.save();
+
+    const emailContent = buildCredentialsEmailContent(normalizedEmail, temporaryPassword);
+    const emailConfigured = isEmailConfigured();
+
+    res.status(201).json({
+      message: emailConfigured
+        ? 'User registered successfully. Temporary password is below — a credentials email is also being sent.'
+        : 'User registered successfully. Share the temporary password below (email is not configured on the server).',
+      emailPending: emailConfigured,
       temporaryPassword,
       userEmail: normalizedEmail,
     });
+
+    if (emailConfigured) {
+      sendEmail({
+        to: normalizedEmail,
+        subject: 'Your GoPass DOrSU Account Credentials',
+        text: emailContent.text,
+        html: emailContent.html,
+      })
+        .then((info) => console.log('Credentials email sent in background:', info.provider, info.messageId))
+        .catch((emailError) => {
+          console.error('Background credentials email failed:', emailError.code, emailError.message);
+        });
+    } else {
+      console.warn('Temporary password email skipped: email not configured on server.');
+    }
 
   } catch (error) {
     console.error('User registration error:', error);

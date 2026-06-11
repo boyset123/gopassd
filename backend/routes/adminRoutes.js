@@ -86,9 +86,7 @@ router.get('/dashboard', auth, async (req, res) => {
 });
 
 const crypto = require('crypto');
-const { sendEmail, isEmailConfigured, logEmailConfig } = require('../utils/sendEmail');
-
-logEmailConfig();
+const { sendEmail, isEmailConfigured } = require('../utils/sendEmail');
 const { isValidDorsuEmail, dorsuEmailErrorMessage, validatePhone } = require('../utils/dorsuEmail');
 const { validateRegistrationMetadata } = require('../utils/metadataValidation');
 

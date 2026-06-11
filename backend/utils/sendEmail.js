@@ -60,16 +60,13 @@ async function sendViaSmtp({ to, subject, text, html }) {
     text,
     html,
   });
-  return { messageId: info.messageId, provider: 'smtp' };
+  return { messageId: info.messageId, provider: 'gmail' };
 }
 
-/**
- * Send email via Resend HTTP API (optional) or Gmail SMTP (original working setup).
- */
 async function sendEmail({ to, subject, text, html }) {
   const provider = getEmailProvider();
   if (provider === 'none') {
-    const err = new Error('Email is not configured. Set RESEND_API_KEY on Render or EMAIL_USER/EMAIL_PASS locally.');
+    const err = new Error('Email is not configured (EMAIL_USER / EMAIL_PASS).');
     err.code = 'ENOEMAIL';
     throw err;
   }
@@ -82,12 +79,28 @@ async function sendEmail({ to, subject, text, html }) {
 function logEmailConfig() {
   const provider = getEmailProvider();
   if (provider === 'resend') {
-    console.log('Email config: Resend API (HTTP) — recommended for Render');
-    console.log(`Email from: ${getFromAddress()}`);
+    console.log(`Email: Resend API, from ${getFromAddress()}`);
   } else if (provider === 'smtp') {
-    console.log(`Email config: Gmail SMTP (${process.env.EMAIL_USER})`);
+    console.log(`Email: Gmail SMTP (${process.env.EMAIL_USER})`);
   } else {
-    console.log('Email config: NOT LOADED — set RESEND_API_KEY on Render or EMAIL_USER/EMAIL_PASS locally');
+    console.warn('Email: NOT CONFIGURED — set EMAIL_USER + EMAIL_PASS (or RESEND_API_KEY)');
+  }
+}
+
+/** Call on server startup to confirm Gmail can connect on this host (Render vs local). */
+async function verifyEmailOnStartup() {
+  logEmailConfig();
+  const provider = getEmailProvider();
+  if (provider === 'smtp') {
+    try {
+      await createMailTransporter().verify();
+      console.log('Email: Gmail SMTP connection verified OK');
+    } catch (error) {
+      console.error('Email: Gmail SMTP verify FAILED —', error.code, error.message);
+      console.error(
+        'If this is Render: copy EMAIL_USER and EMAIL_PASS from backend/.env into Render → Environment, then redeploy.'
+      );
+    }
   }
 }
 
@@ -96,4 +109,5 @@ module.exports = {
   isEmailConfigured,
   getEmailProvider,
   logEmailConfig,
+  verifyEmailOnStartup,
 };

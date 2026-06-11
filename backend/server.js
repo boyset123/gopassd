@@ -20,6 +20,7 @@ const { Server } = require('socket.io');
 const cron = require('node-cron');
 const User = require('./models/User');
 const { autoReturnFivePmSlips } = require('./jobs/autoReturnFivePmSlips');
+const { verifyEmailOnStartup } = require('./utils/sendEmail');
 
 function loadServiceAccount() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -176,7 +177,7 @@ async function startServer() {
 
     server.listen(PORT, async () => {
       console.log(`Server running on port ${PORT}`);
-      // Create admin and president users only when DB is reachable.
+      verifyEmailOnStartup().catch((err) => console.error('Email startup check error:', err));
       const { seedMetadata } = require('./utils/seedMetadata');
       await seedMetadata();
       await createAdminUser();

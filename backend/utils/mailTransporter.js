@@ -2,7 +2,7 @@ const nodemailer = require('nodemailer');
 
 let cachedTransporter = null;
 
-/** Original Gmail config — worked on Render before recent timeout/port changes. */
+/** Same Gmail setup that worked before — service: 'gmail' + App Password. */
 function createMailTransporter() {
   if (!cachedTransporter) {
     cachedTransporter = nodemailer.createTransport({

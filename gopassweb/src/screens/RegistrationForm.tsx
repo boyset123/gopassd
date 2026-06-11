@@ -178,7 +178,7 @@ const RegistrationForm = () => {
         });
         setCredentialsNote(
           response.data.emailPending
-            ? 'A credentials email is also being sent to the user.'
+            ? 'A credentials email is also being sent to the user. Check spam/junk if it does not arrive.'
             : 'Email is not configured on the server — share these credentials manually.'
         );
         setModalType(response.data.emailPending ? 'success' : 'warning');

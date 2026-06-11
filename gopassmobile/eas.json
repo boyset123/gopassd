@@ -15,6 +15,9 @@
     "apk": {
       "distribution": "internal",
       "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://gopassd.onrender.com"
+      },
       "android": {
         "buildType": "apk"
       }
@@ -22,12 +25,18 @@
     "preview": {
       "distribution": "internal",
       "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://gopassd.onrender.com"
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
       "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://gopassd.onrender.com"
+      },
       "android": {
         "buildType": "app-bundle"
       }

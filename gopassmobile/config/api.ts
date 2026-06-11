@@ -4,7 +4,7 @@ export const PRODUCTION_BACKEND_URL = 'https://gopassd.onrender.com';
 const API_ORIGIN = (
   process.env.EXPO_PUBLIC_API_ORIGIN ||
   process.env.EXPO_PUBLIC_API_BASE_URL ||
-  'http://192.168.0.247:5000'
+  PRODUCTION_BACKEND_URL
 ).replace(/\/$/, '');
 
 /** Origin of the API server (no /api). Used for profile images, reCAPTCHA embed, etc. */

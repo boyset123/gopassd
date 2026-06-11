@@ -57,6 +57,24 @@ router.get('/extensions', async (req, res) => {
   }
 });
 
+router.get('/registration-options', async (req, res) => {
+  try {
+    const [roles, faculties, extensions] = await Promise.all([
+      Role.find({ active: true, name: { $ne: 'admin' } }).sort({ name: 1 }).select('name'),
+      Faculty.find({ active: true }).sort({ name: 1 }).select('name'),
+      Extension.find({ active: true }).sort({ isMainCampus: -1, name: 1 }).select('name'),
+    ]);
+    res.json({
+      roles: roles.map((r) => r.name),
+      faculties: faculties.map((f) => f.name),
+      extensions: extensions.map((e) => e.name),
+    });
+  } catch (error) {
+    console.error('Get registration options error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 router.get('/admin/roles', adminAuth, async (req, res) => {
   try {
     const roles = await Role.find().sort({ name: 1 });

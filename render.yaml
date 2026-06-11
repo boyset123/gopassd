@@ -1,5 +1,11 @@
 # Optional: in Render → New → Blueprint, connect this repo and apply.
-# Then set environment variables in the Render dashboard (see Render service → Environment).
+# Your live URL may differ (e.g. https://gopassd.onrender.com) — copy it from Render → Service → Settings.
+#
+# Required env vars on Render:
+#   MONGODB_URI, JWT_SECRET, FIREBASE_SERVICE_ACCOUNT_JSON
+#   EMAIL_USER — full Gmail address (e.g. you@gmail.com)
+#   EMAIL_PASS — Google App Password (Account → Security → App passwords; 2FA required)
+# MongoDB Atlas: Network Access must allow 0.0.0.0/0 or Render outbound IPs.
 services:
   - type: web
     name: gopassdorsu-api
@@ -7,4 +13,4 @@ services:
     rootDir: backend
     buildCommand: npm install
     startCommand: npm start
-    healthCheckPath: /
+    healthCheckPath: /health

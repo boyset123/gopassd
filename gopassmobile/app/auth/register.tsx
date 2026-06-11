@@ -49,17 +49,15 @@ export default function RegisterScreen() {
   const loadMetadata = useCallback(async () => {
     setIsMetaLoading(true);
     try {
-      const [rolesRes, facultiesRes, extensionsRes] = await Promise.all([
-        axios.get<string[]>(`${API_URL}/metadata/roles`),
-        axios.get<string[]>(`${API_URL}/metadata/faculties`),
-        axios.get<string[]>(`${API_URL}/metadata/extensions`),
-      ]);
-      setRoles(rolesRes.data);
-      setFaculties(facultiesRes.data);
-      setExtensions(extensionsRes.data);
-      if (rolesRes.data.length) setSelectedRole(rolesRes.data[0]);
-      if (facultiesRes.data.length) setFaculty(facultiesRes.data[0]);
-      if (extensionsRes.data.length) setSelectedCampus(extensionsRes.data[0]);
+      const { data } = await axios.get<{ roles: string[]; faculties: string[]; extensions: string[] }>(
+        `${API_URL}/metadata/registration-options`
+      );
+      setRoles(data.roles);
+      setFaculties(data.faculties);
+      setExtensions(data.extensions);
+      if (data.roles.length) setSelectedRole(data.roles[0]);
+      if (data.faculties.length) setFaculty(data.faculties[0]);
+      if (data.extensions.length) setSelectedCampus(data.extensions[0]);
     } catch (error) {
       console.error('Failed to load metadata:', error);
       Alert.alert('Error', 'Could not load registration options.');

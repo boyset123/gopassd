@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Modal, ActivityIndicator } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
-import axios, { isAxiosError } from 'axios';
+import { isAxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '../config/api';
+import { API_URL, apiClient, getNetworkErrorMessage } from '../config/api';
 import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 import FormSelect from '../components/FormSelect';
 
@@ -14,14 +14,25 @@ const theme = {
   textMuted: 'rgba(1,26,107,0.65)',
   border: 'rgba(1,26,107,0.22)',
   success: '#22c55e',
+  warning: '#b45309',
   danger: '#dc3545',
 };
 
 const FACULTY_ROLES = ['Faculty Staff', 'Program Head', 'Faculty Dean'];
 const EMAIL_HINT = 'Use an email address the user can access for account notifications.';
 
-interface ApiResponse {
+interface RegistrationOptions {
+  roles: string[];
+  faculties: string[];
+  extensions: string[];
+}
+
+interface RegisterApiResponse {
   message: string;
+  emailSent?: boolean;
+  temporaryPassword?: string;
+  userEmail?: string;
+  emailError?: string | null;
 }
 
 function isValidEmail(email: string): boolean {
@@ -44,27 +55,31 @@ const RegistrationForm = () => {
   const [faculty, setFaculty] = useState('');
   const [selectedCampus, setSelectedCampus] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
   const [isMetaLoading, setIsMetaLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
-  const [modalType, setModalType] = useState<'success' | 'error'>('success');
+  const [modalType, setModalType] = useState<'success' | 'warning' | 'error'>('success');
+  const [manualCredentials, setManualCredentials] = useState<{ email: string; password: string } | null>(null);
 
   const loadMetadata = useCallback(async () => {
     setIsMetaLoading(true);
     try {
-      const [rolesRes, facultiesRes, extensionsRes] = await Promise.all([
-        axios.get<string[]>(`${API_URL}/metadata/roles`),
-        axios.get<string[]>(`${API_URL}/metadata/faculties`),
-        axios.get<string[]>(`${API_URL}/metadata/extensions`),
-      ]);
-      setRoles(rolesRes.data);
-      setFaculties(facultiesRes.data);
-      setExtensions(extensionsRes.data);
-      if (rolesRes.data.length) setSelectedRole(rolesRes.data[0]);
-      if (facultiesRes.data.length) setFaculty(facultiesRes.data[0]);
-      if (extensionsRes.data.length) setSelectedCampus(extensionsRes.data[0]);
+      const { data } = await apiClient.get<RegistrationOptions>(`${API_URL}/metadata/registration-options`);
+      setRoles(data.roles);
+      setFaculties(data.faculties);
+      setExtensions(data.extensions);
+      if (data.roles.length) setSelectedRole(data.roles[0]);
+      if (data.faculties.length) setFaculty(data.faculties[0]);
+      if (data.extensions.length) setSelectedCampus(data.extensions[0]);
     } catch (error) {
       console.error('Failed to load metadata:', error);
+      setModalMessage(
+        getNetworkErrorMessage(error, 'loading registration options') ||
+          'Could not load registration options. Please refresh the page.'
+      );
+      setModalType('error');
+      setModalVisible(true);
     } finally {
       setIsMetaLoading(false);
     }
@@ -76,12 +91,28 @@ const RegistrationForm = () => {
 
   useEffect(() => {
     if (modalVisible && modalType === 'success') {
-      const timer = setTimeout(() => setModalVisible(false), 2000);
+      const timer = setTimeout(() => {
+        setModalVisible(false);
+        setManualCredentials(null);
+      }, 2500);
       return () => clearTimeout(timer);
     }
   }, [modalVisible, modalType]);
 
   const showFacultyInput = FACULTY_ROLES.includes(selectedRole);
+
+  const resetForm = () => {
+    setFirstName('');
+    setMiddleName('');
+    setSurname('');
+    setSuffix('');
+    setEmail('');
+    setEmployeeId('');
+    setPhone('');
+    if (roles.length) setSelectedRole(roles[0]);
+    if (faculties.length) setFaculty(faculties[0]);
+    if (extensions.length) setSelectedCampus(extensions[0]);
+  };
 
   const handleRegister = async () => {
     if (
@@ -108,6 +139,8 @@ const RegistrationForm = () => {
     }
 
     setIsLoading(true);
+    setLoadingMessage('Creating account and sending credentials email…');
+    setManualCredentials(null);
     const name = [firstName, middleName, surname, suffix].filter(Boolean).join(' ');
 
     try {
@@ -129,29 +162,32 @@ const RegistrationForm = () => {
         faculty: showFacultyInput ? faculty : undefined,
       };
 
-      const response = await axios.post<ApiResponse>(`${API_URL}/admin/register`, payload, {
+      const response = await apiClient.post<RegisterApiResponse>(`${API_URL}/admin/register`, payload, {
         headers: { 'x-auth-token': token },
       });
 
-      setModalMessage(response.data.message);
-      setModalType('success');
+      resetForm();
+
+      if (response.data.emailSent === false && response.data.temporaryPassword) {
+        setModalMessage(response.data.message);
+        setManualCredentials({
+          email: response.data.userEmail || payload.email,
+          password: response.data.temporaryPassword,
+        });
+        setModalType('warning');
+      } else {
+        setModalMessage(response.data.message);
+        setModalType('success');
+      }
       setModalVisible(true);
-      setFirstName('');
-      setMiddleName('');
-      setSurname('');
-      setSuffix('');
-      setEmail('');
-      setEmployeeId('');
-      setPhone('');
-      if (roles.length) setSelectedRole(roles[0]);
-      if (faculties.length) setFaculty(faculties[0]);
-      if (extensions.length) setSelectedCampus(extensions[0]);
     } catch (error: unknown) {
       console.error('Registration error:', error);
-      let errorMessage = 'An unexpected error occurred. Please try again.';
-      if (isAxiosError(error) && error.response) {
-        errorMessage = error.response.data.message || errorMessage;
-      } else if (error instanceof Error) {
+      let errorMessage =
+        getNetworkErrorMessage(error, 'registering the user') ||
+        'An unexpected error occurred. Please try again.';
+      if (isAxiosError(error) && error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error instanceof Error && !isAxiosError(error)) {
         errorMessage = error.message;
       }
       setModalMessage(errorMessage);
@@ -159,6 +195,7 @@ const RegistrationForm = () => {
       setModalVisible(true);
     } finally {
       setIsLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -166,6 +203,7 @@ const RegistrationForm = () => {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
         <ActivityIndicator size="large" color={theme.primary} />
+        <Text style={styles.loadingHint}>Loading registration options…</Text>
       </View>
     );
   }
@@ -177,15 +215,33 @@ const RegistrationForm = () => {
           <View
             style={[
               styles.modalView,
-              modalType === 'success' ? styles.successModal : styles.errorModal,
+              modalType === 'success' && styles.successModal,
+              modalType === 'warning' && styles.warningModal,
+              modalType === 'error' && styles.errorModal,
               isCompact && styles.modalViewCompact,
             ]}
           >
             {modalType === 'success' && (
               <FontAwesome name="check-circle" size={48} color={theme.success} style={{ marginBottom: 15 }} />
             )}
+            {modalType === 'warning' && (
+              <FontAwesome name="exclamation-triangle" size={48} color={theme.warning} style={{ marginBottom: 15 }} />
+            )}
             <Text style={styles.modalText}>{modalMessage}</Text>
-            {modalType === 'error' && (
+            {manualCredentials && (
+              <View style={styles.credentialsBox}>
+                <Text style={styles.credentialsLabel}>Share these credentials manually:</Text>
+                <Text style={styles.credentialsRow}>
+                  <Text style={styles.credentialsKey}>Email: </Text>
+                  {manualCredentials.email}
+                </Text>
+                <Text style={styles.credentialsRow}>
+                  <Text style={styles.credentialsKey}>Temporary password: </Text>
+                  {manualCredentials.password}
+                </Text>
+              </View>
+            )}
+            {(modalType === 'error' || modalType === 'warning') && (
               <Pressable style={[styles.button, styles.buttonClose]} onPress={() => setModalVisible(false)}>
                 <Text style={styles.textStyle}>Close</Text>
               </Pressable>
@@ -277,7 +333,10 @@ const RegistrationForm = () => {
         disabled={isLoading}
       >
         {isLoading ? (
-          <ActivityIndicator color={theme.surface} />
+          <View style={styles.submitLoading}>
+            <ActivityIndicator color={theme.surface} />
+            {loadingMessage ? <Text style={styles.submitLoadingText}>{loadingMessage}</Text> : null}
+          </View>
         ) : (
           <Text style={styles.buttonText}>Register User</Text>
         )}
@@ -313,6 +372,7 @@ const styles = StyleSheet.create({
   },
   modalViewCompact: { margin: 12, padding: 24, borderRadius: 12 },
   successModal: { borderColor: theme.success },
+  warningModal: { borderColor: theme.warning },
   errorModal: { borderColor: theme.danger },
   button: { borderRadius: 12, padding: 12, paddingHorizontal: 20, elevation: 2 },
   buttonClose: { backgroundColor: theme.primary },
@@ -323,6 +383,31 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: theme.primary,
     fontWeight: '500',
+    lineHeight: 22,
+  },
+  credentialsBox: {
+    width: '100%',
+    backgroundColor: 'rgba(180,83,9,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(180,83,9,0.25)',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 16,
+  },
+  credentialsLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.warning,
+    marginBottom: 8,
+  },
+  credentialsRow: {
+    fontSize: 14,
+    color: theme.primary,
+    marginBottom: 4,
+    lineHeight: 20,
+  },
+  credentialsKey: {
+    fontWeight: '700',
   },
   container: {
     width: '100%',
@@ -339,7 +424,8 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 3,
   },
-  loadingContainer: { alignItems: 'center', justifyContent: 'center', minHeight: 200 },
+  loadingContainer: { alignItems: 'center', justifyContent: 'center', minHeight: 200, gap: 12 },
+  loadingHint: { fontSize: 14, color: theme.textMuted },
   title: {
     fontSize: 22,
     fontWeight: '700',
@@ -374,11 +460,27 @@ const styles = StyleSheet.create({
   roleContainer: { flex: 1, marginRight: 10 },
   facultyContainer: { flex: 1, marginLeft: 10 },
   registerButton: {
-    height: 52,
+    minHeight: 52,
     backgroundColor: theme.primary,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  submitLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  submitLoadingText: {
+    color: theme.surface,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    flexShrink: 1,
   },
   disabledButton: { opacity: 0.65 },
   buttonText: { color: theme.surface, fontSize: 16, fontWeight: '700' },

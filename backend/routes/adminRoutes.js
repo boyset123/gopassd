@@ -97,6 +97,9 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 20000,
 });
 console.log('Nodemailer transporter created.');
 const { isValidDorsuEmail, dorsuEmailErrorMessage, validatePhone } = require('../utils/dorsuEmail');
@@ -153,20 +156,26 @@ router.post('/register', auth, async (req, res) => {
 
     await newUser.save();
 
-    // Send OTP email
-    try {
-      console.log(`Attempting to send temporary password email to ${email}...`);
-      const mailInfo = await transporter.sendMail({
-        from: `"GoPass DOrSU" <${process.env.EMAIL_USER}>`,
-        to: email,
-        subject: 'Your GoPass DOrSU Account Credentials',
-        text:
-          `Welcome to GoPass DOrSU!\n\n` +
-          `You can log in to the mobile app with the following credentials:\n\n` +
-          `Email: ${email}\n` +
-          `Temporary Password: ${temporaryPassword}\n\n` +
-          `You will be required to change this password on your first login.\n`,
-        html: `<!doctype html>
+    let emailSent = false;
+    let emailErrorDetail = null;
+
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.warn('Temporary password email skipped: EMAIL_USER / EMAIL_PASS not configured on server.');
+      emailErrorDetail = 'Email is not configured on the server (EMAIL_USER / EMAIL_PASS).';
+    } else {
+      try {
+        console.log(`Attempting to send temporary password email to ${normalizedEmail}...`);
+        const mailInfo = await transporter.sendMail({
+          from: `"GoPass DOrSU" <${process.env.EMAIL_USER}>`,
+          to: normalizedEmail,
+          subject: 'Your GoPass DOrSU Account Credentials',
+          text:
+            `Welcome to GoPass DOrSU!\n\n` +
+            `You can log in to the mobile app with the following credentials:\n\n` +
+            `Email: ${normalizedEmail}\n` +
+            `Temporary Password: ${temporaryPassword}\n\n` +
+            `You will be required to change this password on your first login.\n`,
+          html: `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -207,7 +216,7 @@ router.post('/register', auth, async (req, res) => {
                   <tr>
                     <td style="padding:14px 14px 6px 14px;">
                       <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Email</div>
-                      <div style="font-size:16px;font-weight:600;color:#111827;word-break:break-word;">${email}</div>
+                      <div style="font-size:16px;font-weight:600;color:#111827;word-break:break-word;">${normalizedEmail}</div>
                     </td>
                   </tr>
                   <tr>
@@ -242,21 +251,34 @@ router.post('/register', auth, async (req, res) => {
     </table>
   </body>
 </html>`,
-      });
-      console.log('Email sent successfully! Message ID:', mailInfo.messageId);
-    } catch (emailError) {
-      // If email sending fails, roll back user creation
-      await User.findByIdAndDelete(newUser._id);
-      console.error('Email sending error:', emailError);
-      // Provide a more specific error message
-      let specificError = 'Failed to send temporary password email due to a server error.';
-      if (emailError.code === 'EAUTH') {
-        specificError = 'Failed to send temporary password email. The server\'s email credentials (username or password) are incorrect.';
+        });
+        console.log('Email sent successfully! Message ID:', mailInfo.messageId);
+        emailSent = true;
+      } catch (emailError) {
+        console.error('Email sending error:', emailError.code, emailError.message, emailError);
+        if (emailError.code === 'EAUTH') {
+          emailErrorDetail = 'Gmail credentials are incorrect. Use a Google App Password on Render (EMAIL_PASS).';
+        } else {
+          emailErrorDetail = emailError.message || 'Unknown SMTP error.';
+        }
       }
-      return res.status(500).json({ message: specificError });
     }
 
-    res.status(201).json({ message: 'User registered successfully. A temporary password has been sent to their email.' });
+    if (emailSent) {
+      return res.status(201).json({
+        message: 'User registered successfully. A temporary password has been sent to their email.',
+        emailSent: true,
+      });
+    }
+
+    return res.status(201).json({
+      message:
+        'User registered, but the credentials email could not be sent. Share the temporary password below manually, or reset their password in User Management.',
+      emailSent: false,
+      emailError: emailErrorDetail,
+      temporaryPassword,
+      userEmail: normalizedEmail,
+    });
 
   } catch (error) {
     console.error('User registration error:', error);

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import React, { useMemo, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,6 @@ import {
   Platform,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Image as ExpoImage } from 'expo-image';
 import { Buffer } from 'buffer';
@@ -242,7 +241,7 @@ const formatTravelOrderNoDisplay = (travelOrderNo: string | undefined, dateStrin
 
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const yy = String(date.getFullYear()).slice(-2);
-  return `${mm}-____-${yy}`;
+  return `${mm}-_____-${yy}`;
 };
 
 const RECOMMENDER_ROLE_LABEL = 'Supervising Administrative Officer';
@@ -261,7 +260,6 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
   const { width: windowWidth } = useWindowDimensions();
   const a4PageWidth = Math.min(windowWidth - 32, 420);
 
-  const [generatedTravelOrderNo, setGeneratedTravelOrderNo] = useState<string>('');
   const [openingSupportingIndex, setOpeningSupportingIndex] = useState<number | null>(null);
   const [supportingViewer, setSupportingViewer] = useState<SupportingViewerState>(null);
 
@@ -366,72 +364,6 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
     [order._id, attachmentMeta, closeSupportingViewer]
   );
 
-  const dateForNo = useMemo(() => {
-    const d = new Date(order.date || '');
-    return Number.isNaN(d.getTime()) ? new Date() : d;
-  }, [order.date]);
-
-  const monthKey = useMemo(() => {
-    const yyyy = dateForNo.getFullYear();
-    const mm = String(dateForNo.getMonth() + 1).padStart(2, '0');
-    return `${yyyy}-${mm}`;
-  }, [dateForNo]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const ensureTravelOrderNo = async () => {
-      // If backend already provided one, don't generate.
-      if (normalizeInline(order.travelOrderNo)) {
-        if (!cancelled) setGeneratedTravelOrderNo('');
-        return;
-      }
-
-      // Need a stable id to prevent re-numbering the same record.
-      const orderId = normalizeInline(order._id);
-      if (!orderId) return;
-
-      const storageKey = `travelOrderNoSeq:${monthKey}`;
-      const raw = await AsyncStorage.getItem(storageKey);
-
-      const parsed: { lastSeq: number; map: Record<string, number> } = raw
-        ? (() => {
-            try {
-              return JSON.parse(raw);
-            } catch {
-              return { lastSeq: 0, map: {} };
-            }
-          })()
-        : { lastSeq: 0, map: {} };
-
-      const existingSeq = parsed.map?.[orderId];
-      const seq = typeof existingSeq === 'number' && existingSeq > 0 ? existingSeq : parsed.lastSeq + 1;
-
-      const yyyy = dateForNo.getFullYear();
-      const mm = String(dateForNo.getMonth() + 1).padStart(2, '0');
-      const yy = String(yyyy).slice(-2);
-      const seq4 = String(seq).padStart(4, '0');
-      const fullNo = `${mm}-${seq4}-${yy}`;
-
-      if (!cancelled) setGeneratedTravelOrderNo(fullNo);
-
-      // Persist assignment so it remains stable per order id.
-      if (!existingSeq) {
-        const next = {
-          lastSeq: seq,
-          map: { ...(parsed.map || {}), [orderId]: seq },
-        };
-        await AsyncStorage.setItem(storageKey, JSON.stringify(next));
-      }
-    };
-
-    void ensureTravelOrderNo();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [order._id, order.travelOrderNo, monthKey, dateForNo]);
-
   const toNames = [
     order.employee?.name || '',
     ...(order.participants || []).filter((p) => !!p),
@@ -473,7 +405,6 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
           <Text style={styles.formLabel}>Order No.</Text>
           <Text style={[styles.formValueUnderlined, styles.formValueTravelOrderNo]}>
             {normalizeTravelOrderNo(order.travelOrderNo) ||
-              generatedTravelOrderNo ||
               formatTravelOrderNoDisplay(order.travelOrderNo, order.date)}
           </Text>
         </View>

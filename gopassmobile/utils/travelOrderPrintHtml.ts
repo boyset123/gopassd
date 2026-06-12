@@ -80,7 +80,7 @@ const formatTravelOrderNoDisplay = (travelOrderNo: string | undefined, dateStrin
 
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const yy = String(date.getFullYear()).slice(-2);
-  return `${mm} - ____ - ${yy}`;
+  return `${mm}-_____-${yy}`;
 };
 
 const formatDate = (dateString: string | undefined, includeTime = false) => {

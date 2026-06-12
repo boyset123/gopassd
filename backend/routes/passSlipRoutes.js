@@ -18,6 +18,7 @@ const { computeReturnBalanceAdjustment } = require('../utils/passSlipBalance');
 const { resolvePassSlipMapRoute } = require('../utils/drivingRoute');
 const { formatPassSlipBalance } = require('../utils/formatPassSlipBalance');
 const { getPassSlipSeconds, setPassSlipSeconds, serializePassSlipBalance } = require('../utils/passSlipBalanceState');
+const { ensurePassSlipTrackingNo } = require('../utils/documentNumbers');
 const {
   getBillableDurationMs,
   getBillableDurationSeconds,
@@ -348,7 +349,7 @@ router.get('/president-pending', [auth], async (req, res) => {
 // Update pass slip status (for first-line approvers, their OICs, and HR)
 router.put('/:id/status', [auth], async (req, res) => {
   try {
-    const { status, approverSignature, trackingNo, rejectionReason } = req.body;
+    const { status, approverSignature, rejectionReason } = req.body;
 
     const passSlip = await PassSlip.findById(req.params.id);
     if (!passSlip) {
@@ -412,9 +413,6 @@ router.put('/:id/status', [auth], async (req, res) => {
         return res.status(400).json({ message: 'HR can only approve pass slips that have been recommended by the Program Head.' });
       }
       if (status === 'Approved') {
-        if (typeof trackingNo !== 'string' || trackingNo.trim() === '') {
-          return res.status(400).json({ message: 'A tracking number is required to approve a pass slip.' });
-        }
         const user = await User.findById(passSlip.employee);
         if (!user) {
           return res.status(404).json({ message: 'Employee not found.' });
@@ -472,7 +470,7 @@ router.put('/:id/status', [auth], async (req, res) => {
         passSlip.status = 'Approved';
         passSlip.hrApprovedBy = req.user.userId;
         passSlip.hrApproverSignature = approverSignature;
-        passSlip.trackingNo = trackingNo.trim(); // Save the tracking number
+        await ensurePassSlipTrackingNo(passSlip);
         // Generate QR Code with full details for guard to scan and view without API
         const approvedByUser = await User.findById(passSlip.approvedBy).select('name').lean();
         const qrPayload = {

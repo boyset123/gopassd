@@ -4,7 +4,7 @@ const TravelOrder = require('../models/TravelOrder');
 const auth = require('../middleware/auth');
 const authorize = require('../middleware/authorize');
 const User = require('../models/User');
-const TravelOrderCounter = require('../models/TravelOrderCounter');
+const { ensureTravelOrderNo } = require('../utils/documentNumbers');
 const QRCode = require('qrcode');
 const { parseLocalDate, parseMeridiemTimeToDate } = require('../utils/dateTime');
 const { getEffectiveSigner, assertCanSignFor, resolvePresidentAccount, toIdString } = require('../utils/oic');
@@ -147,30 +147,6 @@ function buildTravelOrderQrPayload(doc) {
     departureTime: doc.departureTime,
     arrivalTime: doc.arrivalTime,
   };
-}
-
-async function ensureServerTravelOrderNo(travelOrder) {
-  if (travelOrder.travelOrderNo && String(travelOrder.travelOrderNo).trim()) return travelOrder.travelOrderNo;
-
-  const baseDate = travelOrder.date ? new Date(travelOrder.date) : new Date();
-  if (isNaN(baseDate.getTime())) throw new Error('Invalid travel order date for number generation.');
-
-  const yyyy = baseDate.getFullYear();
-  const mm = String(baseDate.getMonth() + 1).padStart(2, '0');
-  const yy = String(yyyy).slice(-2);
-  const key = `${yyyy}-${mm}`;
-
-  // Atomic per-month increment (safe under concurrency)
-  const counter = await TravelOrderCounter.findOneAndUpdate(
-    { key },
-    { $inc: { seq: 1 } },
-    { new: true, upsert: true }
-  );
-
-  const seq4 = String(counter.seq).padStart(4, '0');
-  const generated = `${mm} - ${seq4} - ${yy}`;
-  travelOrder.travelOrderNo = generated;
-  return generated;
 }
 
 /** In-app + socket notification for every user with a given role (e.g. President, Human Resource Personnel). */
@@ -537,7 +513,7 @@ router.get('/pending', [auth], async (req, res) => {
 router.put('/:id/status', [auth], async (req, res) => {
   try {
     console.log(req.body);
-    const { status, approverSignature, travelOrderNo, travelOrderNoSignature, departureSignature, arrivalSignature, rejectionReason } = req.body;
+    const { status, approverSignature, travelOrderNoSignature, departureSignature, arrivalSignature, rejectionReason } = req.body;
 
     const travelOrder = await TravelOrder.findById(req.params.id);
     if (!travelOrder) {
@@ -738,12 +714,7 @@ router.put('/:id/status', [auth], async (req, res) => {
       } else if (status === 'Approved') {
         travelOrder.approvedBy = req.user.userId; // HR finalizes
         travelOrder.status = 'Approved';
-        // Server-generated Travel Order No if not provided
-        if (travelOrderNo && String(travelOrderNo).trim()) {
-          travelOrder.travelOrderNo = String(travelOrderNo).trim();
-        } else {
-          await ensureServerTravelOrderNo(travelOrder);
-        }
+        await ensureTravelOrderNo(travelOrder);
         travelOrder.travelOrderNoSignature = travelOrderNoSignature;
         travelOrder.departureSignature = departureSignature;
         travelOrder.arrivalSignature = arrivalSignature;
@@ -965,7 +936,7 @@ router.get('/approved', [auth, authorize('Human Resource Personnel')], async (re
     }).select('_id date travelOrderNo');
     for (const order of missingNumber) {
       try {
-        await ensureServerTravelOrderNo(order);
+        await ensureTravelOrderNo(order);
         await order.save();
       } catch (e) {
         console.warn('Failed to auto-generate travelOrderNo for approved order:', order?._id?.toString?.(), e);

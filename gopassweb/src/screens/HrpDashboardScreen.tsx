@@ -439,8 +439,6 @@ const HrpDashboardScreen = () => {
   const [departureSignature, setDepartureSignature] = useState<string | null>(null);
   const [arrivalSignature, setArrivalSignature] = useState<string | null>(null);
   const [activeSignatureField, setActiveSignatureField] = useState<'travelOrderNo' | 'departure' | 'arrival' | null>(null);
-  const [travelOrderNoInput, setTravelOrderNoInput] = useState('');
-  const [trackingNoInput, setTrackingNoInput] = useState('');
   let sigPad = React.useRef<any>({});
   const [isSignatureModalVisible, setIsSignatureModalVisible] = useState(false);
   const [isMapModalVisible, setIsMapModalVisible] = useState(false);
@@ -713,16 +711,12 @@ const HrpDashboardScreen = () => {
       const token = await AsyncStorage.getItem('userToken');
       const headers = { 'x-auth-token': token };
       const url = type === 'slip' ? `${API_URL}/pass-slips/${id}/status` : `${API_URL}/travel-orders/${id}/status`;
-      let data: { status: string; approverSignature?: string; travelOrderNo?: string; travelOrderNoSignature?: string | null; departureSignature?: string | null; arrivalSignature?: string | null; trackingNo?: string; rejectionReason?: string; } = { status };
+      let data: { status: string; approverSignature?: string; travelOrderNoSignature?: string | null; departureSignature?: string | null; arrivalSignature?: string | null; rejectionReason?: string; } = { status };
       if (status === 'Rejected' && rejectionReason != null && rejectionReason.trim() !== '') {
         data.rejectionReason = rejectionReason.trim();
       }
 
-      if (type === 'slip' && status === 'Approved') {
-        data.trackingNo = trackingNoInput;
-      }
       if (type === 'order' && status === 'Approved') {
-        data.travelOrderNo = travelOrderNoInput;
         data.travelOrderNoSignature = travelOrderNoSignature;
         data.departureSignature = departureSignature;
         data.arrivalSignature = arrivalSignature;
@@ -734,12 +728,8 @@ const HrpDashboardScreen = () => {
       await axios.put(url, data, { headers });
 
       if (status === 'Approved') {
-        if (selectedItem && type === 'slip') {
-          setSelectedItem({ ...selectedItem, status: 'Approved', trackingNo: trackingNoInput });
-        }
         setTimeout(() => {
           setIsModalVisible(false);
-          setTrackingNoInput('');
           setHrSignatureForPresident(null);
           fetchData({ silent: true });
         }, 2000);
@@ -835,9 +825,6 @@ const HrpDashboardScreen = () => {
     setSelectedItem(item);
     setSelectedItemType(type);
     setIsModalVisible(true);
-    if (type === 'order') {
-      setTravelOrderNoInput((item as TravelOrder).travelOrderNo || '');
-    }
   };
 
   const openCtcModal = (order: ApprovedTravelOrder) => {
@@ -1640,16 +1627,12 @@ const HrpDashboardScreen = () => {
                         <View style={styles.docTitleContainer}>
                           <View style={styles.trackingNoContainer}>
                             <Text style={styles.docField}>Tracking No.: </Text>
-                            {isSelectedItemInForReview && selectedItem.status !== 'Approved' ? (
-                              <TextInput
-                                style={styles.trackingNoInput}
-                                onChangeText={setTrackingNoInput}
-                                value={trackingNoInput}
-                                placeholder="Enter Tracking No."
-                              />
-                            ) : (
-                              <Text style={styles.docValue}>{(selectedItem as PassSlip).trackingNo || 'N/A'}</Text>
-                            )}
+                            <Text style={styles.docValue}>
+                              {(selectedItem as PassSlip).trackingNo ||
+                                (isSelectedItemInForReview && selectedItem.status !== 'Approved'
+                                  ? 'Auto-assigned on approval'
+                                  : 'N/A')}
+                            </Text>
                           </View>
                           <Text style={styles.docField}>Date: <Text style={styles.docValue}>{formatDate((selectedItem as PassSlip).date)}</Text></Text>
                         </View>
@@ -1715,29 +1698,11 @@ const HrpDashboardScreen = () => {
                       </>
                     ) : (
                       <>
-                        {isSelectedItemInForReview &&
-                          (selectedItem as TravelOrder).status !== 'Recommended' && (
-                          <View style={{ marginBottom: 12, width: '100%', maxWidth: 520, alignSelf: 'center' }}>
-                            <Text style={styles.formLabel}>Travel Order No. (required to approve)</Text>
-                            <TextInput
-                              style={styles.formInput}
-                              onChangeText={setTravelOrderNoInput}
-                              value={travelOrderNoInput}
-                              placeholder="Enter Travel Order No."
-                            />
-                          </View>
-                        )}
                         <View style={styles.travelOrderReviewWrap}>
                           <TravelOrderFormWeb
                             order={buildTravelOrderWebView(selectedItem as TravelOrder)}
                             presidentName={presidentName}
                             viewOnly
-                            travelOrderNoDraft={
-                              isSelectedItemInForReview &&
-                              (selectedItem as TravelOrder).status !== 'Recommended'
-                                ? travelOrderNoInput
-                                : undefined
-                            }
                             onViewMap={
                               (selectedItem as TravelOrder).latitude && (selectedItem as TravelOrder).longitude
                                 ? () => openMapModal(selectedItem as TravelOrder)
@@ -1767,29 +1732,17 @@ const HrpDashboardScreen = () => {
                       {(() => {
                         const isTravelOrderRecommended = selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended';
                         const statusToSend = isTravelOrderRecommended ? 'For President Approval' : 'Approved';
-                        const isPassSlipApproval = selectedItemType === 'slip' && statusToSend === 'Approved';
-                        const missingTrackingNo = isPassSlipApproval && trackingNoInput.trim() === '';
                         return (
                           <Pressable
-                            style={[
-                              styles.button,
-                              styles.approveButton,
-                              styles.modalButton,
-                              missingTrackingNo && { opacity: 0.5 },
-                            ]}
-                            disabled={missingTrackingNo}
-                            onPress={() => {
-                              if (missingTrackingNo) {
-                                Alert.alert('Tracking No. Required', 'Please assign a tracking number before approving this pass slip.');
-                                return;
-                              }
-                              handleUpdateStatus(selectedItemType!, selectedItem._id, statusToSend);
-                            }}
+                            style={[styles.button, styles.approveButton, styles.modalButton]}
+                            onPress={() => handleUpdateStatus(selectedItemType!, selectedItem._id, statusToSend)}
                           >
                             <Text style={styles.buttonText}>
                               {selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended'
                                 ? 'Send to President'
-                                : 'Approve'}
+                                : selectedItemType === 'slip'
+                                  ? 'Record'
+                                  : 'Approve'}
                             </Text>
                           </Pressable>
                         );

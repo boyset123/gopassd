@@ -152,7 +152,6 @@ const CreateTravelOrderScreen = () => {
   const [presidentName, setPresidentName] = useState('Roy G. Ponce, Ed.D.');
 
   // Form States
-  const [travelOrderNo, setTravelOrderNo] = useState('');
   const [recommenders, setRecommenders] = useState([{ id: '', name: '' }]);
   const [date, setDate] = useState(new Date());
   const [address, setAddress] = useState('');
@@ -597,7 +596,6 @@ const CreateTravelOrderScreen = () => {
 
   const appendCoreTravelOrderFields = (target: Record<string, string>) => {
     target.employeeAddress = employeeAddress;
-    target.travelOrderNo = travelOrderNo ?? '';
     target.date = toISOStringAtMinute(date);
     target.address = address;
     target.salary = salary ?? '';
@@ -1247,14 +1245,9 @@ const CreateTravelOrderScreen = () => {
             <View style={[styles.row, styles.fieldContainerTight]}>
               <View style={[styles.fieldContainer, styles.fieldContainerTight, styles.flexInput]}>
                 <Text style={styles.label}>Travel Order No.:</Text>
-                <TextInput
-                  style={styles.input}
-                  value={travelOrderNo}
-                  onChangeText={setTravelOrderNo}
-                  editable={user?.role === 'Human Resource Personnel'}
-                  placeholder={user?.role === 'Human Resource Personnel' ? 'Enter travel order number' : 'Assigned by HR'}
-                  placeholderTextColor={theme.placeholder}
-                />
+                <View style={[styles.input, styles.inputReadOnly]}>
+                  <Text style={styles.inputDisplayTextReadOnly}>Assigned on approval</Text>
+                </View>
               </View>
               <View style={[styles.fieldContainer, styles.fieldContainerTight, styles.flexInput]}>
                 <Text style={styles.label}>Date:</Text>
@@ -1912,7 +1905,9 @@ const CreateTravelOrderScreen = () => {
 
                 <View style={styles.formRow}>
                   <Text style={styles.formLabel}>Travel Order No.</Text>
-                  <Text style={styles.formValue}>{travelOrderNo}</Text>
+                  <Text style={styles.formValue}>
+                    {`${String(date.getMonth() + 1).padStart(2, '0')}-_____-${String(date.getFullYear()).slice(-2)}`}
+                  </Text>
                   <Text style={styles.formLabelRight}>Date</Text>
                   <Text style={styles.formValue}>{date.toLocaleDateString()}</Text>
                 </View>

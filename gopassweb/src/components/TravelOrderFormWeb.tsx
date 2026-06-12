@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import React, { useMemo, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,6 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_URL } from '../config/api';
 import { formatRoleLabel } from '../utils/roleLabels';
@@ -72,10 +71,8 @@ export interface TravelOrderWebOrder {
 export interface TravelOrderFormWebProps {
   order: TravelOrderWebOrder;
   presidentName: string;
-  /** Default true on web: no draft TO# from AsyncStorage; signatures read-only */
+  /** Default true on web: signatures read-only */
   viewOnly?: boolean;
-  /** When provided, Travel Order No. shows this (e.g. HR typing before approve). Omit to use order value. */
-  travelOrderNoDraft?: string;
   onViewMap?: () => void;
   currentUserId?: string;
   approverSignature?: string | null;
@@ -204,7 +201,7 @@ const formatTravelOrderNoDisplay = (travelOrderNo: string | undefined, dateStrin
 
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const yy = String(date.getFullYear()).slice(-2);
-  return `${mm}-____-${yy}`;
+  return `${mm}-_____-${yy}`;
 };
 
 const RECOMMENDER_ROLE_LABEL = 'Supervising Administrative Officer';
@@ -214,7 +211,6 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
   order,
   presidentName,
   viewOnly = true,
-  travelOrderNoDraft,
   onViewMap,
   currentUserId,
   approverSignature = null,
@@ -234,7 +230,6 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
     ? Math.min(440, layoutMaxWidth - supportingPanelWidth - layoutGap)
     : Math.min(Math.max(windowWidth - 48, 280), 440);
 
-  const [generatedTravelOrderNo, setGeneratedTravelOrderNo] = useState<string>('');
   const [supportingDocLoadingIndex, setSupportingDocLoadingIndex] = useState<number | null>(null);
   const [supportingViewer, setSupportingViewer] = useState<SupportingWebViewer>(null);
   const supportingObjectUrlRef = useRef<string | null>(null);
@@ -370,85 +365,14 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
       />
     ));
 
-  const dateForNo = useMemo(() => {
-    const d = new Date(order.date || '');
-    return Number.isNaN(d.getTime()) ? new Date() : d;
-  }, [order.date]);
-
-  const monthKey = useMemo(() => {
-    const yyyy = dateForNo.getFullYear();
-    const mm = String(dateForNo.getMonth() + 1).padStart(2, '0');
-    return `${yyyy}-${mm}`;
-  }, [dateForNo]);
-
-  useEffect(() => {
-    if (viewOnly) {
-      setGeneratedTravelOrderNo('');
-      return;
-    }
-
-    let cancelled = false;
-
-    const ensureTravelOrderNo = async () => {
-      if (normalizeInline(order.travelOrderNo)) {
-        if (!cancelled) setGeneratedTravelOrderNo('');
-        return;
-      }
-
-      const orderId = normalizeInline(order._id);
-      if (!orderId) return;
-
-      const storageKey = `travelOrderNoSeq:${monthKey}`;
-      const raw = await AsyncStorage.getItem(storageKey);
-
-      const parsed: { lastSeq: number; map: Record<string, number> } = raw
-        ? (() => {
-            try {
-              return JSON.parse(raw);
-            } catch {
-              return { lastSeq: 0, map: {} };
-            }
-          })()
-        : { lastSeq: 0, map: {} };
-
-      const existingSeq = parsed.map?.[orderId];
-      const seq = typeof existingSeq === 'number' && existingSeq > 0 ? existingSeq : parsed.lastSeq + 1;
-
-      const yyyy = dateForNo.getFullYear();
-      const mm = String(dateForNo.getMonth() + 1).padStart(2, '0');
-      const yy = String(yyyy).slice(-2);
-      const seq4 = String(seq).padStart(4, '0');
-      const fullNo = `${mm}-${seq4}-${yy}`;
-
-      if (!cancelled) setGeneratedTravelOrderNo(fullNo);
-
-      if (!existingSeq) {
-        const next = {
-          lastSeq: seq,
-          map: { ...(parsed.map || {}), [orderId]: seq },
-        };
-        await AsyncStorage.setItem(storageKey, JSON.stringify(next));
-      }
-    };
-
-    void ensureTravelOrderNo();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [order._id, order.travelOrderNo, monthKey, dateForNo, viewOnly]);
-
   const toNames = [
     order.employee?.name || '',
     ...(order.participants || []).filter((p) => !!p),
   ];
 
   const travelOrderNoDisplay =
-    travelOrderNoDraft !== undefined
-      ? normalizeTravelOrderNo(travelOrderNoDraft) || formatTravelOrderNoDisplay('', order.date)
-      : normalizeTravelOrderNo(order.travelOrderNo) ||
-        generatedTravelOrderNo ||
-        formatTravelOrderNoDisplay(order.travelOrderNo, order.date);
+    normalizeTravelOrderNo(order.travelOrderNo) ||
+    formatTravelOrderNoDisplay(order.travelOrderNo, order.date);
 
   const chiefList: Recommender[] =
     order.recommendedBy && order.recommendedBy.length > 0

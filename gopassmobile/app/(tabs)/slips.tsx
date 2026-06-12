@@ -98,6 +98,12 @@ interface Submission {
   arrivalStatus?: string;
 }
 
+const HISTORY_STATUSES = new Set(['Completed', 'Returned', 'Rejected', 'Cancelled', 'Expired']);
+
+function isHistorySubmission(item: Submission): boolean {
+  return HISTORY_STATUSES.has(item.status);
+}
+
 const formatDate = (dateString: string | undefined, includeTime: boolean = false) => {
   if (!dateString) return 'No Date';
   const date = new Date(dateString);
@@ -723,7 +729,7 @@ export default function SlipsScreen() {
                 <Text style={styles.cancelButtonTextSmall}>Cancel</Text>
               </Pressable>
             )}
-            {item.type === 'Travel Order' && item.status === 'Approved' && !isHistoryItem(item) && (
+            {item.type === 'Travel Order' && item.status === 'Approved' && !isHistorySubmission(item) && (
               <Pressable
                 style={[styles.completeButton, completingTravelOrderId === item._id && styles.completeButtonDisabled]}
                 disabled={completingTravelOrderId === item._id}
@@ -732,7 +738,7 @@ export default function SlipsScreen() {
                 <Text style={styles.completeButtonText}>Complete</Text>
               </Pressable>
             )}
-            {isHistoryItem(item) && (
+            {isHistorySubmission(item) && (
               <Pressable style={styles.deleteButtonSmall} onPress={() => handleDelete(item._id, item.type)}>
                 <FontAwesome name="trash-o" size={14} color="#fff" />
               </Pressable>
@@ -769,14 +775,8 @@ export default function SlipsScreen() {
     );
   }
 
-  const isHistoryItem = (item: Submission) => {
-    // Any terminal state (success or not) should live in History, not Active.
-    const terminalStatuses = ['Completed', 'Returned', 'Rejected', 'Cancelled', 'Expired'];
-    return terminalStatuses.includes(item.status);
-  };
-
-  const activeSubmissions = submissions.filter((s) => !isHistoryItem(s));
-  const historySubmissions = submissions.filter((s) => isHistoryItem(s));
+  const activeSubmissions = submissions.filter((s) => !isHistorySubmission(s));
+  const historySubmissions = submissions.filter((s) => isHistorySubmission(s));
 
   return (
     <View style={styles.mainContainer}>
@@ -836,12 +836,12 @@ export default function SlipsScreen() {
             {activeTab === 'active' ? (
               <>
                 <Text style={styles.placeholderText}>You have no active submissions.</Text>
-                <Text style={styles.placeholderSubText}>Completed pass slips and travel orders will appear in History.</Text>
+                <Text style={styles.placeholderSubText}>Completed, rejected, cancelled, and expired pass slips appear in History.</Text>
               </>
             ) : (
               <>
                 <Text style={styles.placeholderText}>No history yet.</Text>
-                <Text style={styles.placeholderSubText}>Once your slip/order is completed, it will show up here.</Text>
+                <Text style={styles.placeholderSubText}>Completed, returned, rejected, cancelled, and expired slips appear here.</Text>
               </>
             )}
           </View>

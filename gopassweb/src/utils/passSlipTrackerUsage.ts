@@ -1,4 +1,5 @@
 import { parseMeridiemTimeInManilaDate } from './manilaDate';
+import { getBillableDurationSeconds } from './passSlipDuration';
 
 const RETURNED_STATUSES = new Set(['Returned', 'Completed']);
 
@@ -19,7 +20,7 @@ export function getPlannedMinutes(slip: TrackerSlipLike): number {
   const start = parseMeridiemTimeInManilaDate(baseDate, slip.timeOut);
   const end = parseMeridiemTimeInManilaDate(baseDate, slip.estimatedTimeBack);
   if (!start || !end || end.getTime() < start.getTime()) return 0;
-  return Math.round((end.getTime() - start.getTime()) / 60000);
+  return Math.round(getBillableDurationSeconds(start, end, slip.date) / 60);
 }
 
 export function getActualMinutes(slip: TrackerSlipLike): number {
@@ -31,7 +32,7 @@ export function getActualMinutes(slip: TrackerSlipLike): number {
   const arrival = new Date(slip.arrivalTime);
   if (Number.isNaN(departure.getTime()) || Number.isNaN(arrival.getTime())) return 0;
   if (arrival.getTime() < departure.getTime()) return 0;
-  return Math.ceil((arrival.getTime() - departure.getTime()) / 60000);
+  return Math.ceil(getBillableDurationSeconds(departure, arrival, slip.date) / 60);
 }
 
 export function getLateMinutes(slip: TrackerSlipLike): number {

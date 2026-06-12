@@ -1,5 +1,6 @@
 const { parseMeridiemTimeToDate } = require('./dateTime');
 const { getScheduledReturnMoment } = require('./passSlipSchedule');
+const { getBillableDurationSeconds } = require('./passSlipDuration');
 
 /**
  * Compute balance adjustment when a verified pass slip is returned.
@@ -16,7 +17,7 @@ function computeReturnBalanceAdjustment(passSlip, arrivalTime) {
   let plannedSeconds = 0;
   let plannedMinutes = 0;
   if (start && end && end.getTime() >= start.getTime()) {
-    plannedSeconds = Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000));
+    plannedSeconds = getBillableDurationSeconds(start, end, passSlip.date);
     plannedMinutes = Math.round(plannedSeconds / 60);
   }
 
@@ -31,7 +32,7 @@ function computeReturnBalanceAdjustment(passSlip, arrivalTime) {
     !Number.isNaN(arrival.getTime()) &&
     arrival.getTime() >= departureTime.getTime()
   ) {
-    actualSeconds = Math.ceil((arrival.getTime() - departureTime.getTime()) / 1000);
+    actualSeconds = getBillableDurationSeconds(departureTime, arrival, passSlip.date);
     actualMinutes = Math.ceil(actualSeconds / 60);
   }
 

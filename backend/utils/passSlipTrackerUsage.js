@@ -1,4 +1,5 @@
 const { parseMeridiemTimeToDate } = require('./dateTime');
+const { getBillableDurationSeconds } = require('./passSlipDuration');
 
 const RETURNED_STATUSES = new Set(['Returned', 'Completed']);
 
@@ -6,7 +7,7 @@ function getPlannedMinutes(slip) {
   const start = parseMeridiemTimeToDate(slip.timeOut, slip.date);
   const end = parseMeridiemTimeToDate(slip.estimatedTimeBack, slip.date);
   if (!start || !end || end.getTime() < start.getTime()) return 0;
-  return Math.round((end.getTime() - start.getTime()) / 60000);
+  return Math.round(getBillableDurationSeconds(start, end, slip.date) / 60);
 }
 
 function getActualMinutes(slip) {
@@ -18,7 +19,7 @@ function getActualMinutes(slip) {
   const arrival = new Date(slip.arrivalTime);
   if (Number.isNaN(departure.getTime()) || Number.isNaN(arrival.getTime())) return 0;
   if (arrival.getTime() < departure.getTime()) return 0;
-  return Math.ceil((arrival.getTime() - departure.getTime()) / 60000);
+  return Math.ceil(getBillableDurationSeconds(departure, arrival, slip.date) / 60);
 }
 
 function getLateMinutes(slip) {

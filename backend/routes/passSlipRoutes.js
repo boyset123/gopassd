@@ -18,6 +18,11 @@ const { computeReturnBalanceAdjustment } = require('../utils/passSlipBalance');
 const { resolvePassSlipMapRoute } = require('../utils/drivingRoute');
 const { formatPassSlipBalance } = require('../utils/formatPassSlipBalance');
 const { getPassSlipSeconds, setPassSlipSeconds, serializePassSlipBalance } = require('../utils/passSlipBalanceState');
+const {
+  getBillableDurationMs,
+  getBillableDurationSeconds,
+  getSlipPlannedBillableMinutes,
+} = require('../utils/passSlipDuration');
 
 function attachEmployeeBalance(slip) {
   const obj = slip?.toObject ? slip.toObject() : { ...slip };
@@ -102,11 +107,7 @@ async function getWeeklyUsedMinutes(employeeId, targetDate) {
     if (!info || info.weekKey !== target.weekKey) continue;
     if (info.dayOfWeek < 1 || info.dayOfWeek > 5) continue;
 
-    const s = parseMeridiemTimeToDate(slip.timeOut, slip.date);
-    const e = parseMeridiemTimeToDate(slip.estimatedTimeBack, slip.date);
-    if (s && e && e > s) {
-      used += (e.getTime() - s.getTime()) / 60000;
-    }
+    used += getSlipPlannedBillableMinutes(slip);
     if (typeof slip.overdueMinutes === 'number' && slip.overdueMinutes > 0) {
       used += slip.overdueMinutes;
     }
@@ -206,7 +207,7 @@ router.post('/', auth, async (req, res) => {
       });
     }
 
-    const durationSeconds = Math.max(0, Math.round((endTime.getTime() - startTime.getTime()) / 1000));
+    const durationSeconds = getBillableDurationSeconds(startTime, endTime, date);
     const durationMinutes = durationSeconds / 60;
 
     if (getPassSlipSeconds(user) < durationSeconds) {
@@ -439,7 +440,7 @@ router.put('/:id/status', [auth], async (req, res) => {
           });
         }
 
-        const durationSeconds = Math.max(0, Math.round((endTime.getTime() - startTime.getTime()) / 1000));
+        const durationSeconds = getBillableDurationSeconds(startTime, endTime, passSlip.date);
         const durationMinutes = durationSeconds / 60;
 
         if (getPassSlipSeconds(user) < durationSeconds) {
@@ -771,17 +772,17 @@ router.put('/:id/verify', [auth, authorize('Security Personnel')], async (req, r
           departureTime: { $gte: startOfDay, $lte: endOfDay }
         });
 
-        const requestedStart = parseMeridiemTimeToMillisOfDay(passSlip.timeOut);
-        const requestedEnd = parseMeridiemTimeToMillisOfDay(passSlip.estimatedTimeBack);
-        if (requestedStart === null || requestedEnd === null || requestedEnd <= requestedStart) {
+        const requestedStart = parseMeridiemTimeToDate(passSlip.timeOut, passSlip.date);
+        const requestedEnd = parseMeridiemTimeToDate(passSlip.estimatedTimeBack, passSlip.date);
+        if (!requestedStart || !requestedEnd || requestedEnd <= requestedStart) {
           return res.status(400).json({ message: 'Invalid time format or range on the pass slip.' });
         }
-        const requestedDuration = requestedEnd - requestedStart;
+        const requestedDuration = getBillableDurationMs(requestedStart, requestedEnd, passSlip.date);
         const totalDurationToday = verifiedSlipsToday.reduce((acc, slip) => {
-          const start = parseMeridiemTimeToMillisOfDay(slip.timeOut);
-          const end = parseMeridiemTimeToMillisOfDay(slip.estimatedTimeBack);
-          if (start === null || end === null || end <= start) return acc;
-          return acc + (end - start);
+          const start = parseMeridiemTimeToDate(slip.timeOut, slip.date);
+          const end = parseMeridiemTimeToDate(slip.estimatedTimeBack, slip.date);
+          if (!start || !end || end <= start) return acc;
+          return acc + getBillableDurationMs(start, end, slip.date);
         }, 0);
 
         if (totalDurationToday + requestedDuration > 2 * 60 * 60 * 1000) { // 2 hours in milliseconds

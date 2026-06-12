@@ -246,7 +246,8 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
           <Text style={styles.title}>Pass Slip Tracker</Text>
           <Text style={styles.subtitle}>
             Usage is counted after return: actual departure→return time when on time or early; planned plus late time
-            when overdue. In-progress slips show 0 until returned. Remaining balance (current week only) matches the mobile profile and includes seconds.
+            when overdue. The 12:00–1:00 PM lunch break is excluded from planned and actual duration. In-progress slips show 0 until returned.
+            Remaining balance (current week only) matches the mobile profile and includes seconds.
           </Text>
         </View>
         <View style={styles.headerMeta}>

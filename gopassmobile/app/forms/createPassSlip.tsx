@@ -19,6 +19,7 @@ import { useServerTime } from '../../hooks/useServerTime';
 import { formatManilaDateYmd, getManilaTodayStart, isSameManilaDay, parseMeridiemTimeInManilaDate } from '../../utils/manilaDate';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { formatPassSlipBalance, getPassSlipBalanceSeconds } from '../../utils/formatPassSlipBalance';
+import { getBillableDurationSeconds } from '../../utils/passSlipDuration';
 import PassSlipForm, { approvedByRoleLabel, requestedByRoleLabel } from '../../components/PassSlipForm';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
@@ -71,6 +72,12 @@ const CreatePassSlipScreen = () => {
   const getDepartureMomentForForm = () => {
     const timeStr = formatTimeMeridiem(timeOut);
     return parseMeridiemTimeInManilaDate(date, timeStr);
+  };
+
+  const getPlannedTimesInManila = () => {
+    const start = parseMeridiemTimeInManilaDate(date, formatTimeMeridiem(timeOut));
+    const end = parseMeridiemTimeInManilaDate(date, formatTimeMeridiem(estimatedTimeBack));
+    return { start, end };
   };
 
   const isDepartureInPast = () => {
@@ -305,24 +312,14 @@ const CreatePassSlipScreen = () => {
   }, [destination, fetchSuggestions]);
 
   useEffect(() => {
-    if (estimatedTimeBack.getTime() >= timeOut.getTime()) {
-      const diff = estimatedTimeBack.getTime() - timeOut.getTime();
-      const hours = Math.floor(diff / (1000 * 60 * 60));
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      
-      let durationString = '';
-      if (hours > 0) {
-        durationString += `${hours}hr `;
-      }
-      if (minutes > 0 || hours === 0) {
-        durationString += `${minutes}min`;
-      }
-      
-      setDuration(durationString.trim());
-    } else {
+    const { start, end } = getPlannedTimesInManila();
+    if (!start || !end || end.getTime() < start.getTime()) {
       setDuration('');
+      return;
     }
-  }, [timeOut, estimatedTimeBack]);
+    const billableSeconds = getBillableDurationSeconds(start, end, date);
+    setDuration(formatPassSlipBalance(billableSeconds));
+  }, [date, timeOut, estimatedTimeBack]);
 
   const fetchUserLocation = useCallback(async () => {
     setIsLocatingUser(true);
@@ -388,10 +385,12 @@ const CreatePassSlipScreen = () => {
       return;
     }
 
-    const durationSeconds = Math.max(
-      0,
-      Math.round((estimatedTimeBack.getTime() - timeOut.getTime()) / 1000),
-    );
+    const { start: plannedStart, end: plannedEnd } = getPlannedTimesInManila();
+    if (!plannedStart || !plannedEnd) {
+      Alert.alert('Invalid Time', 'Please enter valid departure and return times.');
+      return;
+    }
+    const durationSeconds = getBillableDurationSeconds(plannedStart, plannedEnd, date);
     const balanceSeconds = user ? getPassSlipBalanceSeconds(user) : null;
     if (balanceSeconds != null && balanceSeconds < durationSeconds) {
       Alert.alert(
@@ -906,7 +905,8 @@ const CreatePassSlipScreen = () => {
 
           {duration ? (
             <View style={styles.durationContainer}>
-              <Text style={styles.durationText}>Duration: {duration}</Text>
+              <Text style={styles.durationText}>Billable duration: {duration}</Text>
+              <Text style={styles.durationHint}>12:00–1:00 PM lunch is excluded.</Text>
             </View>
           ) : null}
 
@@ -1426,6 +1426,12 @@ const styles = StyleSheet.create({
   durationText: {
     fontSize: 14,
     color: theme.textMuted,
+    fontStyle: 'italic',
+  },
+  durationHint: {
+    fontSize: 12,
+    color: theme.textMuted,
+    marginTop: 2,
     fontStyle: 'italic',
   },
   buttonText: {

@@ -763,9 +763,10 @@ const HrpDashboardScreen = () => {
           message: getApiErrorMessage(err, 'Failed to return the request.'),
         });
       } else {
-        Alert.alert('Error', getApiErrorMessage(err, 'Failed to update the request status.'));
+        const apiMessage = getApiErrorMessage(err, 'Failed to update the request status.');
+        console.error('Status update failed:', apiMessage, err);
+        Alert.alert('Could not record', apiMessage);
       }
-      console.error(err);
     } finally {
       if (isReturn) setIsRejecting(false);
     }
@@ -1671,7 +1672,7 @@ const HrpDashboardScreen = () => {
                   </View>
                 </View>
               )}
-              <ScrollView contentContainerStyle={styles.modalContent}>
+              <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalContent}>
                 {selectedItem && (
                   <>
                     {selectedItemType === 'slip' ? (
@@ -1795,24 +1796,49 @@ const HrpDashboardScreen = () => {
                       {(() => {
                         const isTravelOrderRecommended = selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended';
                         const statusToSend = isTravelOrderRecommended ? 'For President Approval' : 'Approved';
+                        const primaryLabel =
+                          selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended'
+                            ? 'Send to President'
+                            : selectedItemType === 'slip'
+                              ? 'Record'
+                              : 'Approve';
+                        const onPrimaryPress = () => {
+                          handleUpdateStatus(selectedItemType!, selectedItem._id, statusToSend);
+                        };
+                        const onReturnPress = () => {
+                          setRejectComment('');
+                          setRejectModalVisible(true);
+                        };
+                        const webClickProps = (handler: () => void) =>
+                          Platform.OS === 'web'
+                            ? ({
+                                onClick: (e: { stopPropagation?: () => void }) => {
+                                  e.stopPropagation?.();
+                                  handler();
+                                },
+                              } as object)
+                            : {};
                         return (
-                          <Pressable
-                            style={[styles.button, styles.approveButton, styles.modalButton]}
-                            onPress={() => handleUpdateStatus(selectedItemType!, selectedItem._id, statusToSend)}
-                          >
-                            <Text style={styles.buttonText}>
-                              {selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended'
-                                ? 'Send to President'
-                                : selectedItemType === 'slip'
-                                  ? 'Record'
-                                  : 'Approve'}
-                            </Text>
-                          </Pressable>
+                          <>
+                            <Pressable
+                              style={[styles.button, styles.approveButton, styles.modalButton]}
+                              onPress={onPrimaryPress}
+                              accessibilityRole="button"
+                              {...webClickProps(onPrimaryPress)}
+                            >
+                              <Text style={styles.buttonText}>{primaryLabel}</Text>
+                            </Pressable>
+                            <Pressable
+                              style={[styles.button, styles.rejectButton, styles.modalButton]}
+                              onPress={onReturnPress}
+                              accessibilityRole="button"
+                              {...webClickProps(onReturnPress)}
+                            >
+                              <Text style={styles.buttonText}>Return</Text>
+                            </Pressable>
+                          </>
                         );
                       })()}
-                      <Pressable style={[styles.button, styles.rejectButton, styles.modalButton]} onPress={() => { setRejectComment(''); setRejectModalVisible(true); }}>
-                        <Text style={styles.buttonText}>Return</Text>
-                      </Pressable>
                     </>
                   ) : null}
                   {selectedItemType === 'order' && !isSelectedItemInForReview && (

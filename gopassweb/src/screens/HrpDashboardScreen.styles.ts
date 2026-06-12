@@ -1457,10 +1457,12 @@ export const styles = StyleSheet.create({
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
-      backgroundColor: 'rgba(15, 23, 42, 0.5)',
       paddingHorizontal: 16,
       paddingVertical: 16,
       position: 'relative',
+      ...Platform.select({
+        web: { pointerEvents: 'box-none' as const },
+      }),
     },
     modalBackdrop: {
       position: 'absolute',
@@ -1468,10 +1470,20 @@ export const styles = StyleSheet.create({
       left: 0,
       right: 0,
       bottom: 0,
+      backgroundColor: 'rgba(15, 23, 42, 0.5)',
+      zIndex: 0,
     },
     modalViewRaised: {
-      zIndex: 1,
+      zIndex: 10,
       position: 'relative',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      ...Platform.select({
+        web: {
+          pointerEvents: 'auto' as const,
+          isolation: 'isolate' as const,
+        },
+      }),
     },
     /**
      * Review Modal — sized to comfortably display a full Pass Slip / Travel Order
@@ -1522,7 +1534,12 @@ export const styles = StyleSheet.create({
       marginBottom: 4,
     },
     modalContent: {
-      paddingBottom: 20, // Ensure there's space for the buttons
+      paddingBottom: 20,
+    },
+    modalScroll: {
+      flexGrow: 1,
+      flexShrink: 1,
+      minHeight: 0,
     },
     docValue: {
       fontWeight: 'bold',
@@ -1972,6 +1989,13 @@ export const styles = StyleSheet.create({
       borderTopColor: '#e9ecef',
       flexWrap: 'wrap',
       gap: 8,
+      zIndex: 20,
+      position: 'relative',
+      ...Platform.select({
+        web: {
+          pointerEvents: 'auto' as const,
+        },
+      }),
     },
     modalButtonContainerNarrow: {
       paddingTop: 14,

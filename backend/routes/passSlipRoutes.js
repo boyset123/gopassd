@@ -18,7 +18,7 @@ const { computeReturnBalanceAdjustment } = require('../utils/passSlipBalance');
 const { resolvePassSlipMapRoute } = require('../utils/drivingRoute');
 const { formatPassSlipBalance } = require('../utils/formatPassSlipBalance');
 const { getPassSlipSeconds, setPassSlipSeconds, serializePassSlipBalance } = require('../utils/passSlipBalanceState');
-const { ensurePassSlipTrackingNo } = require('../utils/documentNumbers');
+const { ensurePassSlipTrackingNo, peekPassSlipTrackingNo } = require('../utils/documentNumbers');
 const {
   getBillableDurationMs,
   getBillableDurationSeconds,
@@ -655,6 +655,24 @@ router.put('/:id/cancel', auth, async (req, res) => {
   }
 });
 
+// Preview next tracking number for HR (does not increment counter)
+router.get('/:id/preview-tracking-no', [auth, authorize('Human Resource Personnel')], async (req, res) => {
+  try {
+    const passSlip = await PassSlip.findById(req.params.id).select('date trackingNo');
+    if (!passSlip) {
+      return res.status(404).json({ message: 'Pass slip not found.' });
+    }
+    if (passSlip.trackingNo && String(passSlip.trackingNo).trim()) {
+      return res.json({ preview: String(passSlip.trackingNo).trim() });
+    }
+    const preview = await peekPassSlipTrackingNo(passSlip.date);
+    res.json({ preview });
+  } catch (error) {
+    console.error('Error previewing pass slip tracking number:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get all recommended pass slips (for HR)
 router.get('/recommended', [auth, authorize('Human Resource Personnel')], async (req, res) => {
   try {
@@ -662,7 +680,19 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
       .populate('employee', 'name email profilePicture')
       .populate('approvedBy', 'name role')
       .populate('approvedBySignedAsOicFor', 'name role')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor signature approverSignature latitude longitude originLatitude originLongitude routePolyline overdueMinutes');
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor signature approverSignature latitude longitude originLatitude originLongitude routePolyline overdueMinutes trackingNo')
+      .lean();
+
+    for (const slip of recommendedSlips) {
+      if (!slip.trackingNo || !String(slip.trackingNo).trim()) {
+        try {
+          slip.trackingNoPreview = await peekPassSlipTrackingNo(slip.date);
+        } catch (previewErr) {
+          console.warn('Failed to preview tracking number for slip:', slip._id, previewErr?.message || previewErr);
+        }
+      }
+    }
+
     res.json(recommendedSlips);
   } catch (error) {
     console.error('Error fetching recommended pass slips:', error);

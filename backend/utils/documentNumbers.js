@@ -65,8 +65,39 @@ async function ensureTravelOrderNo(travelOrder) {
   return generated;
 }
 
+/**
+ * Preview the next pass slip tracking number without incrementing the counter.
+ */
+async function peekPassSlipTrackingNo(dateValue) {
+  const parts = resolveManilaParts(dateValue);
+  const yyyy = parts.year;
+  const yy = String(yyyy).slice(-2);
+  const key = String(yyyy);
+
+  const counter = await PassSlipCounter.findOne({ key }).lean();
+  const nextSeq = (counter?.seq ?? 0) + 1;
+  return `${padSeq(nextSeq)}-${yy}`;
+}
+
+/**
+ * Preview the next travel order number without incrementing the counter.
+ */
+async function peekTravelOrderNo(dateValue) {
+  const parts = resolveManilaParts(dateValue);
+  const yyyy = parts.year;
+  const mm = String(parts.monthIndex + 1).padStart(2, '0');
+  const yy = String(yyyy).slice(-2);
+  const key = `${yyyy}-${mm}`;
+
+  const counter = await TravelOrderCounter.findOne({ key }).lean();
+  const nextSeq = (counter?.seq ?? 0) + 1;
+  return `${mm}-${padSeq(nextSeq)}-${yy}`;
+}
+
 module.exports = {
   ensurePassSlipTrackingNo,
   ensureTravelOrderNo,
+  peekPassSlipTrackingNo,
+  peekTravelOrderNo,
   SEQ_WIDTH,
 };

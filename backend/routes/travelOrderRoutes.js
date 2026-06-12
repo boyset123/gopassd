@@ -4,7 +4,7 @@ const TravelOrder = require('../models/TravelOrder');
 const auth = require('../middleware/auth');
 const authorize = require('../middleware/authorize');
 const User = require('../models/User');
-const { ensureTravelOrderNo } = require('../utils/documentNumbers');
+const { ensureTravelOrderNo, peekTravelOrderNo } = require('../utils/documentNumbers');
 const QRCode = require('qrcode');
 const { parseLocalDate, parseMeridiemTimeToDate } = require('../utils/dateTime');
 const { getEffectiveSigner, assertCanSignFor, resolvePresidentAccount, toIdString } = require('../utils/oic');
@@ -849,6 +849,24 @@ router.delete('/:id', auth, async (req, res) => {
   }
 });
 
+// Preview next travel order number for HR (does not increment counter)
+router.get('/:id/preview-order-no', [auth, authorize('Human Resource Personnel')], async (req, res) => {
+  try {
+    const travelOrder = await TravelOrder.findById(req.params.id).select('date travelOrderNo');
+    if (!travelOrder) {
+      return res.status(404).json({ message: 'Travel order not found.' });
+    }
+    if (travelOrder.travelOrderNo && String(travelOrder.travelOrderNo).trim()) {
+      return res.json({ preview: String(travelOrder.travelOrderNo).trim() });
+    }
+    const preview = await peekTravelOrderNo(travelOrder.date);
+    res.json({ preview });
+  } catch (error) {
+    console.error('Error previewing travel order number:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get all recommended travel orders (for HR) - Program Head recommended but HR not yet approved
 router.get('/recommended', [auth, authorize('Human Resource Personnel')], async (req, res) => {
   try {
@@ -897,6 +915,15 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
       .select('-document.data -documents.data')
       .lean();
     await attachEmployeeRoleFallback(recommendedOrders);
+    for (const order of recommendedOrders) {
+      if (!order.travelOrderNo || !String(order.travelOrderNo).trim()) {
+        try {
+          order.travelOrderNoPreview = await peekTravelOrderNo(order.date);
+        } catch (previewErr) {
+          console.warn('Failed to preview travel order number:', order._id, previewErr?.message || previewErr);
+        }
+      }
+    }
     res.json(travelOrdersToClientJson(recommendedOrders));
   } catch (error) {
     console.error('Error fetching recommended travel orders:', error);
@@ -918,6 +945,15 @@ router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async 
       .select('-document.data -documents.data')
       .lean();
     await attachEmployeeRoleFallback(hrApprovedOrders);
+    for (const order of hrApprovedOrders) {
+      if (!order.travelOrderNo || !String(order.travelOrderNo).trim()) {
+        try {
+          order.travelOrderNoPreview = await peekTravelOrderNo(order.date);
+        } catch (previewErr) {
+          console.warn('Failed to preview travel order number:', order._id, previewErr?.message || previewErr);
+        }
+      }
+    }
     res.json(travelOrdersToClientJson(hrApprovedOrders));
   } catch (error) {
     console.error('Error fetching HR approved travel orders:', error);

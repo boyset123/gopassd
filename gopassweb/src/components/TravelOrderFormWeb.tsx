@@ -73,6 +73,8 @@ export interface TravelOrderFormWebProps {
   presidentName: string;
   /** Default true on web: signatures read-only */
   viewOnly?: boolean;
+  /** Next number from server preview (before HR final approval). */
+  travelOrderNoPreview?: string;
   onViewMap?: () => void;
   currentUserId?: string;
   approverSignature?: string | null;
@@ -211,6 +213,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
   order,
   presidentName,
   viewOnly = true,
+  travelOrderNoPreview,
   onViewMap,
   currentUserId,
   approverSignature = null,
@@ -372,6 +375,7 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
 
   const travelOrderNoDisplay =
     normalizeTravelOrderNo(order.travelOrderNo) ||
+    normalizeTravelOrderNo(travelOrderNoPreview) ||
     formatTravelOrderNoDisplay(order.travelOrderNo, order.date);
 
   const chiefList: Recommender[] =

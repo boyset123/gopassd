@@ -1460,6 +1460,18 @@ export const styles = StyleSheet.create({
       backgroundColor: 'rgba(15, 23, 42, 0.5)',
       paddingHorizontal: 16,
       paddingVertical: 16,
+      position: 'relative',
+    },
+    modalBackdrop: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+    },
+    modalViewRaised: {
+      zIndex: 1,
+      position: 'relative',
     },
     /**
      * Review Modal — sized to comfortably display a full Pass Slip / Travel Order

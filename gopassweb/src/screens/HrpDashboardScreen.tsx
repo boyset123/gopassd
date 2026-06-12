@@ -67,6 +67,8 @@ interface PassSlip {
   originLongitude?: number;
   routePolyline?: string;
   trackingNo?: string;
+  /** Next tracking number preview from server (before HR records the slip). */
+  trackingNoPreview?: string;
   arrivalStatus?: string;
   overdueMinutes?: number;
   rejectionReason?: string;
@@ -78,6 +80,8 @@ interface TravelOrder {
   /** Submitter role snapshot from server */
   employeeRole?: string;
   travelOrderNo: string;
+  /** Next travel order number preview from server (before HR final approval). */
+  travelOrderNoPreview?: string;
   date: string;
   address: string;
   salary: string;
@@ -439,6 +443,8 @@ const HrpDashboardScreen = () => {
   const [departureSignature, setDepartureSignature] = useState<string | null>(null);
   const [arrivalSignature, setArrivalSignature] = useState<string | null>(null);
   const [activeSignatureField, setActiveSignatureField] = useState<'travelOrderNo' | 'departure' | 'arrival' | null>(null);
+  const [trackingNoPreview, setTrackingNoPreview] = useState<string | null>(null);
+  const [travelOrderNoPreview, setTravelOrderNoPreview] = useState<string | null>(null);
   let sigPad = React.useRef<any>({});
   const [isSignatureModalVisible, setIsSignatureModalVisible] = useState(false);
   const [isMapModalVisible, setIsMapModalVisible] = useState(false);
@@ -821,10 +827,71 @@ const HrpDashboardScreen = () => {
     })();
   };
 
+  const fetchDocumentNumberPreview = async (item: PassSlip | TravelOrder | MonitoringItem, type: ItemType) => {
+    setTrackingNoPreview(null);
+    setTravelOrderNoPreview(null);
+
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const headers = { 'x-auth-token': token };
+
+      if (type === 'slip') {
+        const slip = item as PassSlip;
+        if (slip.trackingNo?.trim()) {
+          setTrackingNoPreview(slip.trackingNo.trim());
+          return;
+        }
+        if (slip.trackingNoPreview?.trim()) {
+          setTrackingNoPreview(slip.trackingNoPreview.trim());
+          return;
+        }
+        const { data } = await axios.get<{ preview?: string }>(
+          `${API_URL}/pass-slips/${slip._id}/preview-tracking-no`,
+          { headers },
+        );
+        setTrackingNoPreview(data.preview?.trim() || '—');
+        return;
+      }
+
+      const order = item as TravelOrder;
+      if (order.travelOrderNo?.trim()) {
+        setTravelOrderNoPreview(order.travelOrderNo.trim());
+        return;
+      }
+      if (order.travelOrderNoPreview?.trim()) {
+        setTravelOrderNoPreview(order.travelOrderNoPreview.trim());
+        return;
+      }
+      const { data } = await axios.get<{ preview?: string }>(
+        `${API_URL}/travel-orders/${order._id}/preview-order-no`,
+        { headers },
+      );
+      setTravelOrderNoPreview(data.preview?.trim() || '—');
+    } catch (err) {
+      console.error('Failed to load document number preview:', err);
+      if (type === 'slip') setTrackingNoPreview('—');
+      else setTravelOrderNoPreview('—');
+    }
+  };
+
   const openReviewModal = (item: PassSlip | TravelOrder | MonitoringItem, type: ItemType) => {
     setSelectedItem(item);
     setSelectedItemType(type);
+    if (type === 'slip') {
+      const slip = item as PassSlip;
+      setTrackingNoPreview(
+        slip.trackingNo?.trim() || slip.trackingNoPreview?.trim() || null,
+      );
+      setTravelOrderNoPreview(null);
+    } else {
+      const order = item as TravelOrder;
+      setTravelOrderNoPreview(
+        order.travelOrderNo?.trim() || order.travelOrderNoPreview?.trim() || null,
+      );
+      setTrackingNoPreview(null);
+    }
     setIsModalVisible(true);
+    void fetchDocumentNumberPreview(item, type);
   };
 
   const openCtcModal = (order: ApprovedTravelOrder) => {
@@ -1551,18 +1618,14 @@ const HrpDashboardScreen = () => {
           visible={isModalVisible}
           onRequestClose={() => setIsModalVisible(false)}
         >
-          <Pressable
-            style={styles.modalOverlay}
-            onPress={() => {
-              if (!isSignatureModalVisible) setIsModalVisible(false);
-            }}
-          >
+          <View style={styles.modalOverlay}>
             <Pressable
-              style={[styles.modalView, isNarrow && styles.modalViewNarrow]}
-              onPress={(e) => {
-                if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+              style={styles.modalBackdrop}
+              onPress={() => {
+                if (!isSignatureModalVisible) setIsModalVisible(false);
               }}
-            >
+            />
+            <View style={[styles.modalView, isNarrow && styles.modalViewNarrow, styles.modalViewRaised]}>
               <View style={styles.reviewModalTopBar}>
                 <Pressable
                   onPress={() => setIsModalVisible(false)}
@@ -1629,9 +1692,8 @@ const HrpDashboardScreen = () => {
                             <Text style={styles.docField}>Tracking No.: </Text>
                             <Text style={styles.docValue}>
                               {(selectedItem as PassSlip).trackingNo ||
-                                (isSelectedItemInForReview && selectedItem.status !== 'Approved'
-                                  ? 'Auto-assigned on approval'
-                                  : 'N/A')}
+                                trackingNoPreview ||
+                                'Loading…'}
                             </Text>
                           </View>
                           <Text style={styles.docField}>Date: <Text style={styles.docValue}>{formatDate((selectedItem as PassSlip).date)}</Text></Text>
@@ -1703,6 +1765,7 @@ const HrpDashboardScreen = () => {
                             order={buildTravelOrderWebView(selectedItem as TravelOrder)}
                             presidentName={presidentName}
                             viewOnly
+                            travelOrderNoPreview={travelOrderNoPreview || undefined}
                             onViewMap={
                               (selectedItem as TravelOrder).latitude && (selectedItem as TravelOrder).longitude
                                 ? () => openMapModal(selectedItem as TravelOrder)
@@ -1759,8 +1822,8 @@ const HrpDashboardScreen = () => {
                   )}
                 </View>
               )}
-            </Pressable>
-          </Pressable>
+            </View>
+          </View>
         </Modal>
 
         {/* CTC Modal — enable via FEATURE_CTC_ENABLED in src/config/featureFlags.ts */}

@@ -1,5 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, useWindowDimensions, Animated, Easing } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+  Platform,
+  useWindowDimensions,
+  Animated,
+  Easing,
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FontAwesome } from '@expo/vector-icons';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -9,7 +20,6 @@ type Employee = {
   _id?: string;
   name?: string;
   campus?: string;
-  // In UI we show "Faculty"; backend may use `department` in some datasets.
   faculty?: string;
   department?: string;
 };
@@ -40,23 +50,29 @@ export type HrpReportsAnalyticsProps = {
   records: RecordLike[];
 };
 
-const normalizeText = (value?: string) => (value || '').trim().toLowerCase();
+type DocumentTypeFilter = 'All' | 'Pass Slip' | 'Travel Order';
 
 type Filters = {
+  documentType: DocumentTypeFilter;
   campus: string;
   office: string;
-  userId: string; // stores employee._id
-  fromDate: string; // YYYY-MM-DD
-  toDate: string; // YYYY-MM-DD
+  userId: string;
+  fromDate: string;
+  toDate: string;
 };
 
 const defaultFilters: Filters = {
+  documentType: 'All',
   campus: 'All Campuses',
   office: 'All Faculties',
   userId: 'All Users',
   fromDate: '',
   toDate: '',
 };
+
+const DOCUMENT_TYPE_OPTIONS: DocumentTypeFilter[] = ['All', 'Pass Slip', 'Travel Order'];
+
+const normalizeText = (value?: string) => (value || '').trim().toLowerCase();
 
 const safeParseDateMs = (d?: string) => {
   if (!d) return null;
@@ -71,28 +87,82 @@ const formatDate = (dateString?: string) => {
   return d.toLocaleDateString();
 };
 
-// Stable date format for CSV/Excel exports.
 const formatCsvDate = (dateString?: string) => {
   if (!dateString) return 'No Date';
   const d = new Date(dateString);
   if (Number.isNaN(d.getTime())) return 'Invalid Date';
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+  return d.toISOString().slice(0, 10);
 };
 
-// Keep dates as plain text in Excel CSV import/open.
-// This avoids "#######" rendering in narrow columns caused by Excel date formatting.
 const formatExcelCsvDateText = (dateString?: string) => {
   const value = formatCsvDate(dateString);
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `'${value}`;
   return value;
 };
 
-const getRecordTypeLabel = (r: RecordLike) => ('destination' in r && r.destination ? 'Pass Slip' : 'Travel Order');
+const getRecordTypeLabel = (r: RecordLike) =>
+  'destination' in r && r.destination ? 'Pass Slip' : 'Travel Order';
 
-/** Pass slip uses `trackingNo`; travel order uses `travelOrderNo`. */
 const getTrackingNo = (r: RecordLike) => {
   if ('destination' in r) return (r as PassSlipLike).trackingNo || '—';
   return (r as TravelOrderLike).travelOrderNo || '—';
+};
+
+const filterByType = (records: RecordLike[], type: 'Pass Slip' | 'Travel Order') =>
+  records.filter((r) => getRecordTypeLabel(r) === type);
+
+const computePassSlipKpis = (records: RecordLike[]) => {
+  const total = records.length;
+  const onTime = records.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('on time')).length;
+  const overdue = records.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('overdue')).length;
+  return { total, onTime, overdue };
+};
+
+const computeRecordsByDay = (records: RecordLike[]) => {
+  const map = new Map<string, number>();
+  for (const r of records) {
+    const key = formatCsvDate(r.date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+    map.set(key, (map.get(key) || 0) + 1);
+  }
+  return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+};
+
+const computeTopByCampus = (records: RecordLike[]) => {
+  const map = new Map<string, number>();
+  for (const r of records) {
+    const c = r.employee?.campus || '—';
+    map.set(c, (map.get(c) || 0) + 1);
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+};
+
+const computeTopByOffice = (records: RecordLike[]) => {
+  const map = new Map<string, number>();
+  for (const r of records) {
+    const o = r.employee?.faculty || r.employee?.department || '—';
+    map.set(o, (map.get(o) || 0) + 1);
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+};
+
+const computeTopByUser = (records: RecordLike[]) => {
+  const map = new Map<string, { label: string; count: number }>();
+  for (const r of records) {
+    const userId = r.employee?._id || '';
+    const label = r.employee?.name || '—';
+    if (!userId) continue;
+    const prev = map.get(userId);
+    map.set(userId, prev ? { label: prev.label, count: prev.count + 1 } : { label, count: 1 });
+  }
+  return Array.from(map.entries())
+    .map(([userId, v]) => ({ userId, ...v }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
 };
 
 const escapeCsv = (value: string) => {
@@ -102,13 +172,19 @@ const escapeCsv = (value: string) => {
   return needsQuotes ? `"${escaped}"` : escaped;
 };
 
-/** Polar coords: 0° = top, clockwise (for SVG donut arcs). */
 const polar = (cx: number, cy: number, r: number, deg: number) => {
   const rad = (deg * Math.PI) / 180 - Math.PI / 2;
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 };
 
-const donutSlicePath = (cx: number, cy: number, rOuter: number, rInner: number, startDeg: number, endDeg: number) => {
+const donutSlicePath = (
+  cx: number,
+  cy: number,
+  rOuter: number,
+  rInner: number,
+  startDeg: number,
+  endDeg: number,
+) => {
   const sweep = endDeg - startDeg;
   const large = sweep > 180 ? 1 : 0;
   const p1 = polar(cx, cy, rOuter, startDeg);
@@ -151,7 +227,9 @@ const DonutChart = ({ size, segments }: { size: number; segments: DonutSeg[] }) 
       const sweep = (seg.value / total) * 360;
       const start = angle;
       const end = start + (sweep >= 359.99 ? 359.99 : sweep);
-      paths.push(<Path key={seg.label} d={donutSlicePath(cx, cy, rOuter, rInner, start, end)} fill={seg.color} />);
+      paths.push(
+        <Path key={seg.label} d={donutSlicePath(cx, cy, rOuter, rInner, start, end)} fill={seg.color} />,
+      );
       angle += sweep;
     }
   }
@@ -160,6 +238,395 @@ const DonutChart = ({ size, segments }: { size: number; segments: DonutSeg[] }) 
     <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       {paths}
     </Svg>
+  );
+};
+
+type DailyTrendChartProps = {
+  recordsByDay: [string, number][];
+  maxDayCount: number;
+  graphAnim: Animated.Value;
+  accentColor: string;
+};
+
+const DailyTrendChart = ({ recordsByDay, maxDayCount, graphAnim, accentColor }: DailyTrendChartProps) => {
+  if (!recordsByDay.length) {
+    return <Text style={styles.trendEmptyInCol}>No dated records.</Text>;
+  }
+
+  return (
+    <View style={styles.trendColumnBody}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        nestedScrollEnabled
+        style={styles.trendScroll}
+        contentContainerStyle={styles.trendScrollContent}
+      >
+        {recordsByDay.map(([date, count]) => {
+          const pct = (count / maxDayCount) * 100;
+          const animatedHeight = graphAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: ['0%', `${pct}%`],
+          });
+          return (
+            <Animated.View
+              key={date}
+              style={[
+                styles.trendCol,
+                {
+                  opacity: graphAnim,
+                  transform: [
+                    {
+                      translateY: graphAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [8, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <Text style={styles.trendCount}>{count}</Text>
+              <View style={styles.trendBarTrack}>
+                <Animated.View
+                  style={[styles.trendBarFill, { height: animatedHeight, backgroundColor: accentColor }]}
+                />
+              </View>
+              <Text style={styles.trendDateLabel}>{date.slice(5)}</Text>
+            </Animated.View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+};
+
+type BreakdownListProps = {
+  title: string;
+  items: { label: string; value: number }[];
+  maxValue: number;
+  accentColor: string;
+};
+
+const BreakdownList = ({ title, items, maxValue, accentColor }: BreakdownListProps) => (
+  <View style={styles.panelBreakdownCard}>
+    <Text style={styles.panelBreakdownTitle}>{title}</Text>
+    {items.length ? (
+      <View style={styles.barList}>
+        {items.map((item) => (
+          <View key={item.label} style={styles.barRow}>
+            <Text style={styles.barLabel} numberOfLines={1}>
+              {item.label}
+            </Text>
+            <View style={styles.barTrack}>
+              <View
+                style={[styles.barFill, { width: `${(item.value / maxValue) * 100}%`, backgroundColor: accentColor }]}
+              />
+            </View>
+            <Text style={styles.barValue}>{item.value}</Text>
+          </View>
+        ))}
+      </View>
+    ) : (
+      <Text style={styles.emptyText}>No matching data.</Text>
+    )}
+  </View>
+);
+
+type ReportTableProps = {
+  records: RecordLike[];
+  emptyTitle: string;
+  emptySubtitle: string;
+  isNarrow: boolean;
+};
+
+const ReportTable = ({ records, emptyTitle, emptySubtitle, isNarrow }: ReportTableProps) => {
+  const tableInner = (
+    <View style={[styles.tableInner, styles.tableInnerNoType, isNarrow && styles.tableInnerNarrow]}>
+      <View style={styles.tableHeadRow}>
+        <Text style={[styles.tableHeadCell, styles.cEmployee]}>Employee</Text>
+        <Text style={[styles.tableHeadCell, styles.cTracking]}>Tracking No.</Text>
+        <Text style={[styles.tableHeadCell, styles.cDate]}>Date</Text>
+        <Text style={[styles.tableHeadCell, styles.cStatus]}>Status</Text>
+        <Text style={[styles.tableHeadCell, styles.cArrival]}>Arrival</Text>
+        <Text style={[styles.tableHeadCell, styles.cCampus]}>Campus</Text>
+        <Text style={[styles.tableHeadCell, styles.cOffice]}>Faculty</Text>
+      </View>
+
+      {records.length ? (
+        records.map((r, idx) => {
+          const office = r.employee?.faculty || r.employee?.department || '—';
+          const campus = r.employee?.campus || '—';
+          const employee = r.employee?.name || '—';
+          const status = r.status || '—';
+          const arrivalRaw = r.arrivalStatus;
+          const arrival = arrivalRaw ? stripArrivalStatusDisplaySuffix(arrivalRaw) : '—';
+          const arrivalLower = arrival.toLowerCase();
+          const arrivalVariant = arrivalLower.includes('overdue')
+            ? 'overdue'
+            : arrivalLower.includes('on time')
+              ? 'onTime'
+              : 'neutral';
+          const trackingNo = getTrackingNo(r);
+
+          return (
+            <View
+              key={`${r._id}-${idx}`}
+              style={[styles.tableRow, idx % 2 === 1 ? styles.tableRowAlt : undefined]}
+            >
+              <Text style={[styles.tableCell, styles.cEmployee]} numberOfLines={1}>
+                {employee}
+              </Text>
+              <Text style={[styles.tableCell, styles.cTracking]} numberOfLines={1}>
+                {trackingNo}
+              </Text>
+              <Text style={[styles.tableCell, styles.cDate]}>{formatDate(r.date)}</Text>
+              <Text style={[styles.tableCell, styles.cStatus]} numberOfLines={1}>
+                {status}
+              </Text>
+              <View style={styles.cArrival}>
+                {arrival !== '—' ? (
+                  <View
+                    style={[
+                      styles.arrivalBadge,
+                      arrivalVariant === 'overdue' && styles.arrivalBadgeOverdue,
+                      arrivalVariant === 'onTime' && styles.arrivalBadgeOnTime,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.arrivalDot,
+                        arrivalVariant === 'overdue' && styles.arrivalDotOverdue,
+                        arrivalVariant === 'onTime' && styles.arrivalDotOnTime,
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.arrivalBadgeText,
+                        arrivalVariant === 'overdue' && styles.arrivalBadgeTextOverdue,
+                        arrivalVariant === 'onTime' && styles.arrivalBadgeTextOnTime,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {arrival}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.tableCell}>—</Text>
+                )}
+              </View>
+              <Text style={[styles.tableCell, styles.cCampus]} numberOfLines={1}>
+                {campus}
+              </Text>
+              <Text style={[styles.tableCell, styles.cOffice]} numberOfLines={1}>
+                {office}
+              </Text>
+            </View>
+          );
+        })
+      ) : (
+        <View style={styles.noResults}>
+          <Text style={styles.noResultsTitle}>{emptyTitle}</Text>
+          <Text style={styles.noResultsText}>{emptySubtitle}</Text>
+        </View>
+      )}
+    </View>
+  );
+
+  return (
+    <View style={styles.panelTableCard}>
+      <View style={styles.tableHeader}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.tableTitle}>Detailed Report</Text>
+          <Text style={styles.tableSubtitle}>
+            Showing {records.length} result{records.length === 1 ? '' : 's'}
+          </Text>
+        </View>
+        <View style={styles.tableHeaderBadge}>
+          <Text style={styles.tableHeaderBadgeText}>
+            {records.length} record{records.length === 1 ? '' : 's'}
+          </Text>
+        </View>
+      </View>
+      {Platform.OS === 'web' ? (
+        <View style={styles.tableHorizontalWrapper}>{tableInner}</View>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableHorizontal} nestedScrollEnabled>
+          {tableInner}
+        </ScrollView>
+      )}
+    </View>
+  );
+};
+
+type PanelVariant = 'passSlip' | 'travelOrder';
+
+type DocumentTypeReportPanelProps = {
+  variant: PanelVariant;
+  records: RecordLike[];
+  graphAnim: Animated.Value;
+  isNarrow: boolean;
+  isVeryNarrow: boolean;
+};
+
+const DocumentTypeReportPanel = ({
+  variant,
+  records,
+  graphAnim,
+  isNarrow,
+  isVeryNarrow,
+}: DocumentTypeReportPanelProps) => {
+  const isPassSlip = variant === 'passSlip';
+  const accentColor = isPassSlip ? '#fece00' : '#0284c7';
+  const iconName = isPassSlip ? 'file-text-o' : 'plane';
+  const title = isPassSlip ? 'Pass Slip — Visual Summary' : 'Travel Order (TO) — Visual Summary';
+  const emptyTitle = isPassSlip
+    ? 'No pass slips match the selected filters.'
+    : 'No travel orders match the selected filters.';
+  const emptySubtitle = 'Try changing campus, faculty, user, date range, or report type.';
+
+  const passSlipKpis = useMemo(() => computePassSlipKpis(records), [records]);
+  const recordsByDay = useMemo(() => computeRecordsByDay(records), [records]);
+  const maxDayCount = useMemo(() => Math.max(1, ...recordsByDay.map(([, c]) => c)), [recordsByDay]);
+  const topByCampus = useMemo(() => computeTopByCampus(records), [records]);
+  const topByOffice = useMemo(() => computeTopByOffice(records), [records]);
+  const topByUser = useMemo(() => computeTopByUser(records), [records]);
+  const maxCampus = useMemo(() => Math.max(1, ...topByCampus.map((x) => x[1])), [topByCampus]);
+  const maxOffice = useMemo(() => Math.max(1, ...topByOffice.map((x) => x[1])), [topByOffice]);
+  const maxUser = useMemo(() => Math.max(1, ...topByUser.map((x) => x.count)), [topByUser]);
+
+  const totalCount = isPassSlip ? passSlipKpis.total : records.length;
+
+  return (
+    <View
+      style={[
+        styles.docPanel,
+        isPassSlip ? styles.docPanelPassSlip : styles.docPanelTravelOrder,
+      ]}
+    >
+      <View style={[styles.docPanelHeader, { borderLeftColor: accentColor }]}>
+        <View style={[styles.docPanelIconWrap, { backgroundColor: `${accentColor}22` }]}>
+          <FontAwesome name={iconName} size={18} color={accentColor} />
+        </View>
+        <View style={styles.docPanelHeaderText}>
+          <Text style={styles.docPanelTitle}>{title}</Text>
+          <Text style={styles.docPanelSubtitle}>
+            {totalCount} record{totalCount === 1 ? '' : 's'} in this report
+          </Text>
+        </View>
+        <View style={[styles.docPanelCountPill, { borderColor: `${accentColor}55` }]}>
+          <Text style={[styles.docPanelCountValue, { color: accentColor }]}>{totalCount}</Text>
+        </View>
+      </View>
+
+      <View style={[styles.kpiRow, isVeryNarrow && styles.kpiRowStacked]}>
+        <View style={[styles.kpiCard, isPassSlip ? styles.kpiCardPassSlip : styles.kpiCardTravelOrder]}>
+          <Text style={styles.kpiLabel}>Total</Text>
+          <Text style={[styles.kpiValue, { color: accentColor }]}>{totalCount}</Text>
+        </View>
+        {isPassSlip && (
+          <>
+            <View style={[styles.kpiCard, styles.kpiCardPassSlip]}>
+              <Text style={styles.kpiLabel}>On time</Text>
+              <Text style={[styles.kpiValue, { color: '#16a34a' }]}>{passSlipKpis.onTime}</Text>
+            </View>
+            <View style={[styles.kpiCard, styles.kpiCardPassSlip]}>
+              <Text style={styles.kpiLabel}>Overdue</Text>
+              <Text style={[styles.kpiValue, { color: '#dc3545' }]}>{passSlipKpis.overdue}</Text>
+            </View>
+          </>
+        )}
+      </View>
+
+      <View style={[styles.panelChartsRow, isVeryNarrow && styles.panelChartsRowStacked]}>
+        {isPassSlip && (
+          <View style={[styles.panelChartBlock, isVeryNarrow && styles.panelChartBlockStacked]}>
+            <Text style={styles.donutBlockTitle}>By arrival status</Text>
+            <View style={styles.summaryColBody}>
+              <Animated.View
+                style={{
+                  opacity: graphAnim,
+                  transform: [
+                    {
+                      scale: graphAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.92, 1],
+                      }),
+                    },
+                  ],
+                }}
+              >
+                <DonutChart
+                  size={100}
+                  segments={[
+                    { label: 'On time', value: passSlipKpis.onTime, color: '#16a34a' },
+                    { label: 'Overdue', value: passSlipKpis.overdue, color: '#dc3545' },
+                  ]}
+                />
+              </Animated.View>
+              <View style={styles.donutLegendColumn}>
+                <View style={styles.legendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: '#16a34a' }]} />
+                  <Text style={styles.legendText} numberOfLines={2}>
+                    On time · {passSlipKpis.onTime}
+                  </Text>
+                </View>
+                <View style={styles.legendRow}>
+                  <View style={[styles.legendSwatch, { backgroundColor: '#dc3545' }]} />
+                  <Text style={styles.legendText} numberOfLines={2}>
+                    Overdue · {passSlipKpis.overdue}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        )}
+
+        <View
+          style={[
+            styles.panelChartBlock,
+            isPassSlip && !isVeryNarrow && styles.panelChartBlockDivider,
+            isVeryNarrow && styles.panelChartBlockStacked,
+          ]}
+        >
+          <Text style={styles.donutBlockTitle}>Records by day</Text>
+          <DailyTrendChart
+            recordsByDay={recordsByDay}
+            maxDayCount={maxDayCount}
+            graphAnim={graphAnim}
+            accentColor={accentColor}
+          />
+        </View>
+      </View>
+
+      <View style={[styles.panelBreakdownRow, isNarrow && styles.panelBreakdownRowStacked]}>
+        <BreakdownList
+          title="By Campus (Top)"
+          items={topByCampus.map(([label, value]) => ({ label, value }))}
+          maxValue={maxCampus}
+          accentColor={accentColor}
+        />
+        <BreakdownList
+          title="By Faculty (Top)"
+          items={topByOffice.map(([label, value]) => ({ label, value }))}
+          maxValue={maxOffice}
+          accentColor={accentColor}
+        />
+        <BreakdownList
+          title="By User (Top)"
+          items={topByUser.map((u) => ({ label: u.label, value: u.count }))}
+          maxValue={maxUser}
+          accentColor={accentColor}
+        />
+      </View>
+
+      <ReportTable
+        records={records}
+        emptyTitle={emptyTitle}
+        emptySubtitle={emptySubtitle}
+        isNarrow={isNarrow}
+      />
+    </View>
   );
 };
 
@@ -176,11 +643,6 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
   const isNarrow = width < 900;
   const isVeryNarrow = width < 640;
 
-  // IMPORTANT:
-  // `select`/`input[type="date"]` are DOM elements on web.
-  // Passing `style={[...]}`
-  // can crash react-native-web with: "Failed to set an indexed property [0] on CSSStyleDeclaration".
-  // Flatten to a single object for DOM style props.
   const selectStyle = StyleSheet.flatten([styles.select, isNarrow && styles.selectNarrow]) as any;
   const dateInputStyle = StyleSheet.flatten([styles.dateInput, isNarrow && styles.dateInputNarrow]) as any;
 
@@ -220,8 +682,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
       const campusValue = (r.employee?.campus || '').trim();
       if (campusValue) set.add(campusValue);
     }
-    const arr = Array.from(set.values()).sort((a, b) => a.localeCompare(b));
-    return arr;
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
   }, [records]);
 
   const officeOptions = useMemo(() => {
@@ -230,20 +691,17 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
       const facultyValue = (r.employee?.faculty || r.employee?.department || '').trim();
       if (facultyValue) set.add(facultyValue);
     }
-    const arr = Array.from(set.values()).sort((a, b) => a.localeCompare(b));
-    return arr;
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
   }, [records]);
 
   const appliedFilteredRecords = useMemo(() => {
-    const { campus, office, userId, fromDate, toDate } = filtersApplied;
+    const { documentType, campus, office, userId, fromDate, toDate } = filtersApplied;
 
     const fromMs = safeParseDateMs(fromDate ? `${fromDate}T00:00:00` : undefined);
-    // inclusive end date (set to next day start - 1ms)
     const toMs = safeParseDateMs(toDate ? `${toDate}T23:59:59` : undefined);
 
     return records.filter((r) => {
-      const recordType = getRecordTypeLabel(r);
-      void recordType;
+      if (documentType !== 'All' && getRecordTypeLabel(r) !== documentType) return false;
 
       const campusValue = (r.employee?.campus || '').trim();
       if (campus !== 'All Campuses' && normalizeText(campusValue) !== normalizeText(campus)) return false;
@@ -265,29 +723,18 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
     });
   }, [records, filtersApplied]);
 
-  const kpis = useMemo(() => {
-    const total = appliedFilteredRecords.length;
-    const passSlips = appliedFilteredRecords.filter((r) => getRecordTypeLabel(r) === 'Pass Slip').length;
-    const travelOrders = total - passSlips;
+  const passSlipRecords = useMemo(
+    () => filterByType(appliedFilteredRecords, 'Pass Slip'),
+    [appliedFilteredRecords],
+  );
+  const travelOrderRecords = useMemo(
+    () => filterByType(appliedFilteredRecords, 'Travel Order'),
+    [appliedFilteredRecords],
+  );
 
-    const passSlipRows = appliedFilteredRecords.filter((r) => getRecordTypeLabel(r) === 'Pass Slip');
-    const onTime = passSlipRows.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('on time')).length;
-    const overdue = passSlipRows.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('overdue')).length;
+  const showPassSlipSection = filtersApplied.documentType !== 'Travel Order';
+  const showTravelOrderSection = filtersApplied.documentType !== 'Pass Slip';
 
-    return { total, passSlips, travelOrders, onTime, overdue };
-  }, [appliedFilteredRecords]);
-
-  const recordsByDay = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of appliedFilteredRecords) {
-      const key = formatCsvDate(r.date);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
-      map.set(key, (map.get(key) || 0) + 1);
-    }
-    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [appliedFilteredRecords]);
-
-  const maxDayCount = useMemo(() => Math.max(1, ...recordsByDay.map(([, c]) => c)), [recordsByDay]);
   const graphAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -298,47 +745,17 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start();
-  }, [graphAnim, kpis.total, kpis.passSlips, kpis.travelOrders, kpis.onTime, kpis.overdue, recordsByDay.length, maxDayCount]);
+  }, [
+    graphAnim,
+    filtersApplied,
+    passSlipRecords.length,
+    travelOrderRecords.length,
+    appliedFilteredRecords.length,
+  ]);
 
-  const topByCampus = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of appliedFilteredRecords) {
-      const c = r.employee?.campus || '—';
-      map.set(c, (map.get(c) || 0) + 1);
-    }
-    const entries = Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
-    return entries.slice(0, 6);
-  }, [appliedFilteredRecords]);
-
-  const topByOffice = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of appliedFilteredRecords) {
-      const o = r.employee?.faculty || r.employee?.department || '—';
-      map.set(o, (map.get(o) || 0) + 1);
-    }
-    const entries = Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
-    return entries.slice(0, 6);
-  }, [appliedFilteredRecords]);
-
-  const topByUser = useMemo(() => {
-    const map = new Map<string, { label: string; count: number }>();
-    for (const r of appliedFilteredRecords) {
-      const userId = r.employee?._id || '';
-      const label = r.employee?.name || '—';
-      if (!userId) continue;
-      const prev = map.get(userId);
-      map.set(userId, prev ? { label: prev.label, count: prev.count + 1 } : { label, count: 1 });
-    }
-    const entries = Array.from(map.entries()).map(([userId, v]) => ({ userId, ...v }));
-    entries.sort((a, b) => b.count - a.count);
-    return entries.slice(0, 8);
-  }, [appliedFilteredRecords]);
-
-  const maxCampus = useMemo(() => Math.max(1, ...topByCampus.map((x) => x[1])), [topByCampus]);
-  const maxOffice = useMemo(() => Math.max(1, ...topByOffice.map((x) => x[1])), [topByOffice]);
-  const maxUser = useMemo(() => Math.max(1, ...topByUser.map((x) => x.count)), [topByUser]);
   const activeFilterChips = useMemo(() => {
     const chips: string[] = [];
+    if (filtersApplied.documentType !== 'All') chips.push(`Type: ${filtersApplied.documentType}`);
     if (filtersApplied.campus !== 'All Campuses') chips.push(`Campus: ${filtersApplied.campus}`);
     if (filtersApplied.office !== 'All Faculties') chips.push(`Faculty: ${filtersApplied.office}`);
     if (filtersApplied.userId !== 'All Users') {
@@ -352,149 +769,41 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
     }
     return chips;
   }, [filtersApplied, userOptions]);
+
   const generatedAtLabel = useMemo(() => new Date().toLocaleString(), [filtersApplied]);
 
-  let tableInnerContent: any = null;
-  let tableInnerContentError: string | null = null;
+  const snapshotCountText = useMemo(() => {
+    const total = appliedFilteredRecords.length;
+    const ps = passSlipRecords.length;
+    const to = travelOrderRecords.length;
+    if (filtersApplied.documentType === 'Pass Slip') {
+      return `${ps} pass slip${ps === 1 ? '' : 's'}`;
+    }
+    if (filtersApplied.documentType === 'Travel Order') {
+      return `${to} travel order${to === 1 ? '' : 's'}`;
+    }
+    return `${total} result${total === 1 ? '' : 's'} (${ps} pass slips · ${to} travel orders)`;
+  }, [appliedFilteredRecords.length, passSlipRecords.length, travelOrderRecords.length, filtersApplied.documentType]);
 
-  try {
-    tableInnerContent = (
-      <View style={[styles.tableInner, isNarrow && styles.tableInnerNarrow]}>
-        <View style={styles.tableHeadRow}>
-          <Text style={[styles.tableHeadCell, styles.cEmployee]}>Employee</Text>
-          <Text style={[styles.tableHeadCell, styles.cTracking]}>Tracking No.</Text>
-          <Text style={[styles.tableHeadCell, styles.cType]}>Type</Text>
-          <Text style={[styles.tableHeadCell, styles.cDate]}>Date</Text>
-          <Text style={[styles.tableHeadCell, styles.cStatus]}>Status</Text>
-          <Text style={[styles.tableHeadCell, styles.cArrival]}>Arrival</Text>
-          <Text style={[styles.tableHeadCell, styles.cCampus]}>Campus</Text>
-          <Text style={[styles.tableHeadCell, styles.cOffice]}>Faculty</Text>
-        </View>
-
-        {appliedFilteredRecords.length ? (
-          appliedFilteredRecords.map((r, idx) => {
-            const typeLabel = getRecordTypeLabel(r);
-      const office = r.employee?.faculty || r.employee?.department || '—';
-            const campus = r.employee?.campus || '—';
-            const employee = r.employee?.name || '—';
-            const status = r.status || '—';
-            const arrivalRaw = r.arrivalStatus;
-            const arrival = arrivalRaw ? stripArrivalStatusDisplaySuffix(arrivalRaw) : '—';
-            const arrivalLower = arrival.toLowerCase();
-            const arrivalVariant = arrivalLower.includes('overdue')
-              ? 'overdue'
-              : arrivalLower.includes('on time')
-                ? 'onTime'
-                : 'neutral';
-
-            const trackingNo = getTrackingNo(r);
-
-            return (
-              <View
-                key={`${r._id}-${idx}`}
-                style={[styles.tableRow, idx % 2 === 1 ? styles.tableRowAlt : undefined]}
-              >
-                <Text style={[styles.tableCell, styles.cEmployee]} numberOfLines={1}>
-                  {employee}
-                </Text>
-                <Text style={[styles.tableCell, styles.cTracking]} numberOfLines={1}>
-                  {trackingNo}
-                </Text>
-                <View style={styles.cType}>
-                  <View
-                    style={[
-                      styles.typeBadge,
-                      typeLabel === 'Pass Slip' ? styles.typeBadgeSlip : styles.typeBadgeOrder,
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.typeBadgeDot,
-                        typeLabel === 'Pass Slip' ? styles.typeBadgeDotSlip : styles.typeBadgeDotOrder,
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        styles.typeBadgeText,
-                        typeLabel === 'Pass Slip' ? styles.typeBadgeTextSlip : styles.typeBadgeTextOrder,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {typeLabel}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={[styles.tableCell, styles.cDate]}>{formatDate(r.date)}</Text>
-                <Text style={[styles.tableCell, styles.cStatus]} numberOfLines={1}>
-                  {status}
-                </Text>
-                <View style={styles.cArrival}>
-                  {arrival !== '—' ? (
-                    <View
-                      style={[
-                        styles.arrivalBadge,
-                        arrivalVariant === 'overdue' && styles.arrivalBadgeOverdue,
-                        arrivalVariant === 'onTime' && styles.arrivalBadgeOnTime,
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.arrivalDot,
-                          arrivalVariant === 'overdue' && styles.arrivalDotOverdue,
-                          arrivalVariant === 'onTime' && styles.arrivalDotOnTime,
-                        ]}
-                      />
-                      <Text
-                        style={[
-                          styles.arrivalBadgeText,
-                          arrivalVariant === 'overdue' && styles.arrivalBadgeTextOverdue,
-                          arrivalVariant === 'onTime' && styles.arrivalBadgeTextOnTime,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {arrival}
-                      </Text>
-                    </View>
-                  ) : (
-                    <Text style={styles.tableCell}>—</Text>
-                  )}
-                </View>
-                <Text style={[styles.tableCell, styles.cCampus]} numberOfLines={1}>
-                  {campus}
-                </Text>
-                <Text style={[styles.tableCell, styles.cOffice]} numberOfLines={1}>
-                  {office}
-                </Text>
-              </View>
-            );
-          })
-        ) : (
-          <View style={styles.noResults}>
-            <Text style={styles.noResultsTitle}>No records match your filters.</Text>
-            <Text style={styles.noResultsText}>Try changing campus, faculty, user, or date range.</Text>
-          </View>
-        )}
-      </View>
-    );
-  } catch (err) {
-    tableInnerContentError = String(err);
-    tableInnerContent = (
-      <View style={styles.centered}>
-        <Text style={styles.errorText}>Reports table error</Text>
-        <Text style={{ color: '#dc3545', marginTop: 12, fontSize: 13, fontWeight: '600' }}>
-          {tableInnerContentError}
-        </Text>
-      </View>
-    );
-    // eslint-disable-next-line no-console
-    console.error('HrpReportsAnalytics table render error:', err);
-  }
+  const csvFilenameSuffix = useMemo(() => {
+    if (filtersApplied.documentType === 'Pass Slip') return 'pass-slip';
+    if (filtersApplied.documentType === 'Travel Order') return 'travel-order';
+    return 'all';
+  }, [filtersApplied.documentType]);
 
   const downloadCsv = () => {
     if (typeof window === 'undefined') return;
 
-    // Longer date header so Excel opens with a wider Date column (avoids ######)
-    const headers = ['Date (YYYY-MM-DD)', 'Tracking No.', 'Type', 'Employee', 'Campus', 'Faculty', 'Status', 'Arrival Status'];
+    const headers = [
+      'Date (YYYY-MM-DD)',
+      'Tracking No.',
+      'Type',
+      'Employee',
+      'Campus',
+      'Faculty',
+      'Status',
+      'Arrival Status',
+    ];
     const rows = appliedFilteredRecords.map((r) => {
       const type = getRecordTypeLabel(r);
       const employee = r.employee?.name || '—';
@@ -517,13 +826,12 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
     });
 
     const csv = [headers.join(','), ...rows].join('\n');
-
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = window.URL.createObjectURL(blob);
 
     const a = document.createElement('a');
     a.href = url;
-    a.download = `hr-analytics_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `hr-analytics_${csvFilenameSuffix}_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -535,6 +843,7 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
     setFiltersApplied(filtersDraft);
     setFilterActionMessage('Report generated using selected filters.');
   };
+
   const resetFilters = () => {
     setFiltersDraft(defaultFilters);
     setFiltersApplied(defaultFilters);
@@ -560,404 +869,211 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
   try {
     return (
       <View style={styles.container}>
-      <View style={styles.pageShell}>
-      <View style={[styles.headerRow, isNarrow && styles.headerRowNarrow]}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.title}>Reports & Analytics</Text>
-          <Text style={styles.subtitle}>Generate detailed HR reports by user, faculty, campus, and date range.</Text>
-        </View>
-        <View style={[styles.headerActions, isNarrow && styles.headerActionsNarrow]}>
-          <View style={styles.headerPill}>
-            <Text style={styles.headerPillText}>{appliedFilteredRecords.length} records</Text>
-          </View>
-          <Pressable onPress={downloadCsv} style={[styles.primaryBtn, styles.exportBtn]} accessibilityRole="button">
-            <View style={[styles.primaryBtnIcon, styles.exportBtnIcon]}>
-              <FontAwesome name="download" size={14} color="#011a6b" />
+        <View style={styles.pageShell}>
+          <View style={[styles.headerRow, isNarrow && styles.headerRowNarrow]}>
+            <View style={styles.headerLeft}>
+              <Text style={styles.title}>Reports & Analytics</Text>
+              <Text style={styles.subtitle}>
+                Generate detailed HR reports by document type, user, faculty, campus, and date range.
+              </Text>
             </View>
-            <Text style={[styles.primaryBtnText, styles.exportBtnText]}>Export CSV</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.filtersCard}>
-        <Text style={styles.filtersTitle}>Report Filters</Text>
-        <Text style={styles.filtersSubtitle}>Set filters below, then click Generate Report to refresh analytics and the detailed table.</Text>
-
-        <View style={[styles.filtersGrid, isNarrow && styles.filtersGridNarrow]}>
-          <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
-            <Text style={styles.filterLabel}>Campus</Text>
-            <select
-              value={filtersDraft.campus}
-              onChange={(e) => setFiltersDraft((p) => ({ ...p, campus: e.target.value }))}
-              style={selectStyle}
-            >
-              <option value="All Campuses">All Campuses</option>
-              {campusOptions.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </View>
-
-          <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
-            <Text style={styles.filterLabel}>Faculty</Text>
-            <select
-              value={filtersDraft.office}
-              onChange={(e) => setFiltersDraft((p) => ({ ...p, office: e.target.value }))}
-              style={selectStyle}
-            >
-              <option value="All Faculties">All Faculties</option>
-              {officeOptions.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </select>
-          </View>
-
-          <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
-            <Text style={styles.filterLabel}>User</Text>
-            <select
-              value={filtersDraft.userId}
-              onChange={(e) => setFiltersDraft((p) => ({ ...p, userId: e.target.value }))}
-              style={selectStyle}
-            >
-              <option value="All Users">All Users</option>
-              {userOptions.map((u) => (
-                <option key={u.userId} value={u.userId}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-          </View>
-
-          <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
-            <Text style={styles.filterLabel}>Date Range</Text>
-            <View style={styles.dateRow}>
-              <input
-                type="date"
-                value={filtersDraft.fromDate}
-                onChange={(e) => setFiltersDraft((p) => ({ ...p, fromDate: e.target.value }))}
-                style={dateInputStyle}
-              />
-              <Text style={styles.dateDash}>to</Text>
-              <input
-                type="date"
-                value={filtersDraft.toDate}
-                onChange={(e) => setFiltersDraft((p) => ({ ...p, toDate: e.target.value }))}
-                style={dateInputStyle}
-              />
-            </View>
-          </View>
-        </View>
-
-        <View style={[styles.filterActions, isNarrow && styles.filterActionsNarrow, isVeryNarrow && styles.filterActionsVeryNarrow]}>
-          <Pressable style={[styles.primaryBtn, isVeryNarrow && styles.primaryBtnBlock]} onPress={applyFilters}>
-            <View style={styles.primaryBtnIcon}>
-              <FontAwesome name="cogs" size={14} color="#fff" />
-            </View>
-            <Text style={styles.primaryBtnText}>Generate Report</Text>
-          </Pressable>
-
-          <Pressable style={[styles.secondaryBtn, isVeryNarrow && styles.secondaryBtnBlock]} onPress={resetFilters}>
-            <Text style={styles.secondaryBtnText}>Reset</Text>
-          </Pressable>
-        </View>
-        <View style={styles.appliedFiltersRow}>
-          <Text style={styles.appliedFiltersLabel}>Active filters:</Text>
-          {activeFilterChips.length ? (
-            <View style={styles.filterChipWrap}>
-              {activeFilterChips.map((chip) => (
-                <View key={chip} style={styles.filterChip}>
-                  <Text style={styles.filterChipText}>{chip}</Text>
+            <View style={[styles.headerActions, isNarrow && styles.headerActionsNarrow]}>
+              <View style={styles.headerPill}>
+                <Text style={styles.headerPillText}>{appliedFilteredRecords.length} records</Text>
+              </View>
+              <Pressable onPress={downloadCsv} style={[styles.primaryBtn, styles.exportBtn]} accessibilityRole="button">
+                <View style={[styles.primaryBtnIcon, styles.exportBtnIcon]}>
+                  <FontAwesome name="download" size={14} color="#011a6b" />
                 </View>
-              ))}
+                <Text style={[styles.primaryBtnText, styles.exportBtnText]}>Export CSV</Text>
+              </Pressable>
             </View>
-          ) : (
-            <Text style={styles.appliedFiltersNone}>None (showing all records)</Text>
-          )}
-        </View>
-        {!!filterActionMessage && <Text style={styles.filterActionMessage}>{filterActionMessage}</Text>}
-      </View>
+          </View>
 
-      <View style={styles.snapshotCard}>
-        <View>
-          <Text style={styles.snapshotTitle}>Report Snapshot</Text>
-          <Text style={styles.snapshotMeta}>Generated: {generatedAtLabel}</Text>
-        </View>
-        <View style={styles.snapshotCountPill}>
-          <Text style={styles.snapshotCountPillText}>{appliedFilteredRecords.length} result{appliedFilteredRecords.length === 1 ? '' : 's'}</Text>
-        </View>
-      </View>
-
-      <View style={styles.summaryChartsCard}>
-        <View style={[styles.summaryChartsHeader, isNarrow && styles.summaryChartsHeaderNarrow]}>
-          <View style={styles.summaryChartsHeaderText}>
-            <Text style={styles.summaryChartsTitle}>Visual summary</Text>
-            <Text style={styles.summaryChartsSubtitle}>
-              Document mix, pass slip arrival status, and daily volume for the filtered set.
+          <View style={styles.filtersCard}>
+            <Text style={styles.filtersTitle}>Generate Report</Text>
+            <Text style={styles.filtersSubtitle}>
+              Choose what to generate — Pass Slip, Travel Order (TO), or both — then set filters and click Generate Report.
             </Text>
-          </View>
-          <View style={styles.summaryTotalPill}>
-            <Text style={styles.summaryTotalValue}>{kpis.total}</Text>
-            <Text style={styles.summaryTotalLabel}>records</Text>
-          </View>
-        </View>
 
-        <View style={[styles.summaryChartsRow, isVeryNarrow && styles.summaryChartsRowStacked]}>
-          <View style={[styles.summaryChartCol, isVeryNarrow && styles.summaryChartColStacked]}>
-            <Text style={styles.donutBlockTitle}>By document type</Text>
-            <View style={styles.summaryColBody}>
-              <Animated.View
-                style={{
-                  opacity: graphAnim,
-                  transform: [
-                    {
-                      scale: graphAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0.92, 1],
-                      }),
-                    },
-                  ],
-                }}
-              >
-                <DonutChart
-                  size={100}
-                  segments={[
-                    { label: 'Pass Slip', value: kpis.passSlips, color: '#fece00' },
-                    { label: 'Travel Order', value: kpis.travelOrders, color: '#0284c7' },
-                  ]}
-                />
-              </Animated.View>
-              <View style={styles.donutLegendColumn}>
-                <View style={styles.legendRow}>
-                  <View style={[styles.legendSwatch, { backgroundColor: '#fece00' }]} />
-                  <Text style={styles.legendText} numberOfLines={2}>
-                    Pass slips · {kpis.passSlips}
-                  </Text>
-                </View>
-                <View style={styles.legendRow}>
-                  <View style={[styles.legendSwatch, { backgroundColor: '#0284c7' }]} />
-                  <Text style={styles.legendText} numberOfLines={2}>
-                    Travel orders · {kpis.travelOrders}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          <View
-            style={[
-              styles.summaryChartCol,
-              !isVeryNarrow && styles.summaryChartColDivider,
-              isVeryNarrow && styles.summaryChartColStacked,
-            ]}
-          >
-            <Text style={styles.donutBlockTitle}>By arrival status (pass slips)</Text>
-            <View style={styles.summaryColBody}>
-              <Animated.View
-                style={{
-                  opacity: graphAnim,
-                  transform: [
-                    {
-                      scale: graphAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0.92, 1],
-                      }),
-                    },
-                  ],
-                }}
-              >
-                <DonutChart
-                  size={100}
-                  segments={[
-                    { label: 'On time', value: kpis.onTime, color: '#16a34a' },
-                    { label: 'Overdue', value: kpis.overdue, color: '#dc3545' },
-                  ]}
-                />
-              </Animated.View>
-              <View style={styles.donutLegendColumn}>
-                <View style={styles.legendRow}>
-                  <View style={[styles.legendSwatch, { backgroundColor: '#16a34a' }]} />
-                  <Text style={styles.legendText} numberOfLines={2}>
-                    On time · {kpis.onTime}
-                  </Text>
-                </View>
-                <View style={styles.legendRow}>
-                  <View style={[styles.legendSwatch, { backgroundColor: '#dc3545' }]} />
-                  <Text style={styles.legendText} numberOfLines={2}>
-                    Overdue · {kpis.overdue}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          <View
-            style={[
-              styles.summaryChartCol,
-              !isVeryNarrow && styles.summaryChartColDivider,
-              isVeryNarrow && styles.summaryChartColStacked,
-            ]}
-          >
-            <Text style={styles.donutBlockTitle}>Records by day</Text>
-            {recordsByDay.length ? (
-              <View style={styles.trendColumnBody}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  nestedScrollEnabled
-                  style={styles.trendScroll}
-                  contentContainerStyle={styles.trendScrollContent}
-                >
-                  {recordsByDay.map(([date, count]) => {
-                    const pct = (count / maxDayCount) * 100;
-                    const animatedHeight = graphAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['0%', `${pct}%`],
-                    });
+            <View style={[styles.reportTypeSection, isNarrow && styles.reportTypeSectionNarrow]}>
+              <Text style={styles.filterLabel}>Report type</Text>
+              {!isNarrow ? (
+                <View style={styles.segmentGroup}>
+                  {DOCUMENT_TYPE_OPTIONS.map((opt) => {
+                    const active = filtersDraft.documentType === opt;
                     return (
-                      <Animated.View
-                        key={date}
-                        style={[
-                          styles.trendCol,
-                          {
-                            opacity: graphAnim,
-                            transform: [
-                              {
-                                translateY: graphAnim.interpolate({
-                                  inputRange: [0, 1],
-                                  outputRange: [8, 0],
-                                }),
-                              },
-                            ],
-                          },
-                        ]}
+                      <Pressable
+                        key={opt}
+                        style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+                        onPress={() => setFiltersDraft((p) => ({ ...p, documentType: opt }))}
                       >
-                        <Text style={styles.trendCount}>{count}</Text>
-                        <View style={styles.trendBarTrack}>
-                          <Animated.View style={[styles.trendBarFill, { height: animatedHeight }]} />
-                        </View>
-                        <Text style={styles.trendDateLabel}>{date.slice(5)}</Text>
-                      </Animated.View>
+                        <Text style={[styles.segmentBtnText, active && styles.segmentBtnTextActive]}>{opt}</Text>
+                      </Pressable>
                     );
                   })}
-                </ScrollView>
-              </View>
-            ) : (
-              <Text style={styles.trendEmptyInCol}>No dated records.</Text>
-            )}
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.analyticsRow}>
-        <View style={styles.analyticsCard}>
-          <Text style={styles.analyticsTitle}>By Campus (Top)</Text>
-          {topByCampus.length ? (
-            <View style={styles.barList}>
-              {topByCampus.map(([campus, value]) => (
-                <View key={campus} style={styles.barRow}>
-                  <Text style={styles.barLabel} numberOfLines={1}>
-                    {campus}
-                  </Text>
-                  <View style={styles.barTrack}>
-                    <View style={[styles.barFill, { width: `${(value / maxCampus) * 100}%` }]} />
-                  </View>
-                  <Text style={styles.barValue}>{value}</Text>
                 </View>
-              ))}
+              ) : (
+                <select
+                  value={filtersDraft.documentType}
+                  onChange={(e) =>
+                    setFiltersDraft((p) => ({ ...p, documentType: e.target.value as DocumentTypeFilter }))
+                  }
+                  style={selectStyle}
+                >
+                  {DOCUMENT_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+              )}
             </View>
-          ) : (
-            <Text style={styles.emptyText}>No matching data.</Text>
+
+            <View style={[styles.filtersGrid, isNarrow && styles.filtersGridNarrow]}>
+              <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
+                <Text style={styles.filterLabel}>Campus</Text>
+                <select
+                  value={filtersDraft.campus}
+                  onChange={(e) => setFiltersDraft((p) => ({ ...p, campus: e.target.value }))}
+                  style={selectStyle}
+                >
+                  <option value="All Campuses">All Campuses</option>
+                  {campusOptions.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </View>
+
+              <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
+                <Text style={styles.filterLabel}>Faculty</Text>
+                <select
+                  value={filtersDraft.office}
+                  onChange={(e) => setFiltersDraft((p) => ({ ...p, office: e.target.value }))}
+                  style={selectStyle}
+                >
+                  <option value="All Faculties">All Faculties</option>
+                  {officeOptions.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </View>
+
+              <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
+                <Text style={styles.filterLabel}>User</Text>
+                <select
+                  value={filtersDraft.userId}
+                  onChange={(e) => setFiltersDraft((p) => ({ ...p, userId: e.target.value }))}
+                  style={selectStyle}
+                >
+                  <option value="All Users">All Users</option>
+                  {userOptions.map((u) => (
+                    <option key={u.userId} value={u.userId}>
+                      {u.label}
+                    </option>
+                  ))}
+                </select>
+              </View>
+
+              <View style={[styles.filterGroup, styles.filterGroupCard, isNarrow && styles.filterGroupNarrow]}>
+                <Text style={styles.filterLabel}>Date Range</Text>
+                <View style={styles.dateRow}>
+                  <input
+                    type="date"
+                    value={filtersDraft.fromDate}
+                    onChange={(e) => setFiltersDraft((p) => ({ ...p, fromDate: e.target.value }))}
+                    style={dateInputStyle}
+                  />
+                  <Text style={styles.dateDash}>to</Text>
+                  <input
+                    type="date"
+                    value={filtersDraft.toDate}
+                    onChange={(e) => setFiltersDraft((p) => ({ ...p, toDate: e.target.value }))}
+                    style={dateInputStyle}
+                  />
+                </View>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.filterActions,
+                isNarrow && styles.filterActionsNarrow,
+                isVeryNarrow && styles.filterActionsVeryNarrow,
+              ]}
+            >
+              <Pressable style={[styles.primaryBtn, isVeryNarrow && styles.primaryBtnBlock]} onPress={applyFilters}>
+                <View style={styles.primaryBtnIcon}>
+                  <FontAwesome name="cogs" size={14} color="#fff" />
+                </View>
+                <Text style={styles.primaryBtnText}>Generate Report</Text>
+              </Pressable>
+
+              <Pressable style={[styles.secondaryBtn, isVeryNarrow && styles.secondaryBtnBlock]} onPress={resetFilters}>
+                <Text style={styles.secondaryBtnText}>Reset</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.appliedFiltersRow}>
+              <Text style={styles.appliedFiltersLabel}>Active filters:</Text>
+              {activeFilterChips.length ? (
+                <View style={styles.filterChipWrap}>
+                  {activeFilterChips.map((chip) => (
+                    <View key={chip} style={styles.filterChip}>
+                      <Text style={styles.filterChipText}>{chip}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.appliedFiltersNone}>None (showing all records)</Text>
+              )}
+            </View>
+            {!!filterActionMessage && <Text style={styles.filterActionMessage}>{filterActionMessage}</Text>}
+          </View>
+
+          <View style={styles.snapshotCard}>
+            <View>
+              <Text style={styles.snapshotTitle}>Report Snapshot</Text>
+              <Text style={styles.snapshotMeta}>Generated: {generatedAtLabel}</Text>
+            </View>
+            <View style={styles.snapshotCountPill}>
+              <Text style={styles.snapshotCountPillText}>{snapshotCountText}</Text>
+            </View>
+          </View>
+
+          {showPassSlipSection && (
+            <DocumentTypeReportPanel
+              variant="passSlip"
+              records={passSlipRecords}
+              graphAnim={graphAnim}
+              isNarrow={isNarrow}
+              isVeryNarrow={isVeryNarrow}
+            />
+          )}
+
+          {showTravelOrderSection && (
+            <DocumentTypeReportPanel
+              variant="travelOrder"
+              records={travelOrderRecords}
+              graphAnim={graphAnim}
+              isNarrow={isNarrow}
+              isVeryNarrow={isVeryNarrow}
+            />
           )}
         </View>
-
-        <View style={styles.analyticsCard}>
-          <Text style={styles.analyticsTitle}>By Faculty (Top)</Text>
-          {topByOffice.length ? (
-            <View style={styles.barList}>
-              {topByOffice.map(([office, value]) => (
-                <View key={office} style={styles.barRow}>
-                  <Text style={styles.barLabel} numberOfLines={1}>
-                    {office}
-                  </Text>
-                  <View style={styles.barTrack}>
-                    <View style={[styles.barFill, { width: `${(value / maxOffice) * 100}%` }]} />
-                  </View>
-                  <Text style={styles.barValue}>{value}</Text>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <Text style={styles.emptyText}>No matching data.</Text>
-          )}
-        </View>
-      </View>
-
-      <View style={styles.analyticsCard}>
-        <Text style={styles.analyticsTitle}>By User (Top)</Text>
-        {topByUser.length ? (
-          <View style={styles.barList}>
-            {topByUser.map((u) => (
-              <View key={u.userId} style={styles.barRow}>
-                <Text style={styles.barLabel} numberOfLines={1}>
-                  {u.label}
-                </Text>
-                <View style={styles.barTrack}>
-                  <View style={[styles.barFill, { width: `${(u.count / maxUser) * 100}%` }]} />
-                </View>
-                <Text style={styles.barValue}>{u.count}</Text>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <Text style={styles.emptyText}>No matching data.</Text>
-        )}
-      </View>
-
-      <View style={styles.tableCard}>
-        <View style={styles.tableHeader}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.tableTitle}>Detailed Report</Text>
-            <Text style={styles.tableSubtitle}>
-              Showing {appliedFilteredRecords.length} result{appliedFilteredRecords.length === 1 ? '' : 's'}
-            </Text>
-          </View>
-          <View style={styles.tableHeaderBadge}>
-            <Text style={styles.tableHeaderBadgeText}>
-              {appliedFilteredRecords.length} record{appliedFilteredRecords.length === 1 ? '' : 's'}
-            </Text>
-          </View>
-        </View>
-
-        {Platform.OS === 'web' ? (
-          <View style={styles.tableHorizontalWrapper}>{tableInnerContent}</View>
-        ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.tableHorizontal}
-            nestedScrollEnabled={true}
-          >
-            {tableInnerContent}
-          </ScrollView>
-        )}
-      </View>
-      </View>
       </View>
     );
   } catch (err) {
-    // Prevent blank screen if something crashes during render.
     // eslint-disable-next-line no-console
     console.error('HrpReportsAnalytics render error:', err);
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>Reports render error</Text>
-        <Text style={{ color: '#dc3545', marginTop: 12, fontSize: 13, fontWeight: '600' }}>
-          {String(err)}
-        </Text>
+        <Text style={{ color: '#dc3545', marginTop: 12, fontSize: 13, fontWeight: '600' }}>{String(err)}</Text>
       </View>
     );
   }
@@ -965,7 +1081,6 @@ const HrpReportsAnalytics = ({ records }: HrpReportsAnalyticsProps) => {
 
 const styles = StyleSheet.create({
   container: {
-    // Let the parent `ScrollView` control height; avoid `flex: 1` inside scroll content.
     width: '100%',
     backgroundColor: '#f8fafc',
   },
@@ -1094,6 +1209,45 @@ const styles = StyleSheet.create({
     color: 'rgba(1,26,107,0.65)',
     fontWeight: '600',
     marginBottom: 14,
+  },
+  reportTypeSection: {
+    marginBottom: 14,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(1,26,107,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.12)',
+  },
+  reportTypeSectionNarrow: {
+    width: '100%' as any,
+  },
+  segmentGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+  },
+  segmentBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.22)',
+    backgroundColor: '#fff',
+    marginRight: 8,
+    marginBottom: 8,
+    ...Platform.select({ web: { cursor: 'pointer' } }),
+  },
+  segmentBtnActive: {
+    backgroundColor: '#011a6b',
+    borderColor: '#011a6b',
+  },
+  segmentBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#011a6b',
+  },
+  segmentBtnTextActive: {
+    color: '#fff',
   },
   filtersGrid: {
     flexDirection: 'row',
@@ -1246,6 +1400,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 10 as any,
     ...Platform.select({
       web: {
         boxShadow: '0 8px 20px rgba(1,26,107,0.06)',
@@ -1270,6 +1426,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(1,26,107,0.16)',
     paddingVertical: 8,
     paddingHorizontal: 12,
+    maxWidth: '100%' as any,
   },
   snapshotCountPillText: {
     fontSize: 12,
@@ -1311,11 +1468,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 13,
   },
-  summaryChartsCard: {
+  docPanel: {
     backgroundColor: '#fff',
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: 'rgba(1,26,107,0.14)',
     padding: 16,
     marginBottom: 18,
     ...Platform.select({
@@ -1324,76 +1480,113 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  summaryChartsHeader: {
+  docPanelPassSlip: {
+    borderColor: 'rgba(254,206,0,0.45)',
+  },
+  docPanelTravelOrder: {
+    borderColor: 'rgba(2,132,199,0.35)',
+  },
+  docPanelHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 16,
     paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(1,26,107,0.10)',
+    borderLeftWidth: 4,
+    paddingLeft: 12,
   },
-  summaryChartsHeaderNarrow: {
-    flexDirection: 'column',
-    gap: 12 as any,
+  docPanelIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
-  summaryChartsHeaderText: {
+  docPanelHeaderText: {
     flex: 1,
-    paddingRight: 12,
+    minWidth: 0,
   },
-  summaryChartsTitle: {
+  docPanelTitle: {
     fontSize: 15,
     fontWeight: '900',
     color: '#011a6b',
+    marginBottom: 2,
+  },
+  docPanelSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(1,26,107,0.65)',
+  },
+  docPanelCountPill: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    minWidth: 56,
+  },
+  docPanelCountValue: {
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  kpiRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 16,
+  },
+  kpiRowStacked: {
+    flexDirection: 'column',
+  },
+  kpiCard: {
+    flex: 1,
+    minWidth: 120,
+    borderRadius: 12,
+    padding: 14,
+    marginRight: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+  },
+  kpiCardPassSlip: {
+    backgroundColor: 'rgba(254,206,0,0.10)',
+    borderColor: 'rgba(254,206,0,0.35)',
+  },
+  kpiCardTravelOrder: {
+    backgroundColor: 'rgba(2,132,199,0.08)',
+    borderColor: 'rgba(2,132,199,0.25)',
+  },
+  kpiLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: 'rgba(1,26,107,0.60)',
+    textTransform: 'uppercase',
     marginBottom: 4,
   },
-  summaryChartsSubtitle: {
-    fontSize: 12,
-    color: 'rgba(1,26,107,0.65)',
-    fontWeight: '600',
-    lineHeight: 17,
-  },
-  summaryTotalPill: {
-    borderRadius: 14,
-    backgroundColor: 'rgba(1,26,107,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(1,26,107,0.14)',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    minWidth: 88,
-  },
-  summaryTotalValue: {
+  kpiValue: {
     fontSize: 26,
     fontWeight: '900',
     color: '#011a6b',
-    letterSpacing: -0.5,
   },
-  summaryTotalLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: 'rgba(1,26,107,0.55)',
-    textTransform: 'uppercase',
-    marginTop: 2,
-  },
-  summaryChartsRow: {
+  panelChartsRow: {
     flexDirection: 'row',
     alignItems: 'stretch',
+    marginBottom: 16,
     width: '100%',
   },
-  summaryChartsRowStacked: {
+  panelChartsRowStacked: {
     flexDirection: 'column',
   },
-  summaryChartCol: {
+  panelChartBlock: {
     flex: 1,
     minWidth: 0,
     paddingHorizontal: 8,
   },
-  summaryChartColDivider: {
+  panelChartBlockDivider: {
     borderLeftWidth: 1,
     borderLeftColor: 'rgba(1,26,107,0.10)',
   },
-  summaryChartColStacked: {
+  panelChartBlockStacked: {
     width: '100%' as any,
     flex: 0 as any,
     borderLeftWidth: 0,
@@ -1482,7 +1675,6 @@ const styles = StyleSheet.create({
   },
   trendBarFill: {
     width: '100%',
-    backgroundColor: '#011a6b',
     borderBottomLeftRadius: 8,
     borderBottomRightRadius: 8,
   },
@@ -1492,47 +1684,43 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: 'rgba(1,26,107,0.55)',
   },
-  analyticsRow: {
+  panelBreakdownRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginBottom: 14,
+    marginBottom: 16,
   },
-  analyticsCard: {
-    backgroundColor: '#fff',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(1,26,107,0.14)',
-    padding: 16,
+  panelBreakdownRowStacked: {
+    flexDirection: 'column',
+  },
+  panelBreakdownCard: {
     flex: 1,
-    minWidth: 320,
-    marginRight: 12,
-    marginBottom: 12,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 10px 26px rgba(1,26,107,0.06)',
-      },
-    }),
+    minWidth: 220,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.10)',
+    padding: 12,
+    marginRight: 10,
+    marginBottom: 10,
   },
-  analyticsTitle: {
-    fontSize: 14,
+  panelBreakdownTitle: {
+    fontSize: 12,
     fontWeight: '900',
     color: '#011a6b',
     marginBottom: 10,
   },
-  barList: {
-    // Avoid `gap` for broader React Native compatibility.
-  },
+  barList: {},
   barRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 10,
   },
   barLabel: {
-    width: 160,
+    width: 120,
     color: '#011a6b',
     fontWeight: '700',
     fontSize: 12,
-    marginRight: 10,
+    marginRight: 8,
   },
   barTrack: {
     flex: 1,
@@ -1544,11 +1732,10 @@ const styles = StyleSheet.create({
   },
   barFill: {
     height: '100%',
-    backgroundColor: '#fece00',
     borderRadius: 999,
   },
   barValue: {
-    width: 38,
+    width: 32,
     textAlign: 'right',
     color: '#011a6b',
     fontWeight: '900',
@@ -1559,13 +1746,11 @@ const styles = StyleSheet.create({
     color: 'rgba(1,26,107,0.65)',
     fontWeight: '600',
   },
-  /** Untitled UI-style table card */
-  tableCard: {
+  panelTableCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#EAECF0',
-    padding: 0,
     overflow: 'hidden',
     ...Platform.select({
       web: {
@@ -1573,7 +1758,6 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  /** TableCard.Header — title left, count pill right */
   tableHeader: {
     paddingVertical: 16,
     paddingHorizontal: 20,
@@ -1625,18 +1809,16 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  /**
-   * Responsive: stretch to fill on wide screens; columns clamp to their minWidths
-   * on narrow ones and the wrapper above provides horizontal scroll.
-   * 790 = sum of column minWidths (128+92+84+82+100+96+88+120).
-   */
   tableInner: {
     flexGrow: 1,
     flexShrink: 0,
     minWidth: 790,
   },
+  tableInnerNoType: {
+    minWidth: 706,
+  },
   tableInnerNarrow: {
-    minWidth: 790,
+    minWidth: 706,
   },
   tableHeadRow: {
     flexDirection: 'row',
@@ -1660,7 +1842,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     backgroundColor: '#FFFFFF',
   },
-  /** Untitled UI alternating fill */
   tableRowAlt: {
     backgroundColor: '#F9FAFB',
   },
@@ -1670,7 +1851,6 @@ const styles = StyleSheet.create({
     color: '#101828',
     fontWeight: '500',
   },
-  /** Arrival badge — modern w/ dot. Default is neutral; variants override. */
   arrivalBadge: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -1720,9 +1900,6 @@ const styles = StyleSheet.create({
   arrivalBadgeTextOverdue: {
     color: '#B42318',
   },
-  tableHorizontalCell: {
-    paddingHorizontal: 10,
-  },
   noResults: {
     padding: 44,
     alignItems: 'center',
@@ -1740,64 +1917,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
   },
-
-  /** Flex-based columns: ratios + minWidths so the table fills wide screens and clamps on narrow */
   cEmployee: { flex: 2, minWidth: 128, flexBasis: 0 as any },
   cTracking: { flex: 1.2, minWidth: 92, flexBasis: 0 as any },
-  cType: { flex: 1, minWidth: 84, flexBasis: 0 as any },
   cDate: { flex: 1, minWidth: 82, flexBasis: 0 as any },
   cStatus: { flex: 1.2, minWidth: 100, flexBasis: 0 as any },
   cArrival: { flex: 1.4, minWidth: 96, flexBasis: 0 as any, overflow: 'hidden' as any },
   cCampus: { flex: 1.2, minWidth: 88, flexBasis: 0 as any },
   cOffice: { flex: 1.6, minWidth: 120, flexBasis: 0 as any },
-
-  /** Type badge — "BadgeWithDot modern" */
-  typeBadge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    maxWidth: '100%',
-    overflow: 'hidden',
-    marginHorizontal: 16,
-  },
-  typeBadgeSlip: {
-    backgroundColor: '#EFF8FF',
-    borderColor: '#B2DDFF',
-  },
-  typeBadgeOrder: {
-    backgroundColor: '#EEF4FF',
-    borderColor: '#C7D7FE',
-  },
-  typeBadgeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 999,
-    marginRight: 6,
-    flexShrink: 0,
-  },
-  typeBadgeDotSlip: {
-    backgroundColor: '#2E90FA',
-  },
-  typeBadgeDotOrder: {
-    backgroundColor: '#6172F3',
-  },
-  typeBadgeText: {
-    fontSize: 12,
-    fontWeight: '500',
-    flexShrink: 1,
-    minWidth: 0 as any,
-  },
-  typeBadgeTextSlip: {
-    color: '#175CD3',
-  },
-  typeBadgeTextOrder: {
-    color: '#3538CD',
-  },
 });
 
 export default HrpReportsAnalytics;
-

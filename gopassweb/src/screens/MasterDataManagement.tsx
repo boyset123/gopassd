@@ -58,8 +58,8 @@ const SECTIONS: {
   },
   {
     key: 'faculties',
-    label: 'Faculties',
-    shortLabel: 'Faculties',
+    label: 'Faculties/Office',
+    shortLabel: 'Faculties/Office',
     endpoint: 'faculties',
     icon: 'graduation-cap',
     addPlaceholder: 'e.g. Faculty of Teacher Education',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, TextInput, Pressable, Platform, ImageBackground, ActivityIndicator, Image, KeyboardAvoidingView, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -7,6 +7,13 @@ import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 const image = require('../assets/images/dorsu_bg.jpg');
 import { API_URL } from '../config/api';
+import {
+  clearSavedCredentials,
+  loadRememberLogin,
+  loadSavedCredentials,
+  saveCredentials,
+} from '../utils/savedCredentials';
+import { pickDashboardRoute, restoreSession } from '../utils/session';
 
 // Theme aligned with `gopassweb/src/screens/LoginScreen.tsx`
 const theme = {
@@ -18,32 +25,44 @@ const theme = {
   border: 'rgba(1,26,107,0.22)',
 };
 
-// Highest-priority dashboard the caller is entitled to, considering both their
-// own role and any roles they currently cover as an active Officer-In-Charge.
-// Vice President shares the President dashboard (default OIC for the President).
-const DASHBOARD_PRIORITY: Array<{ role: string; route: string }> = [
-  { role: 'President',          route: '/(tabs)/presidentDashboard' },
-  { role: 'Vice President',     route: '/(tabs)/presidentDashboard' },
-  { role: 'Faculty Dean',       route: '/(tabs)/facultyDeanDashboard' },
-  { role: 'Program Head',       route: '/(tabs)/programHeadDashboard' },
-  { role: 'Security Personnel', route: '/(tabs)/securityDashboard' },
-];
-
-function pickDashboardRoute(role: string | undefined | null, activeOicForRoles: string[] = []): string {
-  const all = new Set<string>([role || '', ...activeOicForRoles].filter(Boolean) as string[]);
-  for (const entry of DASHBOARD_PRIORITY) {
-    if (all.has(entry.role)) return entry.route;
-  }
-  return '/(tabs)/slips';
-}
-
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
   const router = useRouter();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const session = await restoreSession();
+        if (cancelled) return;
+        if (session.restored && session.route) {
+          router.replace(session.route as any);
+          return;
+        }
+        setIsRestoringSession(false);
+
+        const remember = await loadRememberLogin();
+        if (cancelled || !remember) return;
+        setRememberMe(true);
+        const saved = await loadSavedCredentials();
+        if (cancelled || !saved) return;
+        setEmail(saved.email);
+        setPassword(saved.password);
+      } catch (err) {
+        if (__DEV__) console.warn('Failed to bootstrap login screen', err);
+        if (!cancelled) setIsRestoringSession(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -60,6 +79,12 @@ export default function LoginScreen() {
       const { token, user } = response.data;
       await AsyncStorage.setItem('userToken', token);
       await AsyncStorage.setItem('userData', JSON.stringify(user)); // Store user data (includes activeOicForRoles)
+
+      if (rememberMe) {
+        await saveCredentials(email.trim(), password);
+      } else {
+        await clearSavedCredentials();
+      }
 
       const activeOicForRoles: string[] = Array.isArray(user?.activeOicForRoles) ? user.activeOicForRoles : [];
       router.replace(pickDashboardRoute(user?.role, activeOicForRoles) as any);
@@ -97,11 +122,13 @@ export default function LoginScreen() {
         <View style={styles.gridSheen} />
       </View>
 
-      {isLoading && (
+      {(isRestoringSession || isLoading) && (
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingPill}>
             <ActivityIndicator size="small" color={theme.white} />
-            <Text style={styles.loadingText}>Signing in…</Text>
+            <Text style={styles.loadingText}>
+              {isRestoringSession ? 'Restoring session…' : 'Signing in…'}
+            </Text>
           </View>
         </View>
       )}
@@ -157,7 +184,9 @@ export default function LoginScreen() {
                     onChangeText={setEmail}
                     autoCapitalize="none"
                     keyboardType="email-address"
-                    editable={!isLoading}
+                    autoComplete="email"
+                    textContentType="emailAddress"
+                    editable={!isLoading && !isRestoringSession}
                     selectionColor={theme.accent}
                   />
                 </View>
@@ -172,15 +201,17 @@ export default function LoginScreen() {
                     placeholder="Your password"
                     placeholderTextColor="rgba(255,255,255,0.55)"
                     secureTextEntry={!showPassword}
+                    autoComplete="password"
+                    textContentType="password"
                     value={password}
                     onChangeText={setPassword}
-                    editable={!isLoading}
+                    editable={!isLoading && !isRestoringSession}
                     selectionColor={theme.accent}
                   />
                   <Pressable
                     onPress={() => setShowPassword(!showPassword)}
                     style={({ pressed }) => [styles.eyeButton, pressed && styles.eyeButtonPressed]}
-                    disabled={isLoading}
+                    disabled={isLoading || isRestoringSession}
                     accessibilityRole="button"
                     accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
                   >
@@ -190,9 +221,23 @@ export default function LoginScreen() {
               </View>
 
               <Pressable
+                style={({ pressed }) => [styles.rememberRow, pressed && styles.rememberRowPressed]}
+                onPress={() => !isLoading && !isRestoringSession && setRememberMe((prev) => !prev)}
+                disabled={isLoading || isRestoringSession}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: rememberMe }}
+                accessibilityLabel="Remember me"
+              >
+                <View style={[styles.rememberCheckbox, rememberMe && styles.rememberCheckboxChecked]}>
+                  {rememberMe ? <Text style={styles.rememberCheckmark}>✓</Text> : null}
+                </View>
+                <Text style={styles.rememberLabel}>Remember me</Text>
+              </Pressable>
+
+              <Pressable
                 style={({ pressed }) => [styles.primaryButton, (pressed || isLoading) && styles.primaryButtonPressed]}
                 onPress={handleLogin}
-                disabled={isLoading}
+                disabled={isLoading || isRestoringSession}
               >
                 <LinearGradient
                   colors={[theme.accent, '#ffd94a']}
@@ -207,7 +252,7 @@ export default function LoginScreen() {
               <Pressable
                 style={({ pressed }) => [styles.secondaryLink, pressed && styles.secondaryLinkPressed]}
                 onPress={() => router.push('/auth/forgot-password')}
-                disabled={isLoading}
+                disabled={isLoading || isRestoringSession}
               >
                 <Text style={styles.secondaryLinkText}>Forgot Password?</Text>
               </Pressable>
@@ -215,7 +260,7 @@ export default function LoginScreen() {
               <Pressable
                 style={({ pressed }) => [styles.secondaryLink, pressed && styles.secondaryLinkPressed]}
                 onPress={() => router.push('/auth/register')}
-                disabled={isLoading}
+                disabled={isLoading || isRestoringSession}
               >
                 <Text style={styles.secondaryLinkText}>Create an account</Text>
               </Pressable>
@@ -482,6 +527,42 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: theme.white,
     letterSpacing: 0.6,
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 2,
+    paddingVertical: 8,
+    gap: 10,
+  },
+  rememberRowPressed: {
+    opacity: 0.85,
+  },
+  rememberCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.45)',
+    backgroundColor: 'rgba(1, 13, 64, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rememberCheckboxChecked: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  rememberCheckmark: {
+    color: theme.primaryDark,
+    fontSize: 14,
+    fontWeight: '900',
+    lineHeight: 16,
+  },
+  rememberLabel: {
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: 14,
+    fontWeight: '700',
   },
   primaryButton: {
     width: '100%',

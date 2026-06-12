@@ -213,7 +213,7 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign(
       { userId: user._id, role: user.role },
       process.env.JWT_SECRET || 'your_jwt_secret_key_here',
-      { expiresIn: '1d' }
+      { expiresIn: '30d' }
     );
 
     const activeOicForRoles = await getActiveOicForRoles(user._id);

@@ -13,6 +13,7 @@ import { useSocket } from '../../config/SocketContext';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { formatPassSlipBalance, getPassSlipBalanceSeconds } from '../../utils/formatPassSlipBalance';
 import { formatRoleLabel } from '../../utils/roleLabels';
+import { clearSavedCredentials } from '../../utils/savedCredentials';
 
 function resolveProfilePictureUri(pathOrUrl: string, apiUrl: string): string {
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
@@ -284,6 +285,7 @@ export default function ProfileScreen() {
     try {
       const token = await AsyncStorage.getItem('userToken');
       await axios.put(`${API_URL}/users/me/password`, { currentPassword, newPassword }, { headers: { 'x-auth-token': token } });
+      await clearSavedCredentials();
       setChangePasswordModalVisible(false);
       setCurrentPassword('');
       setNewPassword('');
@@ -298,7 +300,7 @@ export default function ProfileScreen() {
   };
 
   const performLogout = async () => {
-    await AsyncStorage.removeItem('userToken');
+    await AsyncStorage.multiRemove(['userToken', 'userData']);
     router.replace('/');
   };
 

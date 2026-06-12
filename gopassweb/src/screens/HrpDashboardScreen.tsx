@@ -458,7 +458,9 @@ const HrpDashboardScreen = () => {
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [rejectComment, setRejectComment] = useState('');
   const [isRejecting, setIsRejecting] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [returnFeedback, setReturnFeedback] = useState<{ variant: 'success' | 'error'; message: string } | null>(null);
+  const [recordFeedback, setRecordFeedback] = useState<{ variant: 'success' | 'error'; message: string } | null>(null);
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
   const [isCtcModalVisible, setIsCtcModalVisible] = useState(false);
   const [selectedCtcOrder, setSelectedCtcOrder] = useState<ApprovedTravelOrder | null>(null);
@@ -712,7 +714,10 @@ const HrpDashboardScreen = () => {
 
   const handleUpdateStatus = async (type: ItemType, id: string, status: 'Approved' | 'Completed' | 'Rejected' | 'Recommended' | 'For President Approval', rejectionReason?: string) => {
     const isReturn = status === 'Rejected';
+    const isRecordPassSlip = type === 'slip' && status === 'Approved';
+    if (isRecordPassSlip && isRecording) return;
     if (isReturn) setIsRejecting(true);
+    if (isRecordPassSlip) setIsRecording(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
       const headers = { 'x-auth-token': token };
@@ -733,12 +738,20 @@ const HrpDashboardScreen = () => {
 
       await axios.put(url, data, { headers });
 
-      if (status === 'Approved') {
-        setTimeout(() => {
-          setIsModalVisible(false);
-          setHrSignatureForPresident(null);
-          fetchData({ silent: true });
-        }, 2000);
+      if (isRecordPassSlip) {
+        setRecordFeedback({ variant: 'success', message: 'Pass slip has been recorded successfully.' });
+        setHrSignatureForPresident(null);
+        setIsModalVisible(false);
+        setSelectedItem(null);
+        setSelectedItemType(null);
+        fetchData({ silent: true });
+      } else if (status === 'Approved') {
+        setIsModalVisible(false);
+        setHrSignatureForPresident(null);
+        setSelectedItem(null);
+        setSelectedItemType(null);
+        fetchData({ silent: true });
+        Alert.alert('Success', 'Request has been approved.');
       } else if (isReturn) {
         setReturnFeedback({ variant: 'success', message: 'Request has been returned to the employee.' });
         setHrSignatureForPresident(null);
@@ -762,13 +775,18 @@ const HrpDashboardScreen = () => {
           variant: 'error',
           message: getApiErrorMessage(err, 'Failed to return the request.'),
         });
+      } else if (isRecordPassSlip) {
+        const apiMessage = getApiErrorMessage(err, 'Failed to record the pass slip.');
+        console.error('Pass slip record failed:', apiMessage, err);
+        setRecordFeedback({ variant: 'error', message: apiMessage });
       } else {
         const apiMessage = getApiErrorMessage(err, 'Failed to update the request status.');
         console.error('Status update failed:', apiMessage, err);
-        Alert.alert('Could not record', apiMessage);
+        Alert.alert('Error', apiMessage);
       }
     } finally {
       if (isReturn) setIsRejecting(false);
+      if (isRecordPassSlip) setIsRecording(false);
     }
   };
 
@@ -1796,12 +1814,15 @@ const HrpDashboardScreen = () => {
                       {(() => {
                         const isTravelOrderRecommended = selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended';
                         const statusToSend = isTravelOrderRecommended ? 'For President Approval' : 'Approved';
+                        const isRecordingPassSlip = isRecording && selectedItemType === 'slip';
                         const primaryLabel =
-                          selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended'
-                            ? 'Send to President'
-                            : selectedItemType === 'slip'
-                              ? 'Record'
-                              : 'Approve';
+                          isRecordingPassSlip
+                            ? 'Recording…'
+                            : selectedItemType === 'order' && (selectedItem as TravelOrder).status === 'Recommended'
+                              ? 'Send to President'
+                              : selectedItemType === 'slip'
+                                ? 'Record'
+                                : 'Approve';
                         const onPrimaryPress = () => {
                           handleUpdateStatus(selectedItemType!, selectedItem._id, statusToSend);
                         };
@@ -1809,30 +1830,41 @@ const HrpDashboardScreen = () => {
                           setRejectComment('');
                           setRejectModalVisible(true);
                         };
-                        const webClickProps = (handler: () => void) =>
+                        const modalActionProps = (handler: () => void, disabled: boolean) =>
                           Platform.OS === 'web'
                             ? ({
-                                onClick: (e: { stopPropagation?: () => void }) => {
+                                onClick: (e: { stopPropagation?: () => void; preventDefault?: () => void }) => {
                                   e.stopPropagation?.();
-                                  handler();
+                                  e.preventDefault?.();
+                                  if (!disabled) handler();
                                 },
                               } as object)
-                            : {};
+                            : { onPress: handler, disabled };
                         return (
                           <>
                             <Pressable
-                              style={[styles.button, styles.approveButton, styles.modalButton]}
-                              onPress={onPrimaryPress}
+                              style={[
+                                styles.button,
+                                styles.approveButton,
+                                styles.modalButton,
+                                isRecordingPassSlip && styles.modalButtonDisabled,
+                              ]}
                               accessibilityRole="button"
-                              {...webClickProps(onPrimaryPress)}
+                              disabled={Platform.OS !== 'web' && isRecordingPassSlip}
+                              {...modalActionProps(onPrimaryPress, isRecordingPassSlip)}
                             >
                               <Text style={styles.buttonText}>{primaryLabel}</Text>
                             </Pressable>
                             <Pressable
-                              style={[styles.button, styles.rejectButton, styles.modalButton]}
-                              onPress={onReturnPress}
+                              style={[
+                                styles.button,
+                                styles.rejectButton,
+                                styles.modalButton,
+                                isRecordingPassSlip && styles.modalButtonDisabled,
+                              ]}
                               accessibilityRole="button"
-                              {...webClickProps(onReturnPress)}
+                              disabled={Platform.OS !== 'web' && isRecordingPassSlip}
+                              {...modalActionProps(onReturnPress, isRecordingPassSlip)}
                             >
                               <Text style={styles.buttonText}>Return</Text>
                             </Pressable>
@@ -2031,6 +2063,31 @@ const HrpDashboardScreen = () => {
                 <Pressable
                   style={[styles.rejectModalButton, styles.markCompleteModalPrimaryButton]}
                   onPress={() => setReturnFeedback(null)}
+                >
+                  <Text style={styles.markCompleteModalPrimaryButtonText}>OK</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Record result (success / error) — Modal works on web; Alert.alert does not reliably show there */}
+        <Modal
+          animationType="fade"
+          transparent
+          visible={!!recordFeedback}
+          onRequestClose={() => setRecordFeedback(null)}
+        >
+          <View style={styles.rejectModalOverlay}>
+            <View style={styles.rejectModalContent}>
+              <Text style={styles.rejectModalTitle}>
+                {recordFeedback?.variant === 'success' ? 'Recorded' : 'Could not record'}
+              </Text>
+              <Text style={styles.rejectModalSubtitle}>{recordFeedback?.message}</Text>
+              <View style={styles.rejectModalButtons}>
+                <Pressable
+                  style={[styles.rejectModalButton, styles.markCompleteModalPrimaryButton]}
+                  onPress={() => setRecordFeedback(null)}
                 >
                   <Text style={styles.markCompleteModalPrimaryButtonText}>OK</Text>
                 </Pressable>

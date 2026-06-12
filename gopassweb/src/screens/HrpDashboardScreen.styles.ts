@@ -1981,6 +1981,9 @@ export const styles = StyleSheet.create({
       alignItems: 'center',
       marginBottom: 0, // Override default margin
     },
+    modalButtonDisabled: {
+      opacity: 0.6,
+    },
     modalButtonContainer: {
       flexDirection: 'row',
       justifyContent: 'space-around',

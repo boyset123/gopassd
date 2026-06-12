@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { API_URL } from '../config/api';
 import FormSelect from '../components/FormSelect';
+import { formatRoleLabel, rolesToSelectOptions } from '../utils/roleLabels';
 
 const FACULTY_ROLES = ['Faculty Staff', 'Program Head', 'Faculty Dean'];
 
@@ -291,7 +292,7 @@ const ProfileScreen = () => {
                 <View style={styles.chipRow}>
                   <View style={styles.chip}>
                     <Text style={styles.chipKey}>Role</Text>
-                    <Text style={styles.chipValue}>{userRole}</Text>
+                    <Text style={styles.chipValue}>{formatRoleLabel(userRole)}</Text>
                   </View>
                   <View style={styles.chip}>
                     <Text style={styles.chipKey}>Campus</Text>
@@ -312,7 +313,7 @@ const ProfileScreen = () => {
                   <View style={styles.pendingBannerText}>
                     <Text style={styles.pendingBannerTitle}>Awaiting HR review</Text>
                     <Text style={styles.pendingBannerBody}>
-                      Requested: {pendingRoleRequest.requestedRole}
+                      Requested: {formatRoleLabel(pendingRoleRequest.requestedRole)}
                       {pendingRoleRequest.requestedExtension ? ` @ ${pendingRoleRequest.requestedExtension}` : ''}
                       {pendingRoleRequest.requestedFaculty ? ` (${pendingRoleRequest.requestedFaculty})` : ''}
                     </Text>
@@ -322,7 +323,7 @@ const ProfileScreen = () => {
                 <View style={styles.requestSection}>
                   <Text style={styles.assignmentLabel}>Requested assignment</Text>
                   <View style={styles.requestFields}>
-                    <FormSelect label="Role" value={requestedRole} options={roles} onChange={setRequestedRole} />
+                    <FormSelect label="Role" value={requestedRole} options={rolesToSelectOptions(roles)} onChange={setRequestedRole} />
                     <FormSelect label="Campus / Extension" value={requestedExtension} options={extensions} onChange={setRequestedExtension} />
                     {FACULTY_ROLES.includes(requestedRole) && (
                       <FormSelect label="Faculty / Department" value={requestedFaculty} options={faculties} onChange={setRequestedFaculty} />

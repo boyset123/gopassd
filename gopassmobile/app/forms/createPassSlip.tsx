@@ -21,6 +21,7 @@ import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { formatPassSlipBalance, getPassSlipBalanceSeconds } from '../../utils/formatPassSlipBalance';
 import { getBillableDurationSeconds } from '../../utils/passSlipDuration';
 import PassSlipForm, { approvedByRoleLabel, requestedByRoleLabel } from '../../components/PassSlipForm';
+import { formatRoleLabel } from '../../utils/roleLabels';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
@@ -1031,7 +1032,7 @@ const CreatePassSlipScreen = () => {
                   <Text style={styles.signatureValue}>{user?.name}</Text>
                 </View>
               </View>
-              <Text style={styles.signatureUnderline}>{user?.role === 'Program Head' ? 'Program Head' : user?.role === 'Faculty Dean' ? 'Faculty Dean' : 'Faculty Staff'}</Text>
+              <Text style={styles.signatureUnderline}>{user?.role === 'Program Head' ? 'Program Head' : user?.role === 'Faculty Dean' ? 'Faculty Dean' : formatRoleLabel(user?.role) || 'Faculty'}</Text>
             </View>
             <View style={styles.signatureBox}>
               <Text style={styles.signatureLabel}>Approved by:</Text>

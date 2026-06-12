@@ -8,6 +8,7 @@ import {
   Platform,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import { formatRoleLabel } from '../utils/roleLabels';
 
 type SignatureType = 'draw' | 'upload';
 
@@ -69,7 +70,8 @@ export const requestedByRoleLabel = (viewerRole?: string, employeeRole?: string)
   if (employeeRole === 'Faculty Dean') return 'Faculty Dean';
   if (viewerRole === 'Program Head') return 'Program Head';
   if (viewerRole === 'Faculty Dean') return 'Faculty Dean';
-  return 'Faculty Staff';
+  const role = employeeRole || viewerRole;
+  return formatRoleLabel(role) || 'Faculty';
 };
 
 export const approvedByRoleLabel = (viewerRole?: string, employeeRole?: string) => {

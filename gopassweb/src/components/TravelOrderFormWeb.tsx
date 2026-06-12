@@ -14,6 +14,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_URL } from '../config/api';
+import { formatRoleLabel } from '../utils/roleLabels';
 import SupportingAttachmentFileCard from './SupportingAttachmentFileCard';
 
 type SignatureType = 'draw' | 'upload';
@@ -181,7 +182,7 @@ function supportingWebFileKindLabel(meta: { contentType?: string; name?: string 
 }
 
 const travelOrderPositionLabel = (order: TravelOrderWebOrder) =>
-  normalizeInline(order.employeeRole) || normalizeInline(order.employee?.role) || 'N/A';
+  formatRoleLabel(normalizeInline(order.employeeRole) || normalizeInline(order.employee?.role)) || 'N/A';
 
 const formatNamesList = (names: string[]): string => {
   const filtered = names.map(normalizeInline).filter(Boolean);

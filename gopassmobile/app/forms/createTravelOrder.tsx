@@ -16,6 +16,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { API_URL } from '../../config/api';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { Picker } from '@react-native-picker/picker';
+import { formatRoleLabel } from '../../utils/roleLabels';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
@@ -1047,7 +1048,7 @@ const CreateTravelOrderScreen = () => {
                   </View>
                   <View style={styles.userItemTextWrap}>
                     <Text style={styles.userName}>{item.name}</Text>
-                    <Text style={styles.userDetails}>{item.role}{item.faculty ? ` · ${item.faculty}` : ''}</Text>
+                    <Text style={styles.userDetails}>{formatRoleLabel(item.role)}{item.faculty ? ` · ${item.faculty}` : ''}</Text>
                   </View>
                   <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
                 </Pressable>
@@ -1066,7 +1067,7 @@ const CreateTravelOrderScreen = () => {
               </View>
               <View>
                 <Text style={styles.recommenderModalTitle}>Choose OIC</Text>
-                <Text style={styles.recommenderModalSubtitle}>Faculty Staff from your faculty</Text>
+                <Text style={styles.recommenderModalSubtitle}>Faculty from your faculty</Text>
               </View>
             </View>
             <Pressable onPress={() => setIsOicModalVisible(false)} style={styles.recommenderModalCloseBtn} hitSlop={12}>
@@ -1103,7 +1104,7 @@ const CreateTravelOrderScreen = () => {
                   <View style={styles.userItemTextWrap}>
                     <Text style={styles.userName}>{item.name}</Text>
                     <Text style={styles.userDetails}>
-                      {item.role}
+                      {formatRoleLabel(item.role)}
                       {item.faculty ? ` · ${item.faculty}` : ''}
                     </Text>
                   </View>
@@ -1332,7 +1333,7 @@ const CreateTravelOrderScreen = () => {
             <View style={[styles.row, styles.sectionGap, styles.fieldContainerTight]}>
                 <View style={[styles.fieldContainer, styles.fieldContainerTight, styles.flexInput]}>
                     <Text style={styles.label}>Position:</Text>
-                    <TextInput style={[styles.input, styles.inputDisabled]} value={user?.role} editable={false} />
+                    <TextInput style={[styles.input, styles.inputDisabled]} value={formatRoleLabel(user?.role)} editable={false} />
                 </View>
                 <View style={[styles.fieldContainer, styles.fieldContainerTight, styles.flexInput]}>
                     <Text style={styles.label}>Salary (optional):</Text>
@@ -1928,7 +1929,7 @@ const CreateTravelOrderScreen = () => {
                 ))}
                 <View style={styles.formRow}>
                   <Text style={styles.formLabel}>POSITION:</Text>
-                  <Text style={styles.formValue}>{user?.role}</Text>
+                  <Text style={styles.formValue}>{formatRoleLabel(user?.role)}</Text>
                 </View>
                 <View style={styles.formRow}>
                   <Text style={styles.formLabel}>ADDRESS:</Text>

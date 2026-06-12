@@ -2,6 +2,8 @@
  * HTML for expo-print PDF — matches mobile TravelOrderForm / web travel order layout.
  */
 
+import { formatRoleLabel } from './roleLabels';
+
 export interface TravelOrderPrintItem {
   _id: string;
   travelOrderNo?: string;
@@ -56,7 +58,7 @@ const optionalNoteSpanHtml = (note: string | undefined) => {
 };
 
 const travelOrderPositionLabel = (item: TravelOrderPrintItem) =>
-  normalizeInline(item.employeeRole) || normalizeInline(item.employee?.role) || 'N/A';
+  formatRoleLabel(normalizeInline(item.employeeRole) || normalizeInline(item.employee?.role)) || 'N/A';
 
 const formatNamesList = (names: string[]): string => {
   const filtered = names.map(normalizeInline).filter(Boolean);

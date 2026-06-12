@@ -17,6 +17,7 @@ import axios, { isAxiosError } from 'axios';
 import { Picker } from '@react-native-picker/picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL } from '../../config/api';
+import { formatRoleLabel } from '../../utils/roleLabels';
 
 const FACULTY_ROLES = ['Faculty Staff', 'Program Head', 'Faculty Dean'];
 const EMAIL_HINT = 'Use an email address you can access for account notifications.';
@@ -201,7 +202,7 @@ export default function RegisterScreen() {
                     dropdownIconColor={PICKER_TEXT_COLOR}
                   >
                     {roles.map((r) => (
-                      <Picker.Item key={r} label={r} value={r} color={PICKER_TEXT_COLOR} />
+                      <Picker.Item key={r} label={formatRoleLabel(r)} value={r} color={PICKER_TEXT_COLOR} />
                     ))}
                   </Picker>
                 </View>

@@ -18,6 +18,7 @@ import { useServerEvents } from '../hooks/useServerEvents';
 import { getTravelOrderPrintHtml } from '../utils/travelOrderPrintHtml';
 import { getPassSlipPrintHtml } from '../utils/passSlipPrintHtml';
 import { stripArrivalStatusDisplaySuffix } from '../utils/arrivalStatusDisplay';
+import { formatRoleLabel } from '../utils/roleLabels';
 import TravelOrderFormWeb from '../components/TravelOrderFormWeb';
 import MonitoringApprovedTravelOrdersCard, { ApprovedTravelOrder } from '../components/MonitoringApprovedTravelOrdersCard';
 import MonitoringActivePassSlipsCard from '../components/MonitoringActivePassSlipsCard';
@@ -1695,7 +1696,7 @@ const HrpDashboardScreen = () => {
                               {selectedItem.signature && <Image source={{ uri: selectedItem.signature }} style={styles.docSignatureImage} />}
                               <Text style={styles.docSignatureName}>{selectedItem.employee?.name}</Text>
                             </View>
-                            <Text style={styles.docSignatureUnderline}>{(selectedItem as PassSlip).employee?.role === 'Faculty Dean' ? 'Faculty Dean' : 'Faculty Staff'}</Text>
+                            <Text style={styles.docSignatureUnderline}>{(selectedItem as PassSlip).employee?.role === 'Faculty Dean' ? 'Faculty Dean' : (selectedItem as PassSlip).employee?.role === 'Program Head' ? 'Program Head' : formatRoleLabel((selectedItem as PassSlip).employee?.role) || 'Faculty'}</Text>
                           </View>
                           <View style={styles.docSignatureBox}>
                             <Text style={styles.docField}>Approved by:</Text>

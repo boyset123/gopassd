@@ -15,6 +15,7 @@ import axios, { isAxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../config/api';
 import FormSelect from './FormSelect';
+import { formatRoleLabel, rolesToSelectOptions } from '../utils/roleLabels';
 
 const CONTENT_MAX_WIDTH = 720;
 
@@ -67,7 +68,7 @@ function formatDate(value: string) {
 }
 
 function formatAssignment(role: string, campus: string, faculty?: string) {
-  let text = `${role} · ${campus}`;
+  let text = `${formatRoleLabel(role)} · ${campus}`;
   if (faculty) text += ` · ${faculty}`;
   return text;
 }
@@ -311,7 +312,7 @@ const HrpUserApprovals: React.FC = () => {
               <View style={styles.detailGrid}>
                 <DetailItem label="Employee ID" value={user.employeeId || '—'} />
                 <DetailItem label="Phone" value={user.phone || '—'} />
-                <DetailItem label="Role" value={user.role} />
+                <DetailItem label="Role" value={formatRoleLabel(user.role)} />
                 <DetailItem label="Campus" value={user.campus} />
                 {user.faculty ? <DetailItem label="Faculty" value={user.faculty} /> : null}
               </View>
@@ -376,7 +377,7 @@ const HrpUserApprovals: React.FC = () => {
             </View>
             <Text style={styles.modalSubtitle}>{approveUser?.name}</Text>
             <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
-              <FormSelect label="Role" value={editRole} options={roles} onChange={setEditRole} />
+              <FormSelect label="Role" value={editRole} options={rolesToSelectOptions(roles)} onChange={setEditRole} />
               <FormSelect label="Campus / Extension" value={editCampus} options={extensions} onChange={setEditCampus} />
               {FACULTY_ROLES.includes(editRole) && (
                 <FormSelect label="Faculty" value={editFaculty} options={faculties} onChange={setEditFaculty} />

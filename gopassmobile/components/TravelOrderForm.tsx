@@ -21,6 +21,7 @@ import { WebView } from 'react-native-webview';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { API_URL } from '../config/api';
+import { formatRoleLabel } from '../utils/roleLabels';
 import SupportingAttachmentFileCard from './SupportingAttachmentFileCard';
 
 type SignatureType = 'draw' | 'upload';
@@ -219,7 +220,7 @@ const displayOptionalNote = (value: string | undefined | null) =>
   normalizeInline(value) || BLANK_OPTIONAL_NOTE_LINE;
 
 const travelOrderPositionLabel = (order: TravelOrder) =>
-  normalizeInline(order.employeeRole) || normalizeInline(order.employee?.role) || 'N/A';
+  formatRoleLabel(normalizeInline(order.employeeRole) || normalizeInline(order.employee?.role)) || 'N/A';
 
 const formatNamesList = (names: string[]): string => {
   const filtered = names.map(normalizeInline).filter(Boolean);

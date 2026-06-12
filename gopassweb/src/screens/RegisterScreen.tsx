@@ -20,6 +20,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 import { API_URL } from '../config/api';
 import FormSelect from '../components/FormSelect';
+import { rolesToSelectOptions } from '../utils/roleLabels';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const image = require('../../assets/dorsubg3.jpg');
@@ -276,7 +277,7 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
                 onChange={setSelectedCampus}
                 style={styles.selectField}
               />
-              <FormSelect label="Role *" value={selectedRole} options={roles} onChange={setSelectedRole} style={styles.selectField} />
+              <FormSelect label="Role *" value={selectedRole} options={rolesToSelectOptions(roles)} onChange={setSelectedRole} style={styles.selectField} />
               {showFacultyInput && (
                 <FormSelect label="Faculty / Department *" value={faculty} options={faculties} onChange={setFaculty} style={styles.selectField} />
               )}

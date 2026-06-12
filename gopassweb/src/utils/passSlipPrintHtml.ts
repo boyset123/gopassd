@@ -1,4 +1,5 @@
 import { DORSU_LOGO_DATA_URI } from './dorsuLogoDataUri';
+import { formatRoleLabel } from './roleLabels';
 
 export interface PassSlipPrintItem {
   _id: string;
@@ -45,7 +46,7 @@ const formatDate = (dateString: string | undefined) => {
 const requestedRoleLabel = (role: string | undefined) => {
   if (role === 'Program Head') return 'Program Head';
   if (role === 'Faculty Dean') return 'Faculty Dean';
-  return 'Faculty Staff';
+  return formatRoleLabel(role) || 'Faculty';
 };
 
 const approvedRoleLabel = (role: string | undefined) => {

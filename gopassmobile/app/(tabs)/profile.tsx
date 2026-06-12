@@ -12,6 +12,7 @@ import { API_URL } from '../../config/api';
 import { useSocket } from '../../config/SocketContext';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { formatPassSlipBalance, getPassSlipBalanceSeconds } from '../../utils/formatPassSlipBalance';
+import { formatRoleLabel } from '../../utils/roleLabels';
 
 function resolveProfilePictureUri(pathOrUrl: string, apiUrl: string): string {
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
@@ -632,7 +633,7 @@ export default function ProfileScreen() {
                     <View style={styles.roleChangePendingText}>
                       <Text style={styles.roleChangePendingTitle}>Awaiting HR review</Text>
                       <Text style={styles.roleChangePendingBody}>
-                        Requested: {pendingRoleRequest.requestedRole}
+                        Requested: {formatRoleLabel(pendingRoleRequest.requestedRole)}
                         {pendingRoleRequest.requestedExtension ? ` @ ${pendingRoleRequest.requestedExtension}` : ''}
                         {pendingRoleRequest.requestedFaculty ? ` (${pendingRoleRequest.requestedFaculty})` : ''}
                       </Text>
@@ -655,7 +656,7 @@ export default function ProfileScreen() {
                         dropdownIconColor={theme.text}
                       >
                         {roleChangeRoles.map((r) => (
-                          <Picker.Item key={r} label={r} value={r} color={theme.text} />
+                          <Picker.Item key={r} label={formatRoleLabel(r)} value={r} color={theme.text} />
                         ))}
                       </Picker>
                     </View>
@@ -830,7 +831,7 @@ export default function ProfileScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.oicCandidateName}>{item.name}</Text>
                       <Text style={styles.oicCandidateRole}>
-                        {item.role}
+                        {formatRoleLabel(item.role)}
                         {item.faculty ? ` — ${item.faculty}` : ''}
                       </Text>
                     </View>
@@ -888,7 +889,7 @@ export default function ProfileScreen() {
               </Text>
               {user?.role ? (
                 <View style={styles.roleBadge}>
-                  <Text style={styles.roleBadgeText}>{user.role}</Text>
+                  <Text style={styles.roleBadgeText}>{formatRoleLabel(user.role)}</Text>
                 </View>
               ) : null}
               <Text style={styles.profileMetaHint}>Tap photo to update</Text>
@@ -1007,7 +1008,7 @@ export default function ProfileScreen() {
                     ? 'Pick a Vice President to act as your default OIC.'
                     : user?.role === 'Faculty Dean'
                       ? 'Pick a Program Head from your faculty.'
-                      : 'Pick a Faculty Staff from your faculty.'}
+                      : 'Pick a Faculty from your faculty.'}
                 </Text>
                 <Pressable style={styles.oicPickerButton} onPress={() => void openOicPicker()}>
                   <View style={{ flex: 1 }}>
@@ -1016,7 +1017,7 @@ export default function ProfileScreen() {
                     </Text>
                     {user?.oicPrimary && (
                       <Text style={styles.oicPickerRole}>
-                        {user.oicPrimary.role}
+                        {formatRoleLabel(user.oicPrimary.role)}
                         {user.oicPrimary.faculty ? ` — ${user.oicPrimary.faculty}` : ''}
                       </Text>
                     )}

@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../config/api';
 import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 import FormSelect from '../components/FormSelect';
+import { formatRoleLabel, rolesToSelectOptions } from '../utils/roleLabels';
 
 const theme = {
   primary: '#011a6b',
@@ -88,7 +89,7 @@ function RolePill({ role }: { role: string }) {
   return (
     <View style={[styles.rolePill, isAdmin && styles.rolePillAdmin]}>
       <Text style={[styles.rolePillText, isAdmin && styles.rolePillTextAdmin]} numberOfLines={1}>
-        {role}
+        {formatRoleLabel(role)}
       </Text>
     </View>
   );
@@ -387,7 +388,7 @@ const UserManagement = () => {
           <FormSelect
             label="Role"
             value={selectedRole}
-            options={roles}
+            options={rolesToSelectOptions(roles)}
             onChange={setSelectedRole}
             style={styles.filterSelect}
           />
@@ -588,7 +589,7 @@ const UserManagement = () => {
                   <FormSelect
                     label="Role"
                     value={editingUser.role}
-                    options={roles.slice(1)}
+                    options={rolesToSelectOptions(roles.slice(1))}
                     onChange={(role) => setEditingUser({ ...editingUser, role })}
                   />
                   {FACULTY_ROLES.includes(editingUser.role) && (

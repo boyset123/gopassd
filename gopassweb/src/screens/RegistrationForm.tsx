@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL, apiClient, getNetworkErrorMessage } from '../config/api';
 import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 import FormSelect from '../components/FormSelect';
+import { rolesToSelectOptions } from '../utils/roleLabels';
 
 const theme = {
   primary: '#011a6b',
@@ -324,7 +325,7 @@ const RegistrationForm = () => {
 
       <View style={[styles.roleRow, isCompact && styles.roleRowCompact]}>
         <View style={styles.roleContainer}>
-          <FormSelect label="Role" value={selectedRole} options={roles} onChange={setSelectedRole} />
+          <FormSelect label="Role" value={selectedRole} options={rolesToSelectOptions(roles)} onChange={setSelectedRole} />
         </View>
         {showFacultyInput && (
           <View style={styles.facultyContainer}>

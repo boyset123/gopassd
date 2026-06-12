@@ -13,6 +13,7 @@ import { isFivePmEtb } from '../../utils/manilaDate';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { useSocket } from '../../config/SocketContext';
 import { useServerTime } from '../../hooks/useServerTime';
+import { formatRoleLabel } from '../../utils/roleLabels';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
@@ -593,7 +594,7 @@ export default function SecurityDashboard() {
                             <Text style={styles.docSignatureName}>{scannedData.employee?.name}</Text>
                           </View>
                         </View>
-                        <Text style={[styles.signatureTitle, styles.chiefSignatureLabel]}>{scannedData.employee?.role === 'Faculty Dean' ? 'Faculty Dean' : 'Faculty Staff'}</Text>
+                        <Text style={[styles.signatureTitle, styles.chiefSignatureLabel]}>{scannedData.employee?.role === 'Faculty Dean' ? 'Faculty Dean' : scannedData.employee?.role === 'Program Head' ? 'Program Head' : formatRoleLabel(scannedData.employee?.role) || 'Faculty'}</Text>
                       </View>
                       <View style={styles.signatureBlock}>
                         <Text style={styles.signatureHeader}>APPROVED BY:</Text>

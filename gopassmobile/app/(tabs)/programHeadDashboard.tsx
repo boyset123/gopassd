@@ -527,7 +527,7 @@ export default function ProgramHeadDashboard() {
                       signature: (selectedItem as PassSlip).signature,
                       status: selectedItem.status,
                     }}
-                    requesterRoleLabel="Faculty Staff"
+                    requesterRoleLabel="Faculty"
                     approverCanSign
                     approverSignature={approverSignature}
                     onRedoApproverSignature={() => setApproverSignature(null)}

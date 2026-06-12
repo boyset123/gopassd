@@ -20,6 +20,11 @@ import { formatManilaDateYmd, getManilaTodayStart, isSameManilaDay, parseMeridie
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { formatPassSlipBalance, getPassSlipBalanceSeconds } from '../../utils/formatPassSlipBalance';
 import { getBillableDurationSeconds } from '../../utils/passSlipDuration';
+import {
+  findOverlappingSlipInList,
+  formatOverlapMessage,
+  type OverlapSlipLike,
+} from '../../utils/passSlipOverlap';
 import PassSlipForm, { approvedByRoleLabel, requestedByRoleLabel } from '../../components/PassSlipForm';
 import { formatRoleLabel } from '../../utils/roleLabels';
 
@@ -60,6 +65,7 @@ const CreatePassSlipScreen = () => {
   const socket = useSocket();
   const { getServerNow } = useServerTime();
   const [user, setUser] = useState<User | null>(null);
+  const [mySlips, setMySlips] = useState<OverlapSlipLike[]>([]);
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [timeOut, setTimeOut] = useState(new Date());
@@ -187,8 +193,13 @@ const CreatePassSlipScreen = () => {
       const token = await AsyncStorage.getItem('userToken');
       if (token) {
         try {
-          const response = await axios.get(`${API_URL}/users/me`, { headers: { 'x-auth-token': token } });
-          setUser(response.data);
+          const headers = { 'x-auth-token': token };
+          const [userResponse, slipsResponse] = await Promise.all([
+            axios.get(`${API_URL}/users/me`, { headers }),
+            axios.get<OverlapSlipLike[]>(`${API_URL}/pass-slips/my-slips`, { headers }),
+          ]);
+          setUser(userResponse.data);
+          setMySlips(slipsResponse.data ?? []);
         } catch (error) {
           console.error('Failed to fetch user data:', error);
         }
@@ -398,6 +409,23 @@ const CreatePassSlipScreen = () => {
         'Insufficient Balance',
         `You only have ${formatPassSlipBalance(balanceSeconds)} remaining, but this pass slip needs ${formatPassSlipBalance(durationSeconds)}.`,
       );
+      return;
+    }
+
+    const formattedTimeOut = timeOut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    const formattedEstimatedTimeBack = estimatedTimeBack.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+    const overlapConflict = findOverlappingSlipInList(
+      mySlips,
+      date,
+      formattedTimeOut,
+      formattedEstimatedTimeBack,
+    );
+    if (overlapConflict) {
+      Alert.alert('Schedule Conflict', formatOverlapMessage(overlapConflict));
       return;
     }
 

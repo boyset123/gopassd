@@ -24,6 +24,7 @@ const {
   getBillableDurationSeconds,
   getSlipPlannedBillableMinutes,
 } = require('../utils/passSlipDuration');
+const { findOverlappingPassSlip, formatOverlapMessage } = require('../utils/passSlipOverlap');
 
 function attachEmployeeBalance(slip) {
   const obj = slip?.toObject ? slip.toObject() : { ...slip };
@@ -206,6 +207,16 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({
         message: 'Cannot create a pass slip for a scheduled departure time that has already passed.',
       });
+    }
+
+    const overlapConflict = await findOverlappingPassSlip(
+      req.user.userId,
+      date,
+      timeOut,
+      estimatedTimeBack,
+    );
+    if (overlapConflict) {
+      return res.status(400).json({ message: formatOverlapMessage(overlapConflict) });
     }
 
     const durationSeconds = getBillableDurationSeconds(startTime, endTime, date);
@@ -436,6 +447,17 @@ router.put('/:id/status', [auth], async (req, res) => {
           return res.status(400).json({
             message: 'Cannot approve a pass slip whose scheduled departure time has already passed.',
           });
+        }
+
+        const approvalOverlap = await findOverlappingPassSlip(
+          passSlip.employee,
+          passSlip.date,
+          passSlip.timeOut,
+          passSlip.estimatedTimeBack,
+          { excludePassSlipId: passSlip._id },
+        );
+        if (approvalOverlap) {
+          return res.status(400).json({ message: formatOverlapMessage(approvalOverlap) });
         }
 
         const durationSeconds = getBillableDurationSeconds(startTime, endTime, passSlip.date);

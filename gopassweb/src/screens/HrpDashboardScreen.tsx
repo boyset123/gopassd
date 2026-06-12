@@ -37,6 +37,8 @@ interface Employee {
   faculty?: string;
   department?: string;
   role?: string;
+  passSlipSeconds?: number;
+  passSlipMinutes?: number;
 }
 
 interface PassSlip {
@@ -57,6 +59,7 @@ interface PassSlip {
   hrApproverSignature?: string;
   departureTime?: string;
   arrivalTime?: string;
+  actualMinutesUsed?: number;
   latitude?: number;
   longitude?: number;
   originLatitude?: number;
@@ -467,14 +470,15 @@ const HrpDashboardScreen = () => {
 
   const trackerPassSlips = useMemo<PassSlip[]>(() => {
     const recordsPassSlips = records.filter((item): item is PassSlip => 'destination' in item);
-    const merged = [...approvedPassSlips, ...recordsPassSlips];
+    const verifiedPassSlips = monitoringItems.filter((item) => item.type === 'slip');
+    const merged = [...approvedPassSlips, ...verifiedPassSlips, ...recordsPassSlips];
     const byId = new Map<string, PassSlip>();
     for (const slip of merged) {
       if (!slip?._id) continue;
       byId.set(String(slip._id), slip);
     }
     return Array.from(byId.values());
-  }, [approvedPassSlips, records]);
+  }, [approvedPassSlips, monitoringItems, records]);
 
   const dismissMobileSidebar = useCallback(() => {
     if (isNarrow) setMobileSidebarOpen(false);

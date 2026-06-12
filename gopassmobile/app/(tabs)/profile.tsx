@@ -11,6 +11,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { API_URL } from '../../config/api';
 import { useSocket } from '../../config/SocketContext';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
+import { formatPassSlipBalance, getPassSlipBalanceSeconds } from '../../utils/formatPassSlipBalance';
 
 function resolveProfilePictureUri(pathOrUrl: string, apiUrl: string): string {
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
@@ -27,11 +28,14 @@ const theme = {
   primaryDark: '#010d40',
   accent: '#fece00',
   surface: '#ffffff',
-  background: '#ffffff',
+  background: '#f4f6fb',
   text: '#011a6b',
   textMuted: 'rgba(1,26,107,0.75)',
   border: 'rgba(1,26,107,0.22)',
+  danger: '#dc3545',
 };
+
+const WEEKLY_BALANCE_CAP_SECONDS = 7200;
 
 interface PassSlip {
   _id: string;
@@ -63,14 +67,6 @@ interface User {
   onTravelReason?: 'manual' | 'travel-order' | null;
   canAssignOic?: boolean;
 }
-
-const formatMinutes = (value: number | undefined | null): string => {
-  const total = Math.max(0, Math.floor(Number(value) || 0));
-  if (total < 60) return `${total} min`;
-  const hours = Math.floor(total / 60);
-  const mins = total % 60;
-  return `${hours}h ${mins}m`;
-};
 
 interface OicCandidate {
   _id: string;
@@ -136,6 +132,7 @@ export default function ProfileScreen() {
   const [isSubmittingRoleChange, setIsSubmittingRoleChange] = useState(false);
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [isLoadingActivity, setIsLoadingActivity] = useState(false);
+  const [isActivityExpanded, setIsActivityExpanded] = useState(false);
 
   const fetchActivity = useCallback(async () => {
     try {
@@ -209,7 +206,12 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     if (!socket) return;
-    const handler = async (payload: { userId?: string; passSlipMinutes?: number; reset?: boolean }) => {
+    const handler = async (payload: {
+      userId?: string;
+      passSlipSeconds?: number;
+      passSlipMinutes?: number;
+      reset?: boolean;
+    }) => {
       if (payload.reset) {
         void fetchUserData();
         return;
@@ -218,12 +220,22 @@ export default function ProfileScreen() {
       const storedUser = stored ? JSON.parse(stored) : null;
       const myId = user?._id ? String(user._id) : storedUser?._id ? String(storedUser._id) : null;
       if (!myId || !payload.userId || String(payload.userId) !== myId) return;
-      if (typeof payload.passSlipMinutes !== 'number') return;
-      setUser((prev) => (prev ? { ...prev, passSlipMinutes: payload.passSlipMinutes } : prev));
+      const balanceSeconds =
+        typeof payload.passSlipSeconds === 'number'
+          ? payload.passSlipSeconds
+          : typeof payload.passSlipMinutes === 'number'
+            ? payload.passSlipMinutes * 60
+            : null;
+      if (balanceSeconds == null) return;
+      const balancePatch = {
+        passSlipSeconds: balanceSeconds,
+        passSlipMinutes: Math.floor(balanceSeconds / 60),
+      };
+      setUser((prev) => (prev ? { ...prev, ...balancePatch } : prev));
       if (storedUser) {
         await AsyncStorage.setItem(
           'userData',
-          JSON.stringify({ ...storedUser, passSlipMinutes: payload.passSlipMinutes }),
+          JSON.stringify({ ...storedUser, ...balancePatch }),
         );
       }
     };
@@ -636,17 +648,27 @@ export default function ProfileScreen() {
                     <Text style={styles.roleChangeSectionLabel}>Requested assignment</Text>
                     <Text style={styles.fieldLabel}>Role</Text>
                     <View style={styles.pickerWrap}>
-                      <Picker selectedValue={requestedRole} onValueChange={setRequestedRole}>
+                      <Picker
+                        selectedValue={requestedRole}
+                        onValueChange={setRequestedRole}
+                        style={styles.picker}
+                        dropdownIconColor={theme.text}
+                      >
                         {roleChangeRoles.map((r) => (
-                          <Picker.Item key={r} label={r} value={r} />
+                          <Picker.Item key={r} label={r} value={r} color={theme.text} />
                         ))}
                       </Picker>
                     </View>
                     <Text style={styles.fieldLabel}>Campus / Extension</Text>
                     <View style={styles.pickerWrap}>
-                      <Picker selectedValue={requestedExtension} onValueChange={setRequestedExtension}>
+                      <Picker
+                        selectedValue={requestedExtension}
+                        onValueChange={setRequestedExtension}
+                        style={styles.picker}
+                        dropdownIconColor={theme.text}
+                      >
                         {roleChangeExtensions.map((e) => (
-                          <Picker.Item key={e} label={e} value={e} />
+                          <Picker.Item key={e} label={e} value={e} color={theme.text} />
                         ))}
                       </Picker>
                     </View>
@@ -654,9 +676,14 @@ export default function ProfileScreen() {
                       <>
                         <Text style={styles.fieldLabel}>Faculty / Department</Text>
                         <View style={styles.pickerWrap}>
-                          <Picker selectedValue={requestedFaculty} onValueChange={setRequestedFaculty}>
+                          <Picker
+                            selectedValue={requestedFaculty}
+                            onValueChange={setRequestedFaculty}
+                            style={styles.picker}
+                            dropdownIconColor={theme.text}
+                          >
                             {roleChangeFaculties.map((f) => (
-                              <Picker.Item key={f} label={f} value={f} />
+                              <Picker.Item key={f} label={f} value={f} color={theme.text} />
                             ))}
                           </Picker>
                         </View>
@@ -833,67 +860,109 @@ export default function ProfileScreen() {
 
       <View style={styles.contentContainer}>
         <ScrollView contentContainerStyle={[styles.scrollContainer, { paddingBottom: (insets.bottom || 20) + 88 }]}>
-          <View style={styles.profileHeader}>
-            <TouchableOpacity onPress={handleChoosePhoto} disabled={isUploading}>
-              <View style={styles.profilePictureContainer}>
-                {user?.profilePicture ? (
-                  <Image
-                    source={{ uri: resolveProfilePictureUri(user.profilePicture, API_URL) }}
-                    style={styles.profilePicture}
-                  />
-                ) : (
-                  <FontAwesome name="user-circle-o" size={100} color={theme.primary} />
-                )}
-                <View style={styles.cameraIconContainer}>
-                  <FontAwesome name="camera" size={20} color="#fff" />
-                </View>
-                {isUploading && (
-                  <View style={styles.uploadingOverlay}>
-                    <ActivityIndicator size="large" color="#fff" />
-                  </View>
-                )}
-              </View>
-            </TouchableOpacity>
-            <Text style={styles.userName}>{user?.name}</Text>
-            <Text style={styles.userRole}>{user?.role}</Text>
-          </View>
-
           <View style={styles.card}>
             <View style={styles.cardTopBar} />
-            <View style={styles.cardBody}>
-              <View style={styles.infoRow}>
-                <View style={styles.infoIconWrap}>
-                  <FontAwesome name="envelope-o" size={18} color={theme.primary} />
-                </View>
-                <Text style={styles.infoText}>{user?.email}</Text>
-              </View>
-              {user?.faculty && (
-                <>
-                  <View style={styles.separator} />
-                  <View style={styles.infoRow}>
-                    <View style={styles.infoIconWrap}>
-                      <FontAwesome name="university" size={18} color={theme.primary} />
-                    </View>
-                    <Text style={styles.infoText}>{user.faculty}</Text>
+            <View style={styles.profileHeaderBand}>
+              <TouchableOpacity onPress={handleChoosePhoto} disabled={isUploading} activeOpacity={0.85}>
+                <View style={styles.profilePictureContainer}>
+                  {user?.profilePicture ? (
+                    <Image
+                      source={{ uri: resolveProfilePictureUri(user.profilePicture, API_URL) }}
+                      style={styles.profilePicture}
+                    />
+                  ) : (
+                    <FontAwesome name="user-circle-o" size={80} color={theme.primary} />
+                  )}
+                  <View style={styles.cameraIconContainer}>
+                    <FontAwesome name="camera" size={14} color="#fff" />
                   </View>
-                </>
-              )}
-              <View style={styles.separator} />
-              <View style={styles.infoRow}>
-                <View style={styles.infoIconWrap}>
-                  <FontAwesome name="map-marker" size={18} color={theme.primary} />
+                  {isUploading && (
+                    <View style={styles.uploadingOverlay}>
+                      <ActivityIndicator size="large" color="#fff" />
+                    </View>
+                  )}
                 </View>
-                <Text style={styles.infoText}>{user?.campus}</Text>
+              </TouchableOpacity>
+              <Text style={styles.userName} numberOfLines={2}>
+                {user?.name}
+              </Text>
+              {user?.role ? (
+                <View style={styles.roleBadge}>
+                  <Text style={styles.roleBadgeText}>{user.role}</Text>
+                </View>
+              ) : null}
+              <Text style={styles.profileMetaHint}>Tap photo to update</Text>
+            </View>
+
+            <View style={styles.profileDetailsSection}>
+              <Text style={styles.profileDetailsTitle}>Contact & Assignment</Text>
+              <View style={styles.profileDetailsPanel}>
+                <View style={styles.profileDetailRow}>
+                  <View style={styles.profileDetailIconWrap}>
+                    <FontAwesome name="envelope-o" size={15} color={theme.primary} />
+                  </View>
+                  <View style={styles.profileDetailText}>
+                    <Text style={styles.profileDetailLabel}>Email</Text>
+                    <Text style={styles.profileDetailValue}>{user?.email}</Text>
+                  </View>
+                </View>
+                <View style={[styles.profileDetailRow, !user?.faculty && styles.profileDetailRowLast]}>
+                  <View style={styles.profileDetailIconWrap}>
+                    <FontAwesome name="map-marker" size={15} color={theme.primary} />
+                  </View>
+                  <View style={styles.profileDetailText}>
+                    <Text style={styles.profileDetailLabel}>Campus / Extension</Text>
+                    <Text style={styles.profileDetailValue}>{user?.campus || '—'}</Text>
+                  </View>
+                </View>
+                {user?.faculty ? (
+                  <View style={[styles.profileDetailRow, styles.profileDetailRowLast]}>
+                    <View style={styles.profileDetailIconWrap}>
+                      <FontAwesome name="university" size={15} color={theme.primary} />
+                    </View>
+                    <View style={styles.profileDetailText}>
+                      <Text style={styles.profileDetailLabel}>Faculty / Department</Text>
+                      <Text style={styles.profileDetailValue}>{user.faculty}</Text>
+                    </View>
+                  </View>
+                ) : null}
               </View>
             </View>
           </View>
 
-          {user?.passSlipMinutes !== undefined && user?.role !== 'President' && (
+          {(user?.passSlipSeconds !== undefined || user?.passSlipMinutes !== undefined) &&
+            user?.role !== 'President' && (
             <View style={styles.card}>
               <View style={[styles.cardTopBar, styles.cardTopBarAccent]} />
               <View style={styles.cardBody}>
-                <Text style={styles.sectionTitle}>Weekly Pass Slip Balance</Text>
-                <Text style={styles.timeLimitText}>Remaining: {formatMinutes(user.passSlipMinutes)}</Text>
+                <View style={styles.sectionTitleRow}>
+                  <FontAwesome name="clock-o" size={16} color={theme.primary} />
+                  <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>Weekly Pass Slip Balance</Text>
+                </View>
+                <View style={styles.balanceStatRow}>
+                  <Text style={styles.balanceStatValue}>
+                    {formatPassSlipBalance(getPassSlipBalanceSeconds(user))}
+                  </Text>
+                  <Text style={styles.balanceStatLabel}>
+                    remaining of {formatPassSlipBalance(WEEKLY_BALANCE_CAP_SECONDS)}
+                  </Text>
+                </View>
+                <View style={styles.balanceBarTrack}>
+                  <View
+                    style={[
+                      styles.balanceBarFill,
+                      {
+                        width: `${Math.min(
+                          100,
+                          Math.max(
+                            0,
+                            (getPassSlipBalanceSeconds(user) / WEEKLY_BALANCE_CAP_SECONDS) * 100,
+                          ),
+                        )}%`,
+                      },
+                    ]}
+                  />
+                </View>
               </View>
             </View>
           )}
@@ -962,7 +1031,10 @@ export default function ProfileScreen() {
           <View style={styles.card}>
             <View style={[styles.cardTopBar, styles.cardTopBarAccent]} />
             <View style={styles.cardBody}>
-              <Text style={styles.sectionTitle}>Account Settings</Text>
+              <View style={styles.sectionTitleRow}>
+                <FontAwesome name="cog" size={16} color={theme.primary} />
+                <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>Account Settings</Text>
+              </View>
               <TouchableOpacity
                 style={styles.settingRow}
                 onPress={() => {
@@ -988,16 +1060,22 @@ export default function ProfileScreen() {
                 <View style={styles.infoIconWrap}>
                   <FontAwesome name="edit" size={18} color={theme.primary} />
                 </View>
-                <Text style={styles.settingText}>Edit Name</Text>
-                <FontAwesome name="angle-right" size={20} color={theme.textMuted} />
+                <View style={styles.settingTextWrap}>
+                  <Text style={styles.settingText}>Edit Name</Text>
+                  <Text style={styles.settingSubtext}>Update how your name appears</Text>
+                </View>
+                <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
               </TouchableOpacity>
               <View style={styles.separator} />
               <TouchableOpacity style={styles.settingRow} onPress={() => setChangePasswordModalVisible(true)}>
                 <View style={styles.infoIconWrap}>
                   <FontAwesome name="lock" size={18} color={theme.primary} />
                 </View>
-                <Text style={styles.settingText}>Change Password</Text>
-                <FontAwesome name="angle-right" size={20} color={theme.textMuted} />
+                <View style={styles.settingTextWrap}>
+                  <Text style={styles.settingText}>Change Password</Text>
+                  <Text style={styles.settingSubtext}>Keep your account secure</Text>
+                </View>
+                <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
               </TouchableOpacity>
               {user?.role !== 'admin' && (
                 <>
@@ -1017,7 +1095,7 @@ export default function ProfileScreen() {
                         <Text style={styles.settingSubtext}>Update role, campus, or faculty</Text>
                       )}
                     </View>
-                    <FontAwesome name="angle-right" size={20} color={theme.textMuted} />
+                    <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
                   </TouchableOpacity>
                 </>
               )}
@@ -1027,36 +1105,59 @@ export default function ProfileScreen() {
           <View style={styles.card}>
             <View style={[styles.cardTopBar, styles.cardTopBarAccent]} />
             <View style={styles.cardBody}>
-              <Text style={styles.sectionTitle}>Recent Activity</Text>
-              {isLoadingActivity ? (
-                <ActivityIndicator size="small" color={theme.primary} style={styles.activityLoader} />
-              ) : activityItems.length === 0 ? (
-                <Text style={styles.activityEmpty}>No recent activity yet.</Text>
-              ) : (
-                activityItems.map((item) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.activityRow}
-                    onPress={() => {
-                      if (item.relatedId) router.push('/(tabs)/slips');
-                    }}
-                    activeOpacity={item.relatedId ? 0.7 : 1}
-                  >
-                    <View style={styles.activityIconWrap}>
-                      <FontAwesome name={activityIcon(item.category) as any} size={16} color={theme.primary} />
+              <Pressable
+                style={styles.activitySectionHeader}
+                onPress={() => setIsActivityExpanded((prev) => !prev)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: isActivityExpanded }}
+              >
+                <View style={[styles.sectionTitleRow, styles.sectionTitleRowFlush]}>
+                  <FontAwesome name="history" size={16} color={theme.primary} />
+                  <Text style={[styles.sectionTitle, styles.activitySectionTitle]}>Recent Activity</Text>
+                  {!isActivityExpanded && activityItems.length > 0 ? (
+                    <View style={styles.activityCountBadge}>
+                      <Text style={styles.activityCountText}>{activityItems.length}</Text>
                     </View>
-                    <View style={styles.activityTextWrap}>
-                      <Text style={styles.activityTitle}>{item.title}</Text>
-                      <Text style={styles.activityDetail} numberOfLines={2}>{item.detail}</Text>
-                      <Text style={styles.activityDate}>{formatActivityDate(item.createdAt)}</Text>
-                    </View>
-                  </TouchableOpacity>
-                ))
-              )}
+                  ) : null}
+                </View>
+                <FontAwesome
+                  name={isActivityExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={14}
+                  color={theme.primary}
+                />
+              </Pressable>
+              {isActivityExpanded ? (
+                isLoadingActivity ? (
+                  <ActivityIndicator size="small" color={theme.primary} style={styles.activityLoader} />
+                ) : activityItems.length === 0 ? (
+                  <Text style={styles.activityEmpty}>No recent activity yet.</Text>
+                ) : (
+                  activityItems.map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={styles.activityRow}
+                      onPress={() => {
+                        if (item.relatedId) router.push('/(tabs)/slips');
+                      }}
+                      activeOpacity={item.relatedId ? 0.7 : 1}
+                    >
+                      <View style={styles.activityIconWrap}>
+                        <FontAwesome name={activityIcon(item.category) as any} size={16} color={theme.primary} />
+                      </View>
+                      <View style={styles.activityTextWrap}>
+                        <Text style={styles.activityTitle}>{item.title}</Text>
+                        <Text style={styles.activityDetail} numberOfLines={2}>{item.detail}</Text>
+                        <Text style={styles.activityDate}>{formatActivityDate(item.createdAt)}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                )
+              ) : null}
             </View>
           </View>
 
           <Pressable style={styles.logoutButton} onPress={handleLogout}>
+            <FontAwesome name="sign-out" size={16} color={theme.danger} style={styles.logoutIcon} />
             <Text style={styles.logoutButtonText}>Log Out</Text>
           </Pressable>
         </ScrollView>
@@ -1128,51 +1229,132 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: theme.background,
   },
-  profileHeader: {
+  profileHeaderBand: {
     alignItems: 'center',
-    marginBottom: 24,
+    paddingTop: 22,
+    paddingBottom: 20,
+    paddingHorizontal: 18,
+    backgroundColor: 'rgba(1,26,107,0.04)',
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  profileDetailsSection: {
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
+  },
+  profileDetailsTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: theme.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 10,
+  },
+  profileDetailsPanel: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: 'rgba(1,26,107,0.02)',
+    overflow: 'hidden',
+  },
+  profileDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+    gap: 12,
+  },
+  profileDetailRowLast: {
+    borderBottomWidth: 0,
+  },
+  profileDetailIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(1,26,107,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  profileDetailText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  profileDetailLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: theme.textMuted,
+    marginBottom: 2,
+  },
+  profileDetailValue: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: theme.text,
+    lineHeight: 21,
   },
   profilePictureContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
-    backgroundColor: 'rgba(1,26,107,0.08)',
-    borderWidth: 2,
-    borderColor: theme.primary,
+    backgroundColor: 'rgba(1,26,107,0.06)',
+    borderWidth: 3,
+    borderColor: theme.accent,
   },
   profilePicture: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
   },
   cameraIconContainer: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
+    bottom: -2,
+    right: -2,
     backgroundColor: theme.primary,
-    padding: 8,
-    borderRadius: 15,
+    padding: 7,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: theme.surface,
   },
   uploadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 50,
+    borderRadius: 44,
   },
   userName: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
     color: theme.text,
+    lineHeight: 26,
     marginTop: 12,
+    textAlign: 'center',
   },
-  userRole: {
-    fontSize: 15,
+  roleBadge: {
+    marginTop: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: 'rgba(1,26,107,0.08)',
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  roleBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.primary,
+  },
+  profileMetaHint: {
+    fontSize: 11,
     color: theme.textMuted,
-    marginTop: 4,
+    marginTop: 8,
+    textAlign: 'center',
   },
   card: {
     backgroundColor: theme.surface,
@@ -1205,6 +1387,44 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: theme.primary,
     marginBottom: 12,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  sectionTitleInline: {
+    marginBottom: 0,
+    flex: 1,
+  },
+  sectionTitleRowFlush: {
+    marginBottom: 0,
+    flex: 1,
+  },
+  activitySectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  activitySectionTitle: {
+    marginBottom: 0,
+    flex: 0,
+  },
+  activityCountBadge: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    backgroundColor: theme.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activityCountText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
   },
   activityLoader: {
     marginVertical: 12,
@@ -1248,9 +1468,26 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
     marginTop: 4,
   },
-  infoRow: {
+  infoItem: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+  },
+  infoContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  infoLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: theme.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 3,
+  },
+  infoValue: {
+    fontSize: 15,
+    color: theme.text,
+    lineHeight: 21,
   },
   infoIconWrap: {
     width: 36,
@@ -1266,10 +1503,30 @@ const styles = StyleSheet.create({
     backgroundColor: theme.border,
     marginVertical: 14,
   },
-  infoText: {
-    flex: 1,
-    fontSize: 15,
-    color: theme.text,
+  balanceStatRow: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  balanceStatValue: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: theme.primary,
+  },
+  balanceStatLabel: {
+    fontSize: 13,
+    color: theme.textMuted,
+    marginTop: 2,
+  },
+  balanceBarTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(1,26,107,0.1)',
+    overflow: 'hidden',
+  },
+  balanceBarFill: {
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: theme.accent,
   },
   settingRow: {
     flexDirection: 'row',
@@ -1277,10 +1534,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   settingText: {
-    flex: 1,
     fontSize: 15,
+    fontWeight: '600',
     color: theme.text,
-    marginLeft: 0,
   },
   settingSubtext: {
     fontSize: 12,
@@ -1475,24 +1731,24 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 8,
   },
-  timeLimitText: {
-    fontSize: 15,
-    color: theme.textMuted,
-    textAlign: 'center',
-    marginTop: 4,
-  },
   logoutButton: {
-    marginTop: 24,
+    marginTop: 8,
     marginBottom: 16,
-    backgroundColor: theme.primaryDark,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     paddingVertical: 14,
     borderRadius: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: theme.primary,
+    backgroundColor: theme.surface,
+    borderWidth: 1.5,
+    borderColor: 'rgba(220,53,69,0.35)',
+  },
+  logoutIcon: {
+    marginRight: 2,
   },
   logoutButtonText: {
-    color: '#fff',
+    color: theme.danger,
     fontWeight: '700',
     fontSize: 16,
   },
@@ -1544,6 +1800,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: theme.primary,
     marginBottom: 6,
+  },
+  picker: {
+    color: theme.text,
   },
   pickerWrap: {
     borderWidth: 1,

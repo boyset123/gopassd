@@ -170,7 +170,7 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
         <View style={[styles.headerText, useWideLayout && styles.headerTextWide]}>
           <Text style={styles.title}>Create Account</Text>
           <Text style={[styles.subtitle, useWideLayout && styles.subtitleWide]}>
-            Register for GoPass DOrSU. HR will review your account before you can sign in.
+            Register for GoPass DOrSU. HR will review your account and email you when it is approved or rejected.
           </Text>
         </View>
       </View>
@@ -339,7 +339,7 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
             <FontAwesome name="check-circle" size={48} color={theme.success} />
             <Text style={styles.modalTitle}>Registration Submitted</Text>
             <Text style={styles.modalMessage}>
-              HR will review your account. You will be able to sign in once your registration is approved.
+              HR will review your account. You will receive an email when your registration is approved or rejected.
             </Text>
             <Pressable style={styles.modalButton} onPress={() => navigation.navigate('Login')}>
               <Text style={styles.modalButtonText}>Back to Sign In</Text>

@@ -6,6 +6,7 @@ const auth = require('../middleware/auth');
 const authorize = require('../middleware/authorize');
 const { parseMeridiemTimeToDate } = require('../utils/dateTime');
 const { travelOrderToClientJson, attachEmployeeRoleFallback } = require('../utils/travelOrderSerialize');
+const { serializePassSlipBalance } = require('../utils/passSlipBalanceState');
 
 router.get('/', [auth, authorize('Human Resource Personnel')], async (req, res) => {
   try {
@@ -20,7 +21,7 @@ router.get('/', [auth, authorize('Human Resource Personnel')], async (req, res) 
       .populate({
         path: 'employee',
         match: userQuery,
-        select: 'name campus faculty department role'
+        select: 'name campus faculty department role passSlipSeconds passSlipMinutes'
       })
       .populate('approvedBy', 'name');
 
@@ -28,7 +29,7 @@ router.get('/', [auth, authorize('Human Resource Personnel')], async (req, res) 
       .populate({
         path: 'employee',
         match: userQuery,
-        select: 'name campus faculty department role'
+        select: 'name campus faculty department role passSlipSeconds passSlipMinutes'
       })
       .populate('recommendedBy', 'name')
       .populate('approvedBy', 'name')
@@ -42,6 +43,9 @@ router.get('/', [auth, authorize('Human Resource Personnel')], async (req, res) 
       .filter(p => p.employee)
       .map(p => {
         const slip = p.toObject();
+        if (slip.employee && typeof slip.employee === 'object') {
+          slip.employee = { ...slip.employee, ...serializePassSlipBalance(slip.employee) };
+        }
         if (slip.status === 'Returned' && slip.arrivalTime && slip.estimatedTimeBack) {
           const scheduledReturn = parseMeridiemTimeToDate(slip.estimatedTimeBack, slip.date);
           if (scheduledReturn) {

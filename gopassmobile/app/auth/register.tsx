@@ -22,6 +22,8 @@ const FACULTY_ROLES = ['Faculty Staff', 'Program Head', 'Faculty Dean'];
 const EMAIL_HINT = 'Use an email address you can access for account notifications.';
 /** Android release builds use the system hint color; without this, placeholders can be invisible on white inputs. */
 const PLACEHOLDER_COLOR = 'rgba(1,26,107,0.45)';
+/** Picker selected value + dropdown items need an explicit color on Android release APKs. */
+const PICKER_TEXT_COLOR = '#011a6b';
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+$/.test(email.trim().toLowerCase());
@@ -112,7 +114,7 @@ export default function RegisterScreen() {
       });
       Alert.alert(
         'Registration Submitted',
-        'HR will review your account. You will be able to sign in once approved.',
+        'HR will review your account. You will receive an email when your registration is approved or rejected.',
         [{ text: 'OK', onPress: () => router.back() }]
       );
     } catch (error: unknown) {
@@ -142,7 +144,7 @@ export default function RegisterScreen() {
         >
           <View style={styles.formContainer}>
             <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.subtitle}>HR will review your registration before you can sign in.</Text>
+            <Text style={styles.subtitle}>HR will review your registration. You will be emailed when it is approved or rejected.</Text>
 
             {isMetaLoading ? (
               <ActivityIndicator size="large" color="#011a6b" style={{ marginVertical: 32 }} />
@@ -178,18 +180,28 @@ export default function RegisterScreen() {
 
                 <Text style={styles.label}>Campus / Extension</Text>
                 <View style={styles.pickerWrap}>
-                  <Picker selectedValue={selectedCampus} onValueChange={setSelectedCampus}>
+                  <Picker
+                    selectedValue={selectedCampus}
+                    onValueChange={setSelectedCampus}
+                    style={styles.picker}
+                    dropdownIconColor={PICKER_TEXT_COLOR}
+                  >
                     {extensions.map((c) => (
-                      <Picker.Item key={c} label={c} value={c} />
+                      <Picker.Item key={c} label={c} value={c} color={PICKER_TEXT_COLOR} />
                     ))}
                   </Picker>
                 </View>
 
                 <Text style={styles.label}>Role</Text>
                 <View style={styles.pickerWrap}>
-                  <Picker selectedValue={selectedRole} onValueChange={setSelectedRole}>
+                  <Picker
+                    selectedValue={selectedRole}
+                    onValueChange={setSelectedRole}
+                    style={styles.picker}
+                    dropdownIconColor={PICKER_TEXT_COLOR}
+                  >
                     {roles.map((r) => (
-                      <Picker.Item key={r} label={r} value={r} />
+                      <Picker.Item key={r} label={r} value={r} color={PICKER_TEXT_COLOR} />
                     ))}
                   </Picker>
                 </View>
@@ -198,9 +210,14 @@ export default function RegisterScreen() {
                   <>
                     <Text style={styles.label}>Faculty / Department</Text>
                     <View style={styles.pickerWrap}>
-                      <Picker selectedValue={faculty} onValueChange={setFaculty}>
+                      <Picker
+                        selectedValue={faculty}
+                        onValueChange={setFaculty}
+                        style={styles.picker}
+                        dropdownIconColor={PICKER_TEXT_COLOR}
+                      >
                         {faculties.map((f) => (
-                          <Picker.Item key={f} label={f} value={f} />
+                          <Picker.Item key={f} label={f} value={f} color={PICKER_TEXT_COLOR} />
                         ))}
                       </Picker>
                     </View>
@@ -257,6 +274,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 12,
     overflow: 'hidden',
+  },
+  picker: {
+    color: PICKER_TEXT_COLOR,
   },
   button: {
     backgroundColor: '#011a6b',

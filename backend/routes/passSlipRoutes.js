@@ -16,27 +16,27 @@ const { getEffectiveSigner, isUserOnTravel, toIdString } = require('../utils/oic
 const { getScheduledReturnMoment } = require('../utils/passSlipSchedule');
 const { computeReturnBalanceAdjustment } = require('../utils/passSlipBalance');
 const { resolvePassSlipMapRoute } = require('../utils/drivingRoute');
+const { formatPassSlipBalance } = require('../utils/formatPassSlipBalance');
+const { getPassSlipSeconds, setPassSlipSeconds, serializePassSlipBalance } = require('../utils/passSlipBalanceState');
 
-/**
- * Format a number of minutes as a clean human-readable string
- * (e.g. 0 -> "0 min", 5 -> "5 min", 60 -> "1h 0m", 83 -> "1h 23m").
- */
-function formatMinutes(value) {
-  const total = Math.max(0, Math.floor(Number(value) || 0));
-  if (total < 60) return `${total} min`;
-  const hours = Math.floor(total / 60);
-  const mins = total % 60;
-  return `${hours}h ${mins}m`;
+function attachEmployeeBalance(slip) {
+  const obj = slip?.toObject ? slip.toObject() : { ...slip };
+  if (obj.employee && typeof obj.employee === 'object') {
+    obj.employee = { ...obj.employee, ...serializePassSlipBalance(obj.employee) };
+  }
+  return obj;
 }
 
 /** Weekly pass-slip cap (mirrors HRP tracker WEEKLY_LIMIT_HOURS = 2). */
 const WEEKLY_LIMIT_MINUTES = 120;
 
-function emitBalanceUpdate(io, userId, passSlipMinutes) {
+function emitBalanceUpdate(io, userId, passSlipSeconds) {
   if (!io) return;
+  const seconds = Math.max(0, Math.floor(Number(passSlipSeconds) || 0));
   io.emit('passSlipBalanceUpdated', {
     userId: toIdString(userId),
-    passSlipMinutes: Math.max(0, Math.floor(Number(passSlipMinutes) || 0)),
+    passSlipSeconds: seconds,
+    passSlipMinutes: Math.floor(seconds / 60),
   });
 }
 
@@ -206,11 +206,12 @@ router.post('/', auth, async (req, res) => {
       });
     }
 
-    const durationMinutes = (endTime.getTime() - startTime.getTime()) / 60000; // duration in minutes
+    const durationSeconds = Math.max(0, Math.round((endTime.getTime() - startTime.getTime()) / 1000));
+    const durationMinutes = durationSeconds / 60;
 
-    if (user.passSlipMinutes < durationMinutes) {
+    if (getPassSlipSeconds(user) < durationSeconds) {
       return res.status(400).json({
-        message: `Insufficient pass slip minutes. You have ${formatMinutes(user.passSlipMinutes)} remaining, but this request needs ${formatMinutes(durationMinutes)}.`,
+        message: `Insufficient pass slip balance. You have ${formatPassSlipBalance(getPassSlipSeconds(user))} remaining, but this request needs ${formatPassSlipBalance(durationSeconds)}.`,
       });
     }
 
@@ -223,7 +224,7 @@ router.post('/', auth, async (req, res) => {
       if (weekUsedMinutes + durationMinutes > WEEKLY_LIMIT_MINUTES) {
         const remaining = Math.max(0, WEEKLY_LIMIT_MINUTES - weekUsedMinutes);
         return res.status(400).json({
-          message: `This pass slip exceeds the 2-hour weekly cap. You have ${formatMinutes(remaining)} left this week, but this request needs ${formatMinutes(durationMinutes)}.`,
+          message: `This pass slip exceeds the 2-hour weekly cap. You have ${formatPassSlipBalance(Math.round(remaining * 60))} left this week, but this request needs ${formatPassSlipBalance(durationSeconds)}.`,
         });
       }
     }
@@ -438,11 +439,12 @@ router.put('/:id/status', [auth], async (req, res) => {
           });
         }
 
-        const durationMinutes = (endTime.getTime() - startTime.getTime()) / 60000;
+        const durationSeconds = Math.max(0, Math.round((endTime.getTime() - startTime.getTime()) / 1000));
+        const durationMinutes = durationSeconds / 60;
 
-        if (user.passSlipMinutes < durationMinutes) {
+        if (getPassSlipSeconds(user) < durationSeconds) {
           return res.status(400).json({
-            message: `Insufficient pass slip minutes. The user has ${formatMinutes(user.passSlipMinutes)} remaining, but this request needs ${formatMinutes(durationMinutes)}.`,
+            message: `Insufficient pass slip balance. The user has ${formatPassSlipBalance(getPassSlipSeconds(user))} remaining, but this request needs ${formatPassSlipBalance(durationSeconds)}.`,
           });
         }
 
@@ -454,18 +456,17 @@ router.put('/:id/status', [auth], async (req, res) => {
           if (weekUsedMinutes + durationMinutes > WEEKLY_LIMIT_MINUTES) {
             const remaining = Math.max(0, WEEKLY_LIMIT_MINUTES - weekUsedMinutes);
             return res.status(400).json({
-              message: `Approving this pass slip would exceed the user's 2-hour weekly cap. They have ${formatMinutes(remaining)} left this week, but this slip needs ${formatMinutes(durationMinutes)}.`,
+              message: `Approving this pass slip would exceed the user's 2-hour weekly cap. They have ${formatPassSlipBalance(Math.round(remaining * 60))} left this week, but this slip needs ${formatPassSlipBalance(durationSeconds)}.`,
             });
           }
         }
 
-        // Round to whole minutes when applying so the running balance stays
-        // a clean integer (avoids fractional residues like 0.2161666...).
-        const baseBalance = Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0));
-        const deduct = Math.round(durationMinutes);
-        user.passSlipMinutes = Math.max(0, baseBalance - deduct);
+        const updatedSeconds = setPassSlipSeconds(
+          user,
+          getPassSlipSeconds(user) - durationSeconds,
+        );
         await user.save();
-        emitBalanceUpdate(req.io, user._id, user.passSlipMinutes);
+        emitBalanceUpdate(req.io, user._id, updatedSeconds);
 
         passSlip.status = 'Approved';
         passSlip.hrApprovedBy = req.user.userId;
@@ -674,12 +675,12 @@ router.get('/recommended', [auth, authorize('Human Resource Personnel')], async 
 router.get('/hr-approved', [auth, authorize('Human Resource Personnel')], async (req, res) => {
   try {
     const hrApprovedSlips = await PassSlip.find({ status: 'Approved' })
-      .populate('employee', 'name email profilePicture')
+      .populate('employee', 'name email profilePicture passSlipSeconds passSlipMinutes role')
       .populate('approvedBy', 'name role')
       .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature hrApproverSignature latitude longitude originLatitude originLongitude routePolyline overdueMinutes');
-    res.json(hrApprovedSlips);
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature hrApproverSignature departureTime arrivalTime actualMinutesUsed latitude longitude originLatitude originLongitude routePolyline overdueMinutes');
+    res.json(hrApprovedSlips.map(attachEmployeeBalance));
   } catch (error) {
     console.error('Error fetching HR approved pass slips:', error);
     res.status(500).json({ message: 'Server error' });
@@ -718,12 +719,12 @@ router.get('/verified', [auth, authorize('Security Personnel')], async (req, res
 router.get('/verified-hr', [auth, authorize('Human Resource Personnel')], async (req, res) => {
   try {
     const verifiedSlips = await PassSlip.find({ status: { $in: ['Verified', 'Approved'] } })
-      .populate('employee', 'name email profilePicture')
+      .populate('employee', 'name email profilePicture passSlipSeconds passSlipMinutes role')
       .populate('approvedBy', 'name role')
       .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name')
-      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature departureTime arrivalTime trackingNo latitude longitude originLatitude originLongitude routePolyline overdueMinutes');
-    res.json(verifiedSlips);
+      .select('employee date timeOut estimatedTimeBack destination purpose status approvedBy approvedBySignedAsOicFor hrApprovedBy signature approverSignature departureTime arrivalTime actualMinutesUsed trackingNo latitude longitude originLatitude originLongitude routePolyline overdueMinutes');
+    res.json(verifiedSlips.map(attachEmployeeBalance));
   } catch (error) {
     console.error('Error fetching verified pass slips for HR:', error);
     res.status(500).json({ message: 'Server error' });
@@ -886,10 +887,12 @@ router.put('/:id/return', [auth, authorize('Security Personnel')], async (req, r
     if (adjustment !== 0) {
       const employee = await User.findById(passSlip.employee);
       if (employee) {
-        const currentBalance = Math.max(0, Math.floor(Number(employee.passSlipMinutes) || 0));
-        employee.passSlipMinutes = Math.max(0, currentBalance + adjustment);
+        const updatedSeconds = setPassSlipSeconds(
+          employee,
+          getPassSlipSeconds(employee) + adjustment,
+        );
         await employee.save();
-        emitBalanceUpdate(req.io, employee._id, employee.passSlipMinutes);
+        emitBalanceUpdate(req.io, employee._id, updatedSeconds);
       }
     }
 
@@ -913,20 +916,6 @@ router.get('/returned', [auth, authorize('Human Resource Personnel')], async (re
     res.json(returnedSlips);
   } catch (error) {
     console.error('Error fetching returned pass slips:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Get all verified pass slips (for HR)
-router.get('/verified-hr', [auth, authorize('Human Resource Personnel')], async (req, res) => {
-  try {
-    const verifiedSlips = await PassSlip.find({ status: 'Verified' })
-      .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name role')
-      .populate('approvedBySignedAsOicFor', 'name role');
-    res.json(verifiedSlips);
-  } catch (error) {
-    console.error('Error fetching verified pass slips for HR:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

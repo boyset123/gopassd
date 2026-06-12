@@ -67,6 +67,7 @@ const ProfileScreen = () => {
   const [pendingRoleRequest, setPendingRoleRequest] = useState<PendingRoleRequest | null>(null);
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [isLoadingActivity, setIsLoadingActivity] = useState(false);
+  const [isActivityExpanded, setIsActivityExpanded] = useState(false);
   const navigation = useNavigation<ProfileScreenNavigationProp>();
 
   const formatActivityDate = (value: string) => {
@@ -340,25 +341,39 @@ const ProfileScreen = () => {
           )}
 
           <View style={[styles.formContainer, isNarrow && styles.formContainerMobile]}>
-            <Text style={styles.formTitle}>Recent Activity</Text>
-            {isLoadingActivity ? (
-              <ActivityIndicator size="small" color={theme.primary} style={styles.activityLoader} />
-            ) : activityItems.length === 0 ? (
-              <Text style={styles.formHint}>No recent activity yet.</Text>
-            ) : (
-              activityItems.map((item) => (
-                <View key={item.id} style={styles.activityRow}>
-                  <View style={styles.activityIconWrap}>
-                    <FontAwesome name={activityIcon(item.category) as any} size={16} color={theme.primary} />
+            <Pressable
+              style={styles.activitySectionHeader}
+              onPress={() => setIsActivityExpanded((prev) => !prev)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: isActivityExpanded }}
+            >
+              <Text style={[styles.formTitle, styles.activitySectionTitle]}>Recent Activity</Text>
+              <FontAwesome
+                name={isActivityExpanded ? 'chevron-up' : 'chevron-down'}
+                size={14}
+                color={theme.primary}
+              />
+            </Pressable>
+            {isActivityExpanded ? (
+              isLoadingActivity ? (
+                <ActivityIndicator size="small" color={theme.primary} style={styles.activityLoader} />
+              ) : activityItems.length === 0 ? (
+                <Text style={styles.formHint}>No recent activity yet.</Text>
+              ) : (
+                activityItems.map((item) => (
+                  <View key={item.id} style={styles.activityRow}>
+                    <View style={styles.activityIconWrap}>
+                      <FontAwesome name={activityIcon(item.category) as any} size={16} color={theme.primary} />
+                    </View>
+                    <View style={styles.activityTextWrap}>
+                      <Text style={styles.activityTitle}>{item.title}</Text>
+                      <Text style={styles.activityDetail}>{item.detail}</Text>
+                      <Text style={styles.activityDate}>{formatActivityDate(item.createdAt)}</Text>
+                    </View>
                   </View>
-                  <View style={styles.activityTextWrap}>
-                    <Text style={styles.activityTitle}>{item.title}</Text>
-                    <Text style={styles.activityDetail}>{item.detail}</Text>
-                    <Text style={styles.activityDate}>{formatActivityDate(item.createdAt)}</Text>
-                  </View>
-                </View>
-              ))
-            )}
+                ))
+              )
+            ) : null}
           </View>
         </ScrollView>
       </View>
@@ -697,6 +712,18 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  activitySectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  activitySectionTitle: {
+    marginBottom: 0,
+    flex: 1,
+    borderBottomWidth: 0,
+    paddingBottom: 0,
   },
   activityLoader: {
     marginVertical: 12,

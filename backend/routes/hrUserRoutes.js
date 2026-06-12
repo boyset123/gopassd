@@ -5,6 +5,7 @@ const RoleChangeRequest = require('../models/RoleChangeRequest');
 const auth = require('../middleware/auth');
 const authorize = require('../middleware/authorize');
 const { validateRegistrationMetadata } = require('../utils/metadataValidation');
+const { sendRegistrationDecisionEmail } = require('../utils/registrationStatusEmails');
 
 async function notifyUser(io, userId, { message, type, relatedId }) {
   try {
@@ -105,6 +106,8 @@ router.put('/pending-registrations/:id/approve', [auth, authorize('Human Resourc
       relatedId: user._id,
     });
 
+    await sendRegistrationDecisionEmail({ user, decision: 'approved' });
+
     res.json(user.toObject({ transform: (_, ret) => { delete ret.password; delete ret.notifications; return ret; } }));
   } catch (error) {
     console.error('Approve registration error:', error);
@@ -132,6 +135,8 @@ router.put('/pending-registrations/:id/reject', [auth, authorize('Human Resource
       type: 'account-rejected',
       relatedId: user._id,
     });
+
+    await sendRegistrationDecisionEmail({ user, decision: 'rejected', reason });
 
     res.json({ message: 'Registration rejected.', user: { _id: user._id, accountStatus: user.accountStatus } });
   } catch (error) {

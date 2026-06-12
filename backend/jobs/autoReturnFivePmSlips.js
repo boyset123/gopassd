@@ -3,12 +3,15 @@ const User = require('../models/User');
 const { isFivePmEtb, serverNow } = require('../utils/dateTime');
 const { getScheduledReturnMoment } = require('../utils/passSlipSchedule');
 const { computeReturnBalanceAdjustment } = require('../utils/passSlipBalance');
+const { getPassSlipSeconds, setPassSlipSeconds } = require('../utils/passSlipBalanceState');
 
-function emitBalanceUpdate(io, userId, passSlipMinutes) {
+function emitBalanceUpdate(io, userId, passSlipSeconds) {
   if (!io) return;
+  const seconds = Math.max(0, Math.floor(Number(passSlipSeconds) || 0));
   io.emit('passSlipBalanceUpdated', {
     userId: String(userId),
-    passSlipMinutes: Math.max(0, Math.floor(Number(passSlipMinutes) || 0)),
+    passSlipSeconds: seconds,
+    passSlipMinutes: Math.floor(seconds / 60),
   });
 }
 
@@ -37,10 +40,12 @@ async function autoReturnFivePmSlips(io) {
       if (adjustment !== 0) {
         const employee = await User.findById(slip.employee);
         if (employee) {
-          const currentBalance = Math.max(0, Math.floor(Number(employee.passSlipMinutes) || 0));
-          employee.passSlipMinutes = Math.max(0, currentBalance + adjustment);
+          const updatedSeconds = setPassSlipSeconds(
+            employee,
+            getPassSlipSeconds(employee) + adjustment,
+          );
           await employee.save();
-          emitBalanceUpdate(io, employee._id, employee.passSlipMinutes);
+          emitBalanceUpdate(io, employee._id, updatedSeconds);
         }
       }
 

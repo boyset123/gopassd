@@ -69,6 +69,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: '' // Default to an empty string
   },
+  passSlipSeconds: {
+    type: Number,
+    default: 7200
+  },
   passSlipMinutes: {
     type: Number,
     default: 120

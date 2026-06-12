@@ -7,19 +7,23 @@ const { getScheduledReturnMoment } = require('./passSlipSchedule');
  * return and deducts overdue minutes when the employee is late.
  *
  * @returns {{ adjustment: number, actualMinutes: number, plannedMinutes: number, overdueMinutes: number }}
+ *   adjustment is in seconds (credits unused planned time, debits overdue time).
  */
 function computeReturnBalanceAdjustment(passSlip, arrivalTime) {
   const start = parseMeridiemTimeToDate(passSlip.timeOut, passSlip.date);
   const end = parseMeridiemTimeToDate(passSlip.estimatedTimeBack, passSlip.date);
 
+  let plannedSeconds = 0;
   let plannedMinutes = 0;
   if (start && end && end.getTime() >= start.getTime()) {
-    plannedMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+    plannedSeconds = Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000));
+    plannedMinutes = Math.round(plannedSeconds / 60);
   }
 
   const departureTime = passSlip.departureTime ? new Date(passSlip.departureTime) : null;
   const arrival = arrivalTime instanceof Date ? arrivalTime : new Date(arrivalTime);
 
+  let actualSeconds = 0;
   let actualMinutes = 0;
   if (
     departureTime &&
@@ -27,12 +31,13 @@ function computeReturnBalanceAdjustment(passSlip, arrivalTime) {
     !Number.isNaN(arrival.getTime()) &&
     arrival.getTime() >= departureTime.getTime()
   ) {
-    actualMinutes = Math.ceil((arrival.getTime() - departureTime.getTime()) / 60000);
+    actualSeconds = Math.ceil((arrival.getTime() - departureTime.getTime()) / 1000);
+    actualMinutes = Math.ceil(actualSeconds / 60);
   }
 
   let adjustment = 0;
-  if (plannedMinutes > 0 && actualMinutes < plannedMinutes) {
-    adjustment += plannedMinutes - actualMinutes;
+  if (plannedSeconds > 0 && actualSeconds < plannedSeconds) {
+    adjustment += plannedSeconds - actualSeconds;
   }
 
   let overdueMinutes = 0;
@@ -41,7 +46,7 @@ function computeReturnBalanceAdjustment(passSlip, arrivalTime) {
     const diffMs = arrival.getTime() - scheduledReturn.getTime();
     if (diffMs > 0) {
       overdueMinutes = diffMs / 60000;
-      adjustment -= Math.ceil(overdueMinutes);
+      adjustment -= Math.ceil(diffMs / 1000);
     }
   }
 

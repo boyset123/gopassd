@@ -154,9 +154,9 @@ cron.schedule('* * * * *', () => {
 cron.schedule('0 0 * * 1', async () => {
   console.log('Running weekly reset of pass slip minutes...');
   try {
-    await User.updateMany({}, { $set: { passSlipMinutes: 120 } });
+    await User.updateMany({}, { $set: { passSlipSeconds: 7200, passSlipMinutes: 120 } });
     console.log('Successfully reset pass slip minutes for all users.');
-    io.emit('passSlipBalanceUpdated', { reset: true, passSlipMinutes: 120 });
+    io.emit('passSlipBalanceUpdated', { reset: true, passSlipSeconds: 7200, passSlipMinutes: 120 });
   } catch (error) {
     console.error('Error resetting pass slip minutes:', error);
   }

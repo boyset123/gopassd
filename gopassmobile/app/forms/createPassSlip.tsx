@@ -18,6 +18,7 @@ import { useSocket } from '../../config/SocketContext';
 import { useServerTime } from '../../hooks/useServerTime';
 import { formatManilaDateYmd, getManilaTodayStart, isSameManilaDay, parseMeridiemTimeInManilaDate } from '../../utils/manilaDate';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
+import { formatPassSlipBalance, getPassSlipBalanceSeconds } from '../../utils/formatPassSlipBalance';
 import PassSlipForm, { approvedByRoleLabel, requestedByRoleLabel } from '../../components/PassSlipForm';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
@@ -40,16 +41,9 @@ interface User {
   name: string;
   role: string;
   faculty?: string;
+  passSlipSeconds?: number;
   passSlipMinutes?: number;
 }
-
-const formatMinutes = (value: number | undefined | null): string => {
-  const total = Math.max(0, Math.floor(Number(value) || 0));
-  if (total < 60) return `${total} min`;
-  const hours = Math.floor(total / 60);
-  const mins = total % 60;
-  return `${hours}h ${mins}m`;
-};
 
 interface Suggestion {
   place_id: number;
@@ -197,7 +191,12 @@ const CreatePassSlipScreen = () => {
 
   useEffect(() => {
     if (!socket) return;
-    const handler = async (payload: { userId?: string; passSlipMinutes?: number; reset?: boolean }) => {
+    const handler = async (payload: {
+      userId?: string;
+      passSlipSeconds?: number;
+      passSlipMinutes?: number;
+      reset?: boolean;
+    }) => {
       if (payload.reset) {
         const token = await AsyncStorage.getItem('userToken');
         if (!token) return;
@@ -213,12 +212,22 @@ const CreatePassSlipScreen = () => {
       const storedUser = stored ? JSON.parse(stored) : null;
       const myId = user?._id ? String(user._id) : storedUser?._id ? String(storedUser._id) : null;
       if (!myId || !payload.userId || String(payload.userId) !== myId) return;
-      if (typeof payload.passSlipMinutes !== 'number') return;
-      setUser((prev) => (prev ? { ...prev, passSlipMinutes: payload.passSlipMinutes } : prev));
+      const balanceSeconds =
+        typeof payload.passSlipSeconds === 'number'
+          ? payload.passSlipSeconds
+          : typeof payload.passSlipMinutes === 'number'
+            ? payload.passSlipMinutes * 60
+            : null;
+      if (balanceSeconds == null) return;
+      const balancePatch = {
+        passSlipSeconds: balanceSeconds,
+        passSlipMinutes: Math.floor(balanceSeconds / 60),
+      };
+      setUser((prev) => (prev ? { ...prev, ...balancePatch } : prev));
       if (storedUser) {
         await AsyncStorage.setItem(
           'userData',
-          JSON.stringify({ ...storedUser, passSlipMinutes: payload.passSlipMinutes }),
+          JSON.stringify({ ...storedUser, ...balancePatch }),
         );
       }
     };
@@ -379,11 +388,15 @@ const CreatePassSlipScreen = () => {
       return;
     }
 
-    const durationMinutes = (estimatedTimeBack.getTime() - timeOut.getTime()) / 60000;
-    if (user?.passSlipMinutes !== undefined && user.passSlipMinutes < durationMinutes) {
+    const durationSeconds = Math.max(
+      0,
+      Math.round((estimatedTimeBack.getTime() - timeOut.getTime()) / 1000),
+    );
+    const balanceSeconds = user ? getPassSlipBalanceSeconds(user) : null;
+    if (balanceSeconds != null && balanceSeconds < durationSeconds) {
       Alert.alert(
-        'Insufficient Minutes',
-        `You only have ${formatMinutes(user.passSlipMinutes)} remaining, but this pass slip needs ${formatMinutes(durationMinutes)}.`,
+        'Insufficient Balance',
+        `You only have ${formatPassSlipBalance(balanceSeconds)} remaining, but this pass slip needs ${formatPassSlipBalance(durationSeconds)}.`,
       );
       return;
     }

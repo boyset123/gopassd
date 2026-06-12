@@ -18,6 +18,7 @@ const {
   getRankBelowRoles,
   getActiveOicForRoles,
 } = require('../utils/oic');
+const { serializePassSlipBalance } = require('../utils/passSlipBalanceState');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -79,6 +80,30 @@ async function notifyHrUsers(io, message, type, relatedId) {
     }
   } catch (err) {
     console.error('notifyHrUsers failed:', err);
+  }
+}
+
+async function notifyUserInApp(io, userId, { message, type, relatedId }) {
+  try {
+    const target = await User.findById(userId);
+    if (!target) return;
+
+    const newNotif = target.notifications.create({
+      message,
+      read: false,
+      type,
+      relatedId,
+      createdAt: new Date(),
+    });
+    target.notifications.push(newNotif);
+    await target.save();
+
+    const payload = newNotif.toObject ? newNotif.toObject() : newNotif;
+    if (io) {
+      io.emit('newNotification', { userId: String(userId), notification: payload });
+    }
+  } catch (err) {
+    console.error('notifyUserInApp failed:', err);
   }
 }
 
@@ -146,7 +171,8 @@ router.post('/register', async (req, res) => {
     await notifyHrUsers(req.io, `New registration pending approval: ${newUser.name} (${newUser.email})`, 'pending-registration', newUser._id);
 
     res.status(201).json({
-      message: 'Registration submitted successfully. HR will review your account before you can log in.',
+      message:
+        'Registration submitted successfully. HR will review your account. You will receive an email when your registration is approved or rejected.',
     });
   } catch (error) {
     console.error('Self-registration error:', error);
@@ -202,7 +228,7 @@ router.post('/login', async (req, res) => {
         role: user.role,
         faculty: user.faculty,
         createdAt: user.createdAt,
-        passSlipMinutes: Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0)),
+        ...serializePassSlipBalance(user),
         activeOicForRoles,
       }
     });
@@ -392,7 +418,7 @@ router.get('/me', auth, async (req, res) => {
         faculty: user.faculty,
         createdAt: user.createdAt,
         profilePicture: user.profilePicture,
-        passSlipMinutes: Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0)),
+        ...serializePassSlipBalance(user),
         oicPrimary: user.oicPrimary || null,
         onTravelManual: !!user.onTravelManual,
         onTravelManualUntil: user.onTravelManualUntil || null,
@@ -518,7 +544,7 @@ router.post(
           faculty: user.faculty,
           createdAt: user.createdAt,
           profilePicture: user.profilePicture,
-          passSlipMinutes: Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0)),
+          ...serializePassSlipBalance(user),
         },
       });
     } catch (error) {
@@ -558,7 +584,7 @@ router.put('/me/name', auth, async (req, res) => {
         faculty: user.faculty,
         createdAt: user.createdAt,
         profilePicture: user.profilePicture,
-        passSlipMinutes: Math.max(0, Math.floor(Number(user.passSlipMinutes) || 0))
+        ...serializePassSlipBalance(user),
       }
     });
   } catch (error) {
@@ -742,9 +768,13 @@ router.put('/me/oic', auth, async (req, res) => {
       return res.status(403).json({ message: 'Your role cannot assign an OIC.' });
     }
 
+    const previousOicId = user.oicPrimary ? user.oicPrimary.toString() : null;
+    let newOicId = previousOicId;
+
     // Validate Primary OIC: must be in rank-below pool (faculty-scoped for Dean/Head)
     if (oicPrimary === null || oicPrimary === '') {
       user.oicPrimary = null;
+      newOicId = null;
     } else if (oicPrimary !== undefined) {
       const candidate = await User.findById(oicPrimary).select('_id role faculty').lean();
       if (!candidate) {
@@ -767,9 +797,26 @@ router.put('/me/oic', auth, async (req, res) => {
         return res.status(400).json({ message: 'You cannot assign yourself as OIC.' });
       }
       user.oicPrimary = candidate._id;
+      newOicId = candidate._id.toString();
     }
 
     await user.save();
+
+    if (newOicId && newOicId !== previousOicId) {
+      await notifyUserInApp(req.io, newOicId, {
+        message: `${user.name} (${user.role}) assigned you as their Primary Officer-In-Charge (OIC). You may sign documents on their behalf when they are on travel.`,
+        type: 'OIC',
+        relatedId: user._id,
+      });
+    }
+
+    if (previousOicId && previousOicId !== newOicId) {
+      await notifyUserInApp(req.io, previousOicId, {
+        message: `You are no longer the Primary OIC for ${user.name} (${user.role}).`,
+        type: 'OIC',
+        relatedId: user._id,
+      });
+    }
 
     const refreshed = await User.findById(user._id)
       .select('_id name role oicPrimary')

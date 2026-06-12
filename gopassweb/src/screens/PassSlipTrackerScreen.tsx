@@ -1,12 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import {
-  dayFieldFromManilaDate,
-  getManilaWeekKey,
-  getManilaWeekLabel,
-  parseMeridiemTimeInManilaDate,
-} from '../utils/manilaDate';
+import { dayFieldFromManilaDate, getManilaWeekKey, getManilaWeekLabel } from '../utils/manilaDate';
 import { useServerTime } from '../hooks/useServerTime';
+import { getTrackerUsedMinutes } from '../utils/passSlipTrackerUsage';
+import { formatPassSlipBalance, getPassSlipBalanceSeconds } from '../utils/formatPassSlipBalance';
 
 type PassSlipLike = {
   _id: string;
@@ -14,10 +11,17 @@ type PassSlipLike = {
   timeOut?: string;
   estimatedTimeBack?: string;
   status?: string;
+  departureTime?: string;
+  arrivalTime?: string;
+  actualMinutesUsed?: number;
   overdueMinutes?: number;
   hrApprovedBy?: unknown;
   employee?: {
+    _id?: string;
     name?: string;
+    role?: string;
+    passSlipSeconds?: number;
+    passSlipMinutes?: number;
   };
 };
 
@@ -30,6 +34,8 @@ type TrackerRow = {
   thursday: number;
   friday: number;
   overdue: number;
+  /** Live balance from user pass-slip seconds (same as mobile profile). */
+  remainingSeconds?: number;
 };
 
 type WeeklyTrackerSheet = {
@@ -43,7 +49,6 @@ type PassSlipTrackerScreenProps = {
   passSlips: PassSlipLike[];
 };
 
-const WEEKLY_LIMIT_HOURS = 2;
 const webSelectStyle = {
   minWidth: 300,
   padding: '8px 12px',
@@ -66,17 +71,6 @@ const webExportButtonStyle = {
   cursor: 'pointer',
   minWidth: 140,
   boxShadow: '0 1px 2px rgba(16,24,40,0.05)',
-};
-
-const getSlipDurationHours = (slip: PassSlipLike): number => {
-  const baseDate = new Date(slip.date);
-  if (Number.isNaN(baseDate.getTime())) return 0;
-  const start = parseMeridiemTimeInManilaDate(baseDate, slip.timeOut);
-  const end = parseMeridiemTimeInManilaDate(baseDate, slip.estimatedTimeBack);
-  if (!start || !end) return 0;
-  const durationMs = end.getTime() - start.getTime();
-  if (durationMs <= 0) return 0;
-  return durationMs / (1000 * 60 * 60);
 };
 
 const blankSheetForCurrentWeek = (now: Date): WeeklyTrackerSheet => {
@@ -119,11 +113,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
       if (!field) continue;
 
       const employeeName = slip.employee?.name?.trim() || 'Unknown Employee';
-      const plannedHours = getSlipDurationHours(slip);
-      const overdueHours =
-        typeof slip.overdueMinutes === 'number' && slip.overdueMinutes > 0 ? slip.overdueMinutes / 60 : 0;
-      const totalHours = plannedHours + overdueHours;
-      if (totalHours <= 0) continue;
+      const { usedMinutes, lateMinutes } = getTrackerUsedMinutes(slip);
 
       const weekKey = getManilaWeekKey(slipDate);
       if (!perWeek.has(weekKey)) {
@@ -146,8 +136,21 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
         });
       }
       const row = week.rowsByEmployee.get(employeeKey)!;
-      row[field] += totalHours;
-      row.overdue += overdueHours;
+      if (usedMinutes > 0) {
+        row[field] += usedMinutes / 60;
+      }
+      if (lateMinutes > 0) {
+        row.overdue += lateMinutes / 60;
+      }
+      if (
+        slip.employee &&
+        typeof slip.employee === 'object' &&
+        slip.employee.role !== 'President' &&
+        (typeof slip.employee.passSlipSeconds === 'number' ||
+          typeof slip.employee.passSlipMinutes === 'number')
+      ) {
+        row.remainingSeconds = getPassSlipBalanceSeconds(slip.employee);
+      }
     }
 
     const result = Array.from(perWeek.entries())
@@ -195,13 +198,16 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
       'Friday (h:m)',
       'Overdue (h:m)',
       'Total Used',
-      'Remaining Balance (2h cap)',
+      'Remaining Balance',
     ];
     const lines = [headers.map(csvEscape).join(',')];
 
     for (const row of selectedSheet.rows) {
       const totalUsed = getTotalUsedHours(row);
-      const remaining = WEEKLY_LIMIT_HOURS - totalUsed;
+      const remainingLabel =
+        isCurrentWeekSelected && row.remainingSeconds != null
+          ? formatPassSlipBalance(row.remainingSeconds)
+          : '—';
       lines.push(
         [
           row.employeeName,
@@ -212,7 +218,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
           formatHoursAndMinutes(row.friday),
           row.overdue > 0 ? formatHoursAndMinutes(row.overdue) : '—',
           formatHoursAndMinutes(totalUsed),
-          remaining < 0 ? `Over by ${formatHoursAndMinutes(Math.abs(remaining))}` : formatHoursAndMinutes(remaining),
+          remainingLabel,
         ]
           .map((cell) => csvEscape(cell))
           .join(',')
@@ -238,7 +244,10 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
       <View style={styles.headerCard}>
         <View>
           <Text style={styles.title}>Pass Slip Tracker</Text>
-          <Text style={styles.subtitle}>Approved pass slips from current and past records are grouped weekly. Each week is kept as history automatically.</Text>
+          <Text style={styles.subtitle}>
+            Usage is counted after return: actual departure→return time when on time or early; planned plus late time
+            when overdue. In-progress slips show 0 until returned. Remaining balance (current week only) matches the mobile profile and includes seconds.
+          </Text>
         </View>
         <View style={styles.headerMeta}>
           <View style={styles.metaPill}>
@@ -285,14 +294,13 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
               <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Friday (h:m)</Text>
               <Text style={[styles.headerCell, styles.colOverdue, isCompactTable && styles.colOverdueCompact]}>Overdue (h:m)</Text>
               <Text style={[styles.headerCell, styles.colTotal, isCompactTable && styles.colTotalCompact]}>Total Used</Text>
-              <Text style={[styles.headerCell, styles.colBalance, isCompactTable && styles.colBalanceCompact]}>Remaining Balance (2h cap)</Text>
+              <Text style={[styles.headerCell, styles.colBalance, isCompactTable && styles.colBalanceCompact]}>Remaining Balance (h:m:s)</Text>
             </View>
 
             {selectedSheet?.rows?.length ? (
               selectedSheet.rows.map((row, index) => {
                 const totalUsed = getTotalUsedHours(row);
-                const remaining = WEEKLY_LIMIT_HOURS - totalUsed;
-                const isOver = remaining < 0;
+                const showLiveBalance = isCurrentWeekSelected && row.remainingSeconds != null;
                 return (
                   <View key={row.id} style={[styles.tableRow, index % 2 === 1 && styles.tableRowAlt]}>
                     <View style={[styles.colEmployee, styles.cell, isCompactTable && styles.colEmployeeCompact]}>
@@ -322,8 +330,8 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
                       <Text style={styles.valueTextStrong}>{formatHoursAndMinutes(totalUsed)}</Text>
                     </View>
                     <View style={[styles.colBalance, styles.cell, isCompactTable && styles.colBalanceCompact]}>
-                      <Text style={[styles.valueTextStrong, isOver && styles.overLimitText]}>
-                        {isOver ? `Over by ${formatHoursAndMinutes(Math.abs(remaining))}` : formatHoursAndMinutes(remaining)}
+                      <Text style={styles.valueTextStrong}>
+                        {showLiveBalance ? formatPassSlipBalance(row.remainingSeconds) : '—'}
                       </Text>
                     </View>
                   </View>
@@ -523,7 +531,7 @@ const styles = StyleSheet.create({
     flex: undefined,
   },
   colBalanceCompact: {
-    width: 180,
+    width: 200,
     flex: undefined,
   },
   colOverdueCompact: {

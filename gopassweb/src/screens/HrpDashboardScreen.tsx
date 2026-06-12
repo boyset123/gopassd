@@ -137,7 +137,7 @@ function getApiErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-type ReviewActionKind = 'record' | 'sendToPresident' | 'approve' | 'close';
+type ReviewActionKind = 'record' | 'sendToPresident' | 'close';
 
 type ReviewActionFeedback = {
   variant: 'success' | 'error';
@@ -150,12 +150,12 @@ function reviewActionFeedbackTitle(feedback: ReviewActionFeedback): string {
     if (feedback.action === 'record') return 'Could not record';
     if (feedback.action === 'sendToPresident') return 'Could not send';
     if (feedback.action === 'close') return 'Could not close';
-    return 'Could not approve';
+    return 'Could not complete action';
   }
   if (feedback.action === 'record') return 'Recorded';
   if (feedback.action === 'sendToPresident') return 'Sent to President';
   if (feedback.action === 'close') return 'Closed';
-  return 'Approved';
+  return 'Done';
 }
 
 type RootStackParamList = {
@@ -772,14 +772,12 @@ const HrpDashboardScreen = () => {
     const isReturn = status === 'Rejected';
     const isRecordPassSlip = type === 'slip' && status === 'Approved';
     const isSendToPresident = type === 'order' && status === 'For President Approval';
-    const isApproveOrder = type === 'order' && status === 'Approved';
-    const reviewAction: ReviewActionKind | null = isRecordPassSlip
+    const isRecordTravelOrder = type === 'order' && status === 'Approved';
+    const reviewAction: ReviewActionKind | null = isRecordPassSlip || isRecordTravelOrder
       ? 'record'
       : isSendToPresident
         ? 'sendToPresident'
-        : isApproveOrder
-          ? 'approve'
-          : null;
+        : null;
 
     if (isReturn) {
       if (isRejecting) return;
@@ -811,10 +809,12 @@ const HrpDashboardScreen = () => {
       if (reviewAction) {
         const successMessage =
           reviewAction === 'record'
-            ? 'Pass slip has been recorded successfully.'
+            ? type === 'slip'
+              ? 'Pass slip has been recorded successfully.'
+              : 'Travel order has been recorded successfully.'
             : reviewAction === 'sendToPresident'
               ? 'Travel order has been sent to the President for approval.'
-              : 'Travel order has been approved.';
+              : '';
         setReviewActionFeedback({ variant: 'success', message: successMessage, action: reviewAction });
         setHrSignatureForPresident(null);
         setIsModalVisible(false);
@@ -847,10 +847,12 @@ const HrpDashboardScreen = () => {
       } else if (reviewAction) {
         const fallback =
           reviewAction === 'record'
-            ? 'Failed to record the pass slip.'
+            ? type === 'slip'
+              ? 'Failed to record the pass slip.'
+              : 'Failed to record the travel order.'
             : reviewAction === 'sendToPresident'
               ? 'Failed to send the travel order to the President.'
-              : 'Failed to approve the travel order.';
+              : 'Failed to update the request.';
         const apiMessage = getApiErrorMessage(err, fallback);
         console.error('Review action failed:', apiMessage, err);
         setReviewActionFeedback({ variant: 'error', message: apiMessage, action: reviewAction });
@@ -1901,12 +1903,10 @@ const HrpDashboardScreen = () => {
                               : 'Recording…'
                             : isTravelOrderRecommended
                               ? 'Sending…'
-                              : 'Approving…'
+                              : 'Recording…'
                           : isTravelOrderRecommended
                             ? 'Send to President'
-                            : isPassSlipReview
-                              ? 'Record'
-                              : 'Approve';
+                            : 'Record';
                         const onPrimaryPress = () => {
                           handleUpdateStatus(selectedItemType!, selectedItem._id, statusToSend);
                         };
@@ -2182,7 +2182,7 @@ const HrpDashboardScreen = () => {
           </View>
         </Modal>
 
-        {/* Review action result (Record / Send to President / Approve) — Modal works on web */}
+        {/* Review action result (Record / Send to President / Close) — Modal works on web */}
         <Modal
           animationType="fade"
           transparent

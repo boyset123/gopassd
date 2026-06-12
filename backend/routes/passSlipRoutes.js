@@ -13,7 +13,7 @@ const {
   isFivePmEtb,
 } = require('../utils/dateTime');
 const { getEffectiveSigner, isUserOnTravel, toIdString } = require('../utils/oic');
-const { getScheduledReturnMoment } = require('../utils/passSlipSchedule');
+const { getScheduledReturnMoment, hasScheduledDeparturePassed } = require('../utils/passSlipSchedule');
 const { computeReturnBalanceAdjustment } = require('../utils/passSlipBalance');
 const { resolvePassSlipMapRoute } = require('../utils/drivingRoute');
 const { formatPassSlipBalance } = require('../utils/formatPassSlipBalance');
@@ -360,7 +360,7 @@ router.get('/president-pending', [auth], async (req, res) => {
 // Update pass slip status (for first-line approvers, their OICs, and HR)
 router.put('/:id/status', [auth], async (req, res) => {
   try {
-    const { status, approverSignature, rejectionReason } = req.body;
+    const { status, approverSignature, rejectionReason, closureReason } = req.body;
 
     const passSlip = await PassSlip.findById(req.params.id);
     if (!passSlip) {
@@ -370,8 +370,8 @@ router.put('/:id/status', [auth], async (req, res) => {
     const isHr = req.user.role === 'Human Resource Personnel';
 
     if (isHr) {
-      if (!['Approved', 'Completed', 'Rejected'].includes(status)) {
-        return res.status(400).json({ message: 'HR can only approve, complete, or reject pass slips.' });
+      if (!['Approved', 'Completed', 'Rejected', 'Expired'].includes(status)) {
+        return res.status(400).json({ message: 'HR can only approve, complete, reject, or close (expire) pass slips.' });
       }
     } else {
       if (!['Recommended', 'Rejected'].includes(status)) {
@@ -515,6 +515,15 @@ router.put('/:id/status', [auth], async (req, res) => {
       } else if (status === 'Rejected') {
         passSlip.status = status;
         if (rejectionReason != null) passSlip.rejectionReason = String(rejectionReason).trim() || undefined;
+      } else if (status === 'Expired') {
+        if (passSlip.status !== 'Recommended') {
+          return res.status(400).json({ message: 'HR can only close pass slips that are pending HR recording (Recommended).' });
+        }
+        if (!hasScheduledDeparturePassed(passSlip)) {
+          return res.status(400).json({ message: 'Cannot close a pass slip before its scheduled departure time.' });
+        }
+        passSlip.status = 'Expired';
+        if (closureReason != null) passSlip.closureReason = String(closureReason).trim() || undefined;
       } else {
         return res.status(400).json({ message: 'Invalid status update for HR.' });
       }
@@ -543,12 +552,16 @@ router.put('/:id/status', [auth], async (req, res) => {
           notificationMessage = passSlip.rejectionReason
             ? `Your pass slip has been rejected by ${approverName}: ${passSlip.rejectionReason}`
             : `Your pass slip has been rejected by ${approverName}.`;
+        } else if (status === 'Expired') {
+          const base =
+            'Your pass slip was not recorded before your scheduled departure and has been closed. No pass slip minutes were deducted.';
+          notificationMessage = passSlip.closureReason ? `${base} Note: ${passSlip.closureReason}` : base;
         }
 
         if (notificationMessage) {
           const newNotification = {
             message: notificationMessage,
-            type: 'PassSlipStatus',
+            type: status === 'Expired' ? 'PassSlipExpired' : 'PassSlipStatus',
             relatedId: passSlip._id,
           };
           const savedNotification = employee.notifications.create(newNotification);
@@ -608,7 +621,7 @@ router.delete('/:id', auth, async (req, res) => {
         }
     }
 
-    const deletableStatuses = ['Completed', 'Cancelled', 'Rejected'];
+    const deletableStatuses = ['Completed', 'Cancelled', 'Rejected', 'Expired'];
     if (!deletableStatuses.includes(passSlip.status)) {
       return res.status(400).json({ message: 'Only completed, cancelled, or rejected pass slips can be deleted.' });
     }

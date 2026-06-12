@@ -94,6 +94,7 @@ interface Submission {
   employeeAddress?: string;
   participants?: string[];
   rejectionReason?: string;
+  closureReason?: string;
   arrivalStatus?: string;
 }
 
@@ -136,6 +137,8 @@ const getStatusStyle = (status: string) => {
     case 'Rejected':
     case 'Cancelled':
       return styles.statusRejected;
+    case 'Expired':
+      return styles.statusExpired;
     default:
       return styles.statusPending;
   }
@@ -506,6 +509,7 @@ export default function SlipsScreen() {
         completedIndex = 2;
         break;
       case 'Rejected':
+      case 'Expired':
         break;
       default:
         break;
@@ -662,6 +666,19 @@ export default function SlipsScreen() {
               <Text style={styles.reasonNoteText}>{String(item.rejectionReason).trim()}</Text>
             </View>
           ) : null}
+          {item.status === 'Expired' ? (
+            <View style={styles.reasonNote}>
+              <Text style={styles.reasonNoteLabel}>Not recorded before departure</Text>
+              {item.closureReason != null && String(item.closureReason).trim() !== '' ? (
+                <>
+                  <Text style={[styles.reasonNoteLabel, styles.closureReasonLabel]}>Closure reason</Text>
+                  <Text style={styles.reasonNoteText}>{String(item.closureReason).trim()}</Text>
+                </>
+              ) : (
+                <Text style={styles.reasonNoteText}>No pass slip minutes were deducted.</Text>
+              )}
+            </View>
+          ) : null}
           <View style={styles.historyWrapper}>
             {item.type === 'Pass Slip' ? renderPassSlipHistory(item.status) : renderTravelOrderHistory(item.status)}
           </View>
@@ -754,7 +771,7 @@ export default function SlipsScreen() {
 
   const isHistoryItem = (item: Submission) => {
     // Any terminal state (success or not) should live in History, not Active.
-    const terminalStatuses = ['Completed', 'Returned', 'Rejected', 'Cancelled'];
+    const terminalStatuses = ['Completed', 'Returned', 'Rejected', 'Cancelled', 'Expired'];
     return terminalStatuses.includes(item.status);
   };
 
@@ -956,6 +973,20 @@ export default function SlipsScreen() {
                           <Text style={styles.reasonNoteText}>{String(selectedSubmission.rejectionReason).trim()}</Text>
                         </View>
                       )}
+                    {selectedSubmission.status === 'Expired' && (
+                      <View style={[styles.reasonNote, styles.reasonNoteModal]}>
+                        <Text style={styles.reasonNoteLabel}>Not recorded before departure</Text>
+                        {selectedSubmission.closureReason != null &&
+                        String(selectedSubmission.closureReason).trim() !== '' ? (
+                          <>
+                            <Text style={[styles.reasonNoteLabel, styles.closureReasonLabel]}>Closure reason</Text>
+                            <Text style={styles.reasonNoteText}>{String(selectedSubmission.closureReason).trim()}</Text>
+                          </>
+                        ) : (
+                          <Text style={styles.reasonNoteText}>No pass slip minutes were deducted.</Text>
+                        )}
+                      </View>
+                    )}
                   </>
                 )}
 
@@ -1650,6 +1681,13 @@ const styles = StyleSheet.create({
   statusRejected: {
     backgroundColor: '#fee2e2',
     color: '#991b1b',
+  },
+  statusExpired: {
+    backgroundColor: '#fef3c7',
+    color: '#92400e',
+  },
+  closureReasonLabel: {
+    marginTop: 6,
   },
   viewButton: {
     backgroundColor: theme.primary,

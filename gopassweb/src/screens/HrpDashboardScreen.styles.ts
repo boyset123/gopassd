@@ -684,6 +684,17 @@ export const styles = StyleSheet.create({
     rejectButton: {
       backgroundColor: colors.danger,
     },
+    closeButton: {
+      backgroundColor: '#6b7280',
+    },
+    closeModalConfirm: {
+      backgroundColor: '#6b7280',
+    },
+    closeModalConfirmText: {
+      color: '#fff',
+      fontWeight: '600',
+      fontSize: 15,
+    },
     rejectModalOverlay: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.5)',

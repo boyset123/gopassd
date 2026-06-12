@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_URL } from '../config/api';
 import { formatRoleLabel } from '../utils/roleLabels';
@@ -602,11 +603,11 @@ export const TravelOrderFormWeb: React.FC<TravelOrderFormWebProps> = ({
 
         <View style={styles.formRow}>
           <Text style={styles.formLabel}>Date of Departure:</Text>
-          <Text style={styles.formValueUnderlined}>{formatDate(order.departureDate, true)}</Text>
+          <Text style={styles.formValueUnderlined}>{formatTravelPeriodDate(order.departureDate)}</Text>
         </View>
         <View style={styles.formRow}>
           <Text style={styles.formLabel}>Date of Arrival:</Text>
-          <Text style={styles.formValueUnderlined}>{formatDate(order.arrivalDate, true)}</Text>
+          <Text style={styles.formValueUnderlined}>{formatTravelPeriodDate(order.arrivalDate)}</Text>
         </View>
         {order.travelType === 'OT' && order.timeOut ? (
           <View style={styles.formRow}>

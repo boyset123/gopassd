@@ -20,6 +20,7 @@ const { Server } = require('socket.io');
 const cron = require('node-cron');
 const User = require('./models/User');
 const { autoReturnFivePmSlips } = require('./jobs/autoReturnFivePmSlips');
+const { autoExpireRecommendedSlips } = require('./jobs/autoExpireRecommendedSlips');
 const { verifyEmailOnStartup } = require('./utils/sendEmail');
 
 function loadServiceAccount() {
@@ -148,6 +149,7 @@ io.on('connection', (socket) => {
 // Auto-return pass slips with 5:00 PM estimated return (every minute)
 cron.schedule('* * * * *', () => {
   autoReturnFivePmSlips(io);
+  autoExpireRecommendedSlips(io);
 });
 
 // Cron job to reset pass slip minutes every Monday at midnight

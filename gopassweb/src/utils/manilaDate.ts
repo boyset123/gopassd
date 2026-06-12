@@ -47,6 +47,13 @@ export function isFivePmEtb(timeStr?: string | null): boolean {
   return hours === 17 && minutes === 0;
 }
 
+/** True when scheduled departure (timeOut on date) is in the past (Manila time). */
+export function hasScheduledDeparturePassed(dateValue: Date | string, timeOut?: string): boolean {
+  const start = parseMeridiemTimeInManilaDate(dateValue, timeOut);
+  if (!start) return false;
+  return start.getTime() < Date.now();
+}
+
 export function parseMeridiemTimeInManilaDate(dateValue: Date | string, timeValue?: string): Date | null {
   if (!timeValue) return null;
   const match = String(timeValue).match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);

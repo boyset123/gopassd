@@ -1,4 +1,4 @@
-const { parseMeridiemTimeToDate, getManilaDateParts } = require('./dateTime');
+const { parseMeridiemTimeToDate, getManilaDateParts, serverNow } = require('./dateTime');
 
 /**
  * Compute scheduled return instant anchored to departureTime (matches client timers).
@@ -26,4 +26,11 @@ function getScheduledReturnMoment(passSlip) {
   return scheduled;
 }
 
-module.exports = { getScheduledReturnMoment };
+/** True when the slip's scheduled departure (timeOut on date) is in the past (Manila time). */
+function hasScheduledDeparturePassed(passSlip) {
+  const startTime = parseMeridiemTimeToDate(passSlip.timeOut, passSlip.date);
+  if (!startTime) return false;
+  return startTime.getTime() < serverNow().getTime();
+}
+
+module.exports = { getScheduledReturnMoment, hasScheduledDeparturePassed };

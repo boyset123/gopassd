@@ -28,7 +28,7 @@ const passSlipSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['Pending', 'Recommended', 'Approved', 'Rejected', 'Completed', 'Verified', 'Returned', 'Cancelled'],
+    enum: ['Pending', 'Recommended', 'Approved', 'Rejected', 'Completed', 'Verified', 'Returned', 'Cancelled', 'Expired'],
     default: 'Pending',
   },
   approvedBy: {
@@ -95,6 +95,9 @@ const passSlipSchema = new mongoose.Schema({
     type: String,
   },
   rejectionReason: {
+    type: String,
+  },
+  closureReason: {
     type: String,
   },
   createdAt: {

@@ -22,6 +22,8 @@ import { getTravelOrderPrintHtml } from '../../utils/travelOrderPrintHtml';
 import { getPassSlipPrintHtml } from '../../utils/passSlipPrintHtml';
 import { assetToImageDataUri } from '../../utils/printImageDataUri';
 import { AuditTrailModal } from '../../components/AuditTrailModal';
+import PassSlipCalendarView from '../../components/PassSlipCalendarView';
+import { CalendarSubmissionLike } from '../../utils/passSlipCalendarEvents';
 import { AuditTrailEvent, formatAuditDate, formatAuditTime, resolveCancelledTimestamp } from '../../utils/auditTrail';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
@@ -166,7 +168,7 @@ export default function SlipsScreen() {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
+  const [activeTab, setActiveTab] = useState<'active' | 'history' | 'calendar'>('active');
   const [isViewModalVisible, setViewModalVisible] = useState(false);
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
   const [isQrModalVisible, setQrModalVisible] = useState(false);
@@ -820,6 +822,13 @@ export default function SlipsScreen() {
     );
   };
 
+  const handleCalendarSelect = (item: CalendarSubmissionLike) => {
+    const fullSubmission = submissions.find((submission) => submission._id === item._id);
+    if (!fullSubmission) return;
+    setSelectedSubmission(fullSubmission);
+    setViewModalVisible(true);
+  };
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -873,9 +882,26 @@ export default function SlipsScreen() {
               History ({historySubmissions.length})
             </Text>
           </Pressable>
+          <Pressable
+            style={[styles.tab, activeTab === 'calendar' && styles.activeTab]}
+            onPress={() => setActiveTab('calendar')}
+          >
+            <FontAwesome name="calendar" size={18} color={activeTab === 'calendar' ? theme.primary : theme.textMuted} style={styles.tabIcon} />
+            <Text style={[styles.tabText, activeTab === 'calendar' && styles.activeTabText]}>
+              Calendar
+            </Text>
+          </Pressable>
         </View>
 
-        {(activeTab === 'active' ? activeSubmissions : historySubmissions).length > 0 ? (
+        {activeTab === 'calendar' ? (
+          <PassSlipCalendarView
+            submissions={submissions}
+            onSelectSubmission={handleCalendarSelect}
+            onRefresh={onRefresh}
+            refreshing={refreshing}
+            contentPaddingBottom={(insets.bottom || 20) + 88}
+          />
+        ) : (activeTab === 'active' ? activeSubmissions : historySubmissions).length > 0 ? (
           <FlatList
             data={activeTab === 'active' ? activeSubmissions : historySubmissions}
             renderItem={renderItem}

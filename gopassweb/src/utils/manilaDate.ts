@@ -93,3 +93,37 @@ export function getManilaWeekLabel(weekKey: string): string {
     timeZone: 'Asia/Manila',
   })}`;
 }
+
+export function formatManilaDateYmd(value: Date | string): string {
+  const parts = getManilaDateParts(value);
+  if (!parts) return '';
+  return `${parts.year}-${String(parts.monthIndex + 1).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+}
+
+export function getManilaMonthBounds(year: number, monthIndex: number): { from: string; to: string } {
+  const firstDay = buildManilaDate(year, monthIndex, 1, 0, 0);
+  const lastDay = new Date(buildManilaDate(year, monthIndex + 1, 0, 0, 0).getTime());
+  return {
+    from: formatManilaDateYmd(firstDay),
+    to: formatManilaDateYmd(lastDay),
+  };
+}
+
+export function formatManilaMonthYear(year: number, monthIndex: number): string {
+  const d = buildManilaDate(year, monthIndex, 1, 0, 0);
+  return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'Asia/Manila' });
+}
+
+export function formatManilaDayLabel(ymd: string): string {
+  const parts = ymd.split('-').map((n) => parseInt(n, 10));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return ymd;
+  const d = buildManilaDate(parts[0], parts[1] - 1, parts[2], 0, 0);
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' });
+}
+
+export function addDaysToYmd(ymd: string, days: number): string {
+  const parts = ymd.split('-').map((n) => parseInt(n, 10));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return ymd;
+  const d = buildManilaDate(parts[0], parts[1] - 1, parts[2] + days, 0, 0);
+  return formatManilaDateYmd(d);
+}

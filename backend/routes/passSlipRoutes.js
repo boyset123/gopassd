@@ -8,13 +8,14 @@ const admin = require('firebase-admin');
 const {
   parseMeridiemTimeToDate,
   parseMeridiemTimeToMillisOfDay,
+  parseLocalDate,
   serverNow,
   getManilaTodayStart,
   isFivePmEtb,
 } = require('../utils/dateTime');
 const { getEffectiveSigner, isUserOnTravel, toIdString } = require('../utils/oic');
 const { getScheduledReturnMoment, hasScheduledDeparturePassed } = require('../utils/passSlipSchedule');
-const { computeReturnBalanceAdjustment } = require('../utils/passSlipBalance');
+const { computeReturnBalanceAdjustment, formatReturnAuditDetails } = require('../utils/passSlipBalance');
 const { resolvePassSlipMapRoute } = require('../utils/drivingRoute');
 const { formatPassSlipBalance } = require('../utils/formatPassSlipBalance');
 const { isWithinMatiCity, MATI_CITY_VICINITY_MESSAGE } = require('../utils/matiCityVicinity');
@@ -27,6 +28,7 @@ const {
 } = require('../utils/passSlipDuration');
 const { findOverlappingPassSlip, formatOverlapMessage } = require('../utils/passSlipOverlap');
 const { appendAuditLog, buildPassSlipAuditTrail } = require('../utils/auditLog');
+const { getTrackerUsedMinutes } = require('../utils/passSlipTrackerUsage');
 
 function attachEmployeeBalance(slip) {
   const obj = slip?.toObject ? slip.toObject() : { ...slip };
@@ -103,7 +105,9 @@ async function getWeeklyUsedMinutes(employeeId, targetDate) {
     employee: employeeId,
     status: { $in: ['Approved', 'Verified', 'Returned', 'Completed'] },
     date: { $gte: fromDate, $lte: toDate },
-  }).select('date timeOut estimatedTimeBack overdueMinutes');
+  }).select(
+    'date timeOut estimatedTimeBack overdueMinutes status departureTime arrivalTime actualMinutesUsed',
+  );
 
   let used = 0;
   for (const slip of candidates) {
@@ -111,9 +115,13 @@ async function getWeeklyUsedMinutes(employeeId, targetDate) {
     if (!info || info.weekKey !== target.weekKey) continue;
     if (info.dayOfWeek < 1 || info.dayOfWeek > 5) continue;
 
-    used += getSlipPlannedBillableMinutes(slip);
-    if (typeof slip.overdueMinutes === 'number' && slip.overdueMinutes > 0) {
-      used += slip.overdueMinutes;
+    if (slip.status === 'Returned' || slip.status === 'Completed') {
+      used += getTrackerUsedMinutes(slip).usedMinutes;
+    } else {
+      used += getSlipPlannedBillableMinutes(slip);
+      if (typeof slip.overdueMinutes === 'number' && slip.overdueMinutes > 0) {
+        used += slip.overdueMinutes;
+      }
     }
   }
   return used;
@@ -659,6 +667,62 @@ router.put('/:id/status', [auth], async (req, res) => {
   }
 });
 
+// HR calendar: pass slips in a Manila date range (must be before /:id routes)
+router.get('/calendar', [auth, authorize('Human Resource Personnel')], async (req, res) => {
+  try {
+    const { from, to, campus, faculty, status } = req.query;
+    if (!from || !to) {
+      return res.status(400).json({ message: 'from and to query parameters are required (YYYY-MM-DD).' });
+    }
+
+    const fromStart = parseLocalDate(from);
+    const toDayStart = parseLocalDate(to);
+    if (!fromStart || !toDayStart) {
+      return res.status(400).json({ message: 'Invalid from or to date format. Use YYYY-MM-DD.' });
+    }
+    const toEndExclusive = new Date(toDayStart.getTime() + 24 * 60 * 60 * 1000);
+
+    const query = {
+      date: { $gte: fromStart, $lt: toEndExclusive },
+    };
+    if (status && String(status).trim() && status !== 'All') {
+      query.status = String(status).trim();
+    }
+
+    let slips = await PassSlip.find(query)
+      .populate('employee', 'name campus faculty role')
+      .select('_id date timeOut estimatedTimeBack destination purpose status employee trackingNo')
+      .sort({ date: 1, timeOut: 1 })
+      .lean();
+
+    if (campus && campus !== 'All Campuses') {
+      slips = slips.filter((slip) => slip.employee?.campus === campus);
+    }
+    if (faculty && faculty !== 'All Faculties') {
+      slips = slips.filter((slip) => slip.employee?.faculty === faculty);
+    }
+
+    res.json(slips);
+  } catch (error) {
+    console.error('Error fetching calendar pass slips:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get all returned pass slips (for HR) — must be before /:id routes
+router.get('/returned', [auth, authorize('Human Resource Personnel')], async (req, res) => {
+  try {
+    const returnedSlips = await PassSlip.find({ status: 'Returned' })
+      .populate('employee', 'name email profilePicture')
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role');
+    res.json(returnedSlips);
+  } catch (error) {
+    console.error('Error fetching returned pass slips:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get slips for the current user
 router.get('/my-slips', auth, async (req, res) => {
   try {
@@ -1074,7 +1138,7 @@ router.put('/:id/return', [auth, authorize('Security Personnel')], async (req, r
       performedByName: (await User.findById(req.user.userId).select('name').lean())?.name,
       role: 'Security Personnel',
       timestamp: passSlip.arrivalTime,
-      details: actualMinutes != null ? `Duration: ${actualMinutes} min` : undefined,
+      details: formatReturnAuditDetails(actualMinutes, adjustment),
     });
 
     await passSlip.save();
@@ -1094,23 +1158,12 @@ router.put('/:id/return', [auth, authorize('Security Personnel')], async (req, r
     // --- Real-time Update via Socket.IO ---
     req.io.emit('passSlipReturned', passSlip);
 
-    res.json(passSlip);
+    res.json({
+      ...passSlip.toObject(),
+      balanceAdjustmentSeconds: adjustment,
+    });
   } catch (error) {
     console.error('Error marking pass slip as returned:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Get all returned pass slips (for HR)
-router.get('/returned', [auth, authorize('Human Resource Personnel')], async (req, res) => {
-  try {
-    const returnedSlips = await PassSlip.find({ status: 'Returned' })
-      .populate('employee', 'name email profilePicture')
-      .populate('approvedBy', 'name role')
-      .populate('approvedBySignedAsOicFor', 'name role');
-    res.json(returnedSlips);
-  } catch (error) {
-    console.error('Error fetching returned pass slips:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

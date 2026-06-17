@@ -1,6 +1,7 @@
 const { parseMeridiemTimeToDate } = require('./dateTime');
 const { getScheduledReturnMoment } = require('./passSlipSchedule');
 const { getBillableDurationSeconds } = require('./passSlipDuration');
+const { formatPassSlipBalance } = require('./formatPassSlipBalance');
 
 /**
  * Compute balance adjustment when a verified pass slip is returned.
@@ -54,4 +55,21 @@ function computeReturnBalanceAdjustment(passSlip, arrivalTime) {
   return { adjustment, actualMinutes, plannedMinutes, overdueMinutes };
 }
 
-module.exports = { computeReturnBalanceAdjustment };
+/** Human-readable audit details for a return scan (duration + balance credit/debit). */
+function formatReturnAuditDetails(actualMinutes, adjustmentSeconds) {
+  const parts = [];
+  if (actualMinutes != null) {
+    parts.push(`Duration: ${actualMinutes} min`);
+  }
+  if (adjustmentSeconds > 0) {
+    parts.push(`Balance credited: ${formatPassSlipBalance(adjustmentSeconds)}`);
+  } else if (adjustmentSeconds < 0) {
+    parts.push(`Balance deducted: ${formatPassSlipBalance(-adjustmentSeconds)}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
+module.exports = {
+  computeReturnBalanceAdjustment,
+  formatReturnAuditDetails,
+};

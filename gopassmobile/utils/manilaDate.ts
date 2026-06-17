@@ -63,3 +63,17 @@ export function parseMeridiemTimeInManilaDate(dateValue: Date | string, timeValu
   if (!parts) return null;
   return buildManilaDate(parts.year, parts.monthIndex, parts.day, hours, minutes);
 }
+
+export function addDaysToYmd(ymd: string, days: number): string {
+  const parts = ymd.split('-').map((n) => parseInt(n, 10));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return ymd;
+  const d = buildManilaDate(parts[0], parts[1] - 1, parts[2] + days, 0, 0);
+  return formatManilaDateYmd(d);
+}
+
+export function formatManilaDayLabel(ymd: string): string {
+  const parts = ymd.split('-').map((n) => parseInt(n, 10));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return ymd;
+  const d = buildManilaDate(parts[0], parts[1] - 1, parts[2], 0, 0);
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' });
+}

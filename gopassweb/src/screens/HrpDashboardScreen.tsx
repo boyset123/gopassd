@@ -24,6 +24,7 @@ import MonitoringApprovedTravelOrdersCard, { ApprovedTravelOrder } from '../comp
 import MonitoringActivePassSlipsCard from '../components/MonitoringActivePassSlipsCard';
 import HrpReportsAnalytics from '../components/HrpReportsAnalytics';
 import PassSlipTrackerScreen from './PassSlipTrackerScreen';
+import PassSlipCalendarScreen from './PassSlipCalendarScreen';
 import HrpUserApprovals from '../components/HrpUserApprovals';
 import { styles } from './HrpDashboardScreen.styles';
 import { profilePictureUri } from '../utils/profilePictureUri';
@@ -128,7 +129,7 @@ type MonitoringPassSlip = PassSlip & { type: 'slip' };
 type MonitoringItem = MonitoringPassSlip;
 
 type ItemType = 'slip' | 'order';
-type DashboardView = 'dashboard' | 'records' | 'reports' | 'monitoring' | 'passSlipTracker' | 'userApprovals';
+type DashboardView = 'dashboard' | 'records' | 'reports' | 'monitoring' | 'calendar' | 'passSlipTracker' | 'userApprovals';
 
 function getApiErrorMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err) && err.response?.data?.message) {
@@ -455,6 +456,7 @@ const HrpDashboardScreen = () => {
   const [selectedItem, setSelectedItem] = useState<PassSlip | TravelOrder | MonitoringItem | null>(null);
   const [selectedItemType, setSelectedItemType] = useState<ItemType | null>(null);
   const [activeView, setActiveView] = useState<DashboardView>('dashboard');
+  const [calendarRefreshKey, setCalendarRefreshKey] = useState(0);
   const [monitoringSubView, setMonitoringSubView] = useState<'slip' | 'order'>('slip');
   const [isMonitoringExpanded, setIsMonitoringExpanded] = useState(true);
   const [name, setName] = useState('');
@@ -579,6 +581,7 @@ const HrpDashboardScreen = () => {
       const recordsResponse = await axios.get(`${API_URL}/records`, { headers });
       setRecords(recordsResponse.data);
       setFilteredRecords(recordsResponse.data);
+      setCalendarRefreshKey((key) => key + 1);
 
     } catch (err) {
       if (!silent) {
@@ -990,6 +993,15 @@ const HrpDashboardScreen = () => {
     void fetchDocumentNumberPreview(item, type);
   };
 
+  const handleCalendarSlipSelect = useCallback((slip: { _id: string }) => {
+    const fullSlip =
+      trackerPassSlips.find((item) => item._id === slip._id) ||
+      forReviewItems.find((item): item is PassSlip => 'destination' in item && item._id === slip._id) ||
+      records.find((item): item is PassSlip => 'destination' in item && item._id === slip._id) ||
+      (slip as PassSlip);
+    openReviewModal(fullSlip, 'slip');
+  }, [trackerPassSlips, forReviewItems, records]);
+
   const openCtcModal = (order: ApprovedTravelOrder) => {
     if (!FEATURE_CTC_ENABLED) return;
     setCtcIssueDateIso(new Date().toISOString());
@@ -1254,6 +1266,18 @@ const HrpDashboardScreen = () => {
               </View>
             )}
             <Pressable
+              style={getNavItemStyle('calendar')}
+              onPress={() => {
+                setActiveView('calendar');
+                dismissMobileSidebar();
+              }}
+            >
+              <View style={styles.navIcon}>
+                <FontAwesome name="calendar" size={20} color={activeView === 'calendar' ? '#011a6b' : 'rgba(255,255,255,0.75)'} />
+              </View>
+              <Text style={[styles.navText, activeView === 'calendar' && styles.activeNavText]}>Calendar</Text>
+            </Pressable>
+            <Pressable
               style={getNavItemStyle('passSlipTracker')}
               onPress={() => {
                 setActiveView('passSlipTracker');
@@ -1324,6 +1348,7 @@ const HrpDashboardScreen = () => {
               {activeView === 'records' && 'Records'}
               {activeView === 'reports' && 'Reports & Analytics'}
               {activeView === 'monitoring' && 'Monitoring'}
+              {activeView === 'calendar' && 'Calendar'}
               {activeView === 'passSlipTracker' && 'Pass Slip Tracker'}
               {activeView === 'userApprovals' && 'User Approvals'}
             </Text>
@@ -1634,6 +1659,18 @@ const HrpDashboardScreen = () => {
             )}
 
             {activeView === 'passSlipTracker' && <PassSlipTrackerScreen passSlips={trackerPassSlips} />}
+            {activeView === 'calendar' && (
+              <PassSlipCalendarScreen
+                campuses={campuses}
+                faculties={faculties}
+                campusFilter={campusFilter}
+                facultyFilter={facultyFilter}
+                onCampusFilterChange={setCampusFilter}
+                onFacultyFilterChange={setFacultyFilter}
+                onSelectSlip={handleCalendarSlipSelect}
+                refreshKey={calendarRefreshKey}
+              />
+            )}
             {activeView === 'userApprovals' && <HrpUserApprovals />}
             </ScrollView>
 

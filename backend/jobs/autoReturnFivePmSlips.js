@@ -2,8 +2,9 @@ const PassSlip = require('../models/PassSlip');
 const User = require('../models/User');
 const { isFivePmEtb, serverNow } = require('../utils/dateTime');
 const { getScheduledReturnMoment } = require('../utils/passSlipSchedule');
-const { computeReturnBalanceAdjustment } = require('../utils/passSlipBalance');
+const { computeReturnBalanceAdjustment, formatReturnAuditDetails } = require('../utils/passSlipBalance');
 const { getPassSlipSeconds, setPassSlipSeconds } = require('../utils/passSlipBalanceState');
+const { appendAuditLog } = require('../utils/auditLog');
 
 function emitBalanceUpdate(io, userId, passSlipSeconds) {
   if (!io) return;
@@ -35,6 +36,13 @@ async function autoReturnFivePmSlips(io) {
       slip.arrivalTime = scheduledReturn;
       slip.overdueMinutes = overdueMinutes;
       slip.actualMinutesUsed = actualMinutes;
+      appendAuditLog(slip, {
+        action: 'returned',
+        label: 'Auto-returned at 5:00 PM',
+        role: 'System',
+        timestamp: slip.arrivalTime,
+        details: formatReturnAuditDetails(actualMinutes, adjustment),
+      });
       await slip.save();
 
       if (adjustment !== 0) {

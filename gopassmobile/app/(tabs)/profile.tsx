@@ -15,6 +15,7 @@ import { formatPassSlipBalance, getPassSlipBalanceSeconds } from '../../utils/fo
 import { formatRoleLabel } from '../../utils/roleLabels';
 import { clearSavedCredentials } from '../../utils/savedCredentials';
 import { SavedSignatureProfileCard } from '../../components/SavedSignatureProfileCard';
+import { ServiceCreditsProfileCard } from '../../components/ServiceCreditsProfileCard';
 
 function resolveProfilePictureUri(pathOrUrl: string, apiUrl: string): string {
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
@@ -993,6 +994,10 @@ export default function ProfileScreen() {
                 </View>
               </View>
             </View>
+          )}
+
+          {user?.role !== 'President' && (
+            <ServiceCreditsProfileCard userName={user?.name} />
           )}
 
           {canAssignOic && (

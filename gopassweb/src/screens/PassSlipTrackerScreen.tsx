@@ -196,7 +196,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
       'Wednesday (h:m)',
       'Thursday (h:m)',
       'Friday (h:m)',
-      'Overdue (h:m)',
+      'Late (h:m)',
       'Total Used',
       'Remaining Balance',
     ];
@@ -246,7 +246,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
           <Text style={styles.title}>Pass Slip Tracker</Text>
           <Text style={styles.subtitle}>
             Usage is counted after return: actual departure→return time when on time or early; planned plus late time
-            when overdue. The 12:00–1:00 PM lunch break is excluded from planned and actual duration. In-progress slips show 0 until returned.
+            when late. The 12:00–1:00 PM lunch break is excluded from planned and actual duration. In-progress slips show 0 until returned.
             Remaining balance (current week only) matches the mobile profile and includes seconds.
           </Text>
         </View>
@@ -293,7 +293,7 @@ export default function PassSlipTrackerScreen({ passSlips }: PassSlipTrackerScre
               <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Wednesday (h:m)</Text>
               <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Thursday (h:m)</Text>
               <Text style={[styles.headerCell, styles.colDay, isCompactTable && styles.colDayCompact]}>Friday (h:m)</Text>
-              <Text style={[styles.headerCell, styles.colOverdue, isCompactTable && styles.colOverdueCompact]}>Overdue (h:m)</Text>
+              <Text style={[styles.headerCell, styles.colOverdue, isCompactTable && styles.colOverdueCompact]}>Late (h:m)</Text>
               <Text style={[styles.headerCell, styles.colTotal, isCompactTable && styles.colTotalCompact]}>Total Used</Text>
               <Text style={[styles.headerCell, styles.colBalance, isCompactTable && styles.colBalanceCompact]}>Remaining Balance (h:m:s)</Text>
             </View>

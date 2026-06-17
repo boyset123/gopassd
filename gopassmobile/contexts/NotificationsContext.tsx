@@ -9,6 +9,7 @@ import { useServerTime } from '../hooks/useServerTime';
 import { getPassSlipDeadlineMs } from '../utils/passSlipTimer';
 import { isFivePmEtb } from '../utils/manilaDate';
 import { initializeNotificationSound, playNotificationSound } from '../services/notificationSound';
+import { showNotificationToast } from '../utils/notificationToast';
 import type { Notification } from '../components/NotificationsModal';
 
 function sameId(a: unknown, b: unknown): boolean {
@@ -121,6 +122,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       if (initialFetchDone.current && newestId && newestId !== previousNewestId.current) {
         if (__DEV__) console.log('[Notifications] new notification from fetch, playing sound');
         playNotificationSound();
+        const newestMessage = next[0] ? pickMessage(next[0]) : '';
+        showNotificationToast(newestMessage);
       }
       previousNewestId.current = newestId;
       initialFetchDone.current = true;
@@ -135,15 +138,19 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       if (__DEV__) console.warn('[Notifications] addNotification skipped (no notification or _id)');
       return;
     }
+    const normalized = normalizeNotification(notification);
+    let added = false;
     setNotifications((prev) => {
-      const normalized = normalizeNotification(notification);
       const exists = prev.some((n) => sameId(n._id, normalized._id));
       if (exists) return prev;
+      added = true;
       return [normalized, ...prev];
     });
+    if (!added) return;
     previousNewestId.current = String(notification._id);
     if (__DEV__) console.log('[Notifications] playNotificationSound() called');
     playNotificationSound();
+    showNotificationToast(pickMessage(notification));
   }, []);
 
   const syncPassSlipAlerts = useCallback(async () => {

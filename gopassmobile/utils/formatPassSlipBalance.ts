@@ -9,20 +9,18 @@ export function formatPassSlipBalance(totalSecondsInput: number | undefined | nu
   return `${hours}h ${mins}m ${secs}s`;
 }
 
-const WEEKLY_CAP_SECONDS = 7200;
-
-/** Resolve balance seconds from API payload (supports legacy passSlipMinutes). */
+/** Resolve balance seconds from API payload. passSlipSeconds is canonical when set. */
 export function getPassSlipBalanceSeconds(user: {
   passSlipSeconds?: number;
   passSlipMinutes?: number;
 }): number {
-  const minutes =
-    typeof user.passSlipMinutes === 'number' && !Number.isNaN(user.passSlipMinutes)
-      ? Math.max(0, Math.floor(user.passSlipMinutes))
-      : null;
   const secondsRaw =
     typeof user.passSlipSeconds === 'number' && !Number.isNaN(user.passSlipSeconds)
       ? Math.max(0, Math.floor(user.passSlipSeconds))
+      : null;
+  const minutes =
+    typeof user.passSlipMinutes === 'number' && !Number.isNaN(user.passSlipMinutes)
+      ? Math.max(0, Math.floor(user.passSlipMinutes))
       : null;
 
   if (secondsRaw == null) {
@@ -32,15 +30,10 @@ export function getPassSlipBalanceSeconds(user: {
     return secondsRaw;
   }
 
-  const fromMinutes = minutes * 60;
+  // Legacy: seconds field accidentally stored as whole minutes.
   if (secondsRaw === minutes && secondsRaw <= 120) {
-    return fromMinutes;
+    return minutes * 60;
   }
-  if (Math.floor(secondsRaw / 60) === minutes) {
-    return secondsRaw;
-  }
-  if (secondsRaw >= WEEKLY_CAP_SECONDS && fromMinutes < secondsRaw) {
-    return fromMinutes;
-  }
+
   return secondsRaw;
 }

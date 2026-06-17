@@ -763,7 +763,7 @@ export default function SlipsScreen() {
           {item.type === 'Pass Slip' && item.status === 'Returned' && typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0 && (
             <View style={styles.overdueBox}>
               <FontAwesome name="exclamation-triangle" size={14} color={theme.danger} style={styles.cardRowIcon} />
-              <Text style={styles.overdueText}>Overdue: {Math.round(item.overdueMinutes)} min added to time spent</Text>
+              <Text style={styles.overdueText}>Late: {Math.round(item.overdueMinutes)} min added to time spent</Text>
             </View>
           )}
         </View>

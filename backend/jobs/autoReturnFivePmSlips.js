@@ -3,7 +3,7 @@ const User = require('../models/User');
 const { isFivePmEtb, serverNow } = require('../utils/dateTime');
 const { getScheduledReturnMoment } = require('../utils/passSlipSchedule');
 const { computeReturnBalanceAdjustment, formatReturnAuditDetails } = require('../utils/passSlipBalance');
-const { getPassSlipSeconds, setPassSlipSeconds } = require('../utils/passSlipBalanceState');
+const { getPassSlipSeconds, getStoredPassSlipSeconds, setPassSlipSeconds } = require('../utils/passSlipBalanceState');
 const { appendAuditLog } = require('../utils/auditLog');
 
 function emitBalanceUpdate(io, userId, passSlipSeconds) {
@@ -50,7 +50,7 @@ async function autoReturnFivePmSlips(io) {
         if (employee) {
           const updatedSeconds = setPassSlipSeconds(
             employee,
-            getPassSlipSeconds(employee) + adjustment,
+            getStoredPassSlipSeconds(employee) + adjustment,
           );
           await employee.save();
           emitBalanceUpdate(io, employee._id, updatedSeconds);

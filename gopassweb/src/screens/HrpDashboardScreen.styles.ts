@@ -348,32 +348,6 @@ export const styles = StyleSheet.create({
       color: colors.text,
       marginBottom: 16,
     },
-    liveUpdateBanner: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
-      marginHorizontal: 28,
-      marginTop: 12,
-      paddingVertical: 12,
-      paddingHorizontal: 16,
-      backgroundColor: 'rgba(254, 206, 0, 0.18)',
-      borderWidth: 1,
-      borderColor: colors.accent,
-      borderRadius: 10,
-    },
-    liveUpdateBannerMobile: {
-      marginHorizontal: 16,
-    },
-    liveUpdateBannerText: {
-      flex: 1,
-      fontSize: 14,
-      color: colors.primary,
-      lineHeight: 20,
-    },
-    liveUpdateBannerDismiss: {
-      padding: 4,
-    },
     header: {
       flexDirection: 'row',
       justifyContent: 'space-between',

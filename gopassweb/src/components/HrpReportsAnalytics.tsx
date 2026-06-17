@@ -114,7 +114,7 @@ const filterByType = (records: RecordLike[], type: 'Pass Slip' | 'Travel Order')
 const computePassSlipKpis = (records: RecordLike[]) => {
   const total = records.length;
   const onTime = records.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('on time')).length;
-  const overdue = records.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('overdue')).length;
+  const overdue = records.filter((r) => (r.arrivalStatus || '').toLowerCase().includes('late by')).length;
   return { total, onTime, overdue };
 };
 
@@ -362,7 +362,7 @@ const ReportTable = ({ records, emptyTitle, emptySubtitle, isNarrow }: ReportTab
           const arrivalRaw = r.arrivalStatus;
           const arrival = arrivalRaw ? stripArrivalStatusDisplaySuffix(arrivalRaw) : '—';
           const arrivalLower = arrival.toLowerCase();
-          const arrivalVariant = arrivalLower.includes('overdue')
+          const arrivalVariant = arrivalLower.includes('late by')
             ? 'overdue'
             : arrivalLower.includes('on time')
               ? 'onTime'
@@ -531,7 +531,7 @@ const DocumentTypeReportPanel = ({
               <Text style={[styles.kpiValue, { color: '#16a34a' }]}>{passSlipKpis.onTime}</Text>
             </View>
             <View style={[styles.kpiCard, styles.kpiCardPassSlip]}>
-              <Text style={styles.kpiLabel}>Overdue</Text>
+              <Text style={styles.kpiLabel}>Late</Text>
               <Text style={[styles.kpiValue, { color: '#dc3545' }]}>{passSlipKpis.overdue}</Text>
             </View>
           </>
@@ -560,7 +560,7 @@ const DocumentTypeReportPanel = ({
                   size={100}
                   segments={[
                     { label: 'On time', value: passSlipKpis.onTime, color: '#16a34a' },
-                    { label: 'Overdue', value: passSlipKpis.overdue, color: '#dc3545' },
+                    { label: 'Late', value: passSlipKpis.overdue, color: '#dc3545' },
                   ]}
                 />
               </Animated.View>
@@ -574,7 +574,7 @@ const DocumentTypeReportPanel = ({
                 <View style={styles.legendRow}>
                   <View style={[styles.legendSwatch, { backgroundColor: '#dc3545' }]} />
                   <Text style={styles.legendText} numberOfLines={2}>
-                    Overdue · {passSlipKpis.overdue}
+                    Late · {passSlipKpis.overdue}
                   </Text>
                 </View>
               </View>

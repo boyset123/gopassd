@@ -154,11 +154,22 @@ function startUserStream() {
     if (!notificationsFieldUpdated(change)) return;
     const userId = change.documentKey?._id?.toString();
     if (!userId) return;
+
+    let notificationMessage;
+    const notifications = change.fullDocument?.notifications;
+    if (Array.isArray(notifications) && notifications.length > 0) {
+      const newest = notifications[notifications.length - 1];
+      if (newest && typeof newest.message === 'string') {
+        notificationMessage = newest.message;
+      }
+    }
+
     hub.emit('change', {
       collection: 'users',
       operationType: 'notification',
       documentId: userId,
       userId,
+      ...(notificationMessage ? { notificationMessage } : {}),
     });
   });
   console.log('User notifications change stream started');

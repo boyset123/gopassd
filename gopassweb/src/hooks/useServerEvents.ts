@@ -9,6 +9,7 @@ export type ServerEventPayload = {
   operationType: string;
   documentId?: string | null;
   userId?: string;
+  notificationMessage?: string;
 };
 
 type UseServerEventsOptions = {
@@ -103,7 +104,9 @@ export function useServerEvents({
           }
           onNotificationRef.current?.({
             userId: uid ?? undefined,
-            notification: { message: undefined },
+            notification: payload.notificationMessage
+              ? { message: payload.notificationMessage }
+              : { message: undefined },
           });
           onDataChangeRef.current?.('You have a new notification — your dashboard has been updated.');
           return;

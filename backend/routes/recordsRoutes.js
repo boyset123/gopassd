@@ -55,7 +55,7 @@ router.get('/', [auth, authorize('Human Resource Personnel')], async (req, res) 
 
             if (diffMs > 0) {
               const diffMinutes = Math.ceil(diffMs / 60000);
-              slip.arrivalStatus = `Overdue by ${diffMinutes} min (${formattedArrivalTime})`;
+              slip.arrivalStatus = `Late by ${diffMinutes} min (${formattedArrivalTime})`;
             } else {
               slip.arrivalStatus = `On Time (${formattedArrivalTime})`;
             }

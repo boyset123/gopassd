@@ -15,6 +15,8 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import { getWebInitialRouteForRole, isWebAllowedRole } from './src/config/webAuth';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ServerTimeProvider } from './src/hooks/useServerTime';
+import Toast from 'react-native-toast-message';
+import { notificationToastConfig } from './src/utils/notificationToast';
 
 const Stack = createStackNavigator();
 
@@ -95,6 +97,7 @@ const App = () => {
         <Stack.Screen name="Profile" component={ProfileScreen} />
         </Stack.Navigator>
       </NavigationContainer>
+      <Toast config={notificationToastConfig} position="bottom" bottomOffset={24} />
       </ServerTimeProvider>
     </SafeAreaProvider>
   );

@@ -103,7 +103,7 @@ const renderSlipCard = (item: PassSlipPrintItem, options?: PassSlipPrintOptions)
         ? `<div class="field data-field"><strong>Actual Time Back:</strong> ${escapeHtml(formatPrintTime(item.arrivalTime))}</div>`
         : ''}
       ${typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0
-        ? `<div class="field data-field overdue-field"><strong>Overdue:</strong> ${Math.round(item.overdueMinutes)} min</div>`
+        ? `<div class="field data-field overdue-field"><strong>Late:</strong> ${Math.round(item.overdueMinutes)} min</div>`
         : ''}
       <div class="field data-field"><strong>Required Vicinity:</strong> ${escapeHtml(normalizeInline(item.requiredVicinity) || 'Mati City')}</div>
       <div class="field data-field"><strong>Destination:</strong> ${escapeHtml(normalizeInline(item.destination) || 'N/A')}</div>

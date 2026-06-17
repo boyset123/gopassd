@@ -267,13 +267,10 @@ const CreatePassSlipScreen = () => {
       const storedUser = stored ? JSON.parse(stored) : null;
       const myId = user?._id ? String(user._id) : storedUser?._id ? String(storedUser._id) : null;
       if (!myId || !payload.userId || String(payload.userId) !== myId) return;
-      const balanceSeconds =
-        typeof payload.passSlipSeconds === 'number'
-          ? payload.passSlipSeconds
-          : typeof payload.passSlipMinutes === 'number'
-            ? payload.passSlipMinutes * 60
-            : null;
-      if (balanceSeconds == null) return;
+      const balanceSeconds = getPassSlipBalanceSeconds({
+        passSlipSeconds: payload.passSlipSeconds,
+        passSlipMinutes: payload.passSlipMinutes,
+      });
       const balancePatch = {
         passSlipSeconds: balanceSeconds,
         passSlipMinutes: Math.floor(balanceSeconds / 60),

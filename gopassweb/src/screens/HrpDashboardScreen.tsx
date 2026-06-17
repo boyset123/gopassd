@@ -15,6 +15,7 @@ import polyline from '@mapbox/polyline';
 import { API_URL, API_BASE_URL } from '../config/api';
 import { FEATURE_CTC_ENABLED } from '../config/featureFlags';
 import { useServerEvents } from '../hooks/useServerEvents';
+import { showNotificationToast } from '../utils/notificationToast';
 import { getTravelOrderPrintHtml } from '../utils/travelOrderPrintHtml';
 import { getPassSlipPrintHtml } from '../utils/passSlipPrintHtml';
 import { stripArrivalStatusDisplaySuffix } from '../utils/arrivalStatusDisplay';
@@ -495,7 +496,6 @@ const HrpDashboardScreen = () => {
   const [ctcIssueDateIso, setCtcIssueDateIso] = useState('');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [liveUpdateMessage, setLiveUpdateMessage] = useState<string | null>(null);
 
   const isSelectedItemInForReview = useMemo(() => {
     if (!selectedItem) return false;
@@ -541,10 +541,6 @@ const HrpDashboardScreen = () => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isNarrow, mobileSidebarOpen]);
-
-  const showLiveUpdate = useCallback((message: string) => {
-    setLiveUpdateMessage(message);
-  }, []);
 
   const fetchData = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
@@ -617,12 +613,6 @@ const HrpDashboardScreen = () => {
   );
 
   useEffect(() => {
-    if (!liveUpdateMessage) return;
-    const timer = setTimeout(() => setLiveUpdateMessage(null), 8000);
-    return () => clearTimeout(timer);
-  }, [liveUpdateMessage]);
-
-  useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -638,7 +628,7 @@ const HrpDashboardScreen = () => {
     currentUserId,
     onDataChange: (message) => {
       void fetchData({ silent: true });
-      if (message) showLiveUpdate(message);
+      if (message) showNotificationToast(message);
     },
     onNotification: (payload) => {
       if (!currentUserId || !payload.userId || String(payload.userId) !== String(currentUserId)) {
@@ -646,7 +636,7 @@ const HrpDashboardScreen = () => {
       }
       const text = payload.notification?.message?.trim();
       void fetchData({ silent: true });
-      showLiveUpdate(text || 'You have a new notification — your dashboard has been updated.');
+      showNotificationToast(text || 'You have a new notification — your dashboard has been updated.');
     },
   });
 
@@ -1354,20 +1344,6 @@ const HrpDashboardScreen = () => {
             </Text>
           </View>
         </View>
-        {liveUpdateMessage ? (
-          <View style={[styles.liveUpdateBanner, isNarrow && styles.liveUpdateBannerMobile]}>
-            <FontAwesome name="bell" size={16} color="#011a6b" />
-            <Text style={styles.liveUpdateBannerText}>{liveUpdateMessage}</Text>
-            <Pressable
-              onPress={() => setLiveUpdateMessage(null)}
-              style={styles.liveUpdateBannerDismiss}
-              accessibilityRole="button"
-              accessibilityLabel="Dismiss update notification"
-            >
-              <FontAwesome name="times" size={18} color="#011a6b" />
-            </Pressable>
-          </View>
-        ) : null}
         <ScrollView
           style={styles.mainScrollView}
           contentContainerStyle={[styles.mainScrollContent, isNarrow && styles.mainScrollContentNarrow]}

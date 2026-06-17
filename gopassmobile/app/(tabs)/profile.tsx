@@ -207,9 +207,19 @@ export default function ProfileScreen() {
     }, [fetchUserData, fetchActivity])
   );
 
+  const resolveMyUserId = useCallback(async (): Promise<string | null> => {
+    if (user?._id) return String(user._id);
+    if ((user as { id?: string } | undefined)?.id) return String((user as { id?: string }).id);
+    const stored = await AsyncStorage.getItem('userData');
+    const storedUser = stored ? JSON.parse(stored) : null;
+    if (storedUser?._id) return String(storedUser._id);
+    if (storedUser?.id) return String(storedUser.id);
+    return null;
+  }, [user]);
+
   useEffect(() => {
     if (!socket) return;
-    const handler = async (payload: {
+    const balanceHandler = async (payload: {
       userId?: string;
       passSlipSeconds?: number;
       passSlipMinutes?: number;
@@ -219,22 +229,19 @@ export default function ProfileScreen() {
         void fetchUserData();
         return;
       }
-      const stored = await AsyncStorage.getItem('userData');
-      const storedUser = stored ? JSON.parse(stored) : null;
-      const myId = user?._id ? String(user._id) : storedUser?._id ? String(storedUser._id) : null;
+      const myId = await resolveMyUserId();
       if (!myId || !payload.userId || String(payload.userId) !== myId) return;
-      const balanceSeconds =
-        typeof payload.passSlipSeconds === 'number'
-          ? payload.passSlipSeconds
-          : typeof payload.passSlipMinutes === 'number'
-            ? payload.passSlipMinutes * 60
-            : null;
-      if (balanceSeconds == null) return;
+      const balanceSeconds = getPassSlipBalanceSeconds({
+        passSlipSeconds: payload.passSlipSeconds,
+        passSlipMinutes: payload.passSlipMinutes,
+      });
       const balancePatch = {
         passSlipSeconds: balanceSeconds,
         passSlipMinutes: Math.floor(balanceSeconds / 60),
       };
       setUser((prev) => (prev ? { ...prev, ...balancePatch } : prev));
+      const stored = await AsyncStorage.getItem('userData');
+      const storedUser = stored ? JSON.parse(stored) : null;
       if (storedUser) {
         await AsyncStorage.setItem(
           'userData',
@@ -242,11 +249,26 @@ export default function ProfileScreen() {
         );
       }
     };
-    socket.on('passSlipBalanceUpdated', handler);
-    return () => {
-      socket.off('passSlipBalanceUpdated', handler);
+
+    const returnedHandler = async (slip: { employee?: string | { _id?: string; id?: string } }) => {
+      const myId = await resolveMyUserId();
+      if (!myId || !slip?.employee) return;
+      const employeeId =
+        typeof slip.employee === 'object'
+          ? String(slip.employee._id || slip.employee.id || '')
+          : String(slip.employee);
+      if (employeeId && employeeId === myId) {
+        void fetchUserData();
+      }
     };
-  }, [socket, user?._id, fetchUserData]);
+
+    socket.on('passSlipBalanceUpdated', balanceHandler);
+    socket.on('passSlipReturned', returnedHandler);
+    return () => {
+      socket.off('passSlipBalanceUpdated', balanceHandler);
+      socket.off('passSlipReturned', returnedHandler);
+    };
+  }, [socket, resolveMyUserId, fetchUserData]);
 
   const handleUpdateName = async () => {
     if (!firstName.trim() || !surname.trim()) {

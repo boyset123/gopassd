@@ -77,3 +77,8 @@ export function formatManilaDayLabel(ymd: string): string {
   const d = buildManilaDate(parts[0], parts[1] - 1, parts[2], 0, 0);
   return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' });
 }
+
+export function formatManilaMonthYear(year: number, monthIndex: number): string {
+  const d = buildManilaDate(year, monthIndex, 1, 0, 0);
+  return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'Asia/Manila' });
+}

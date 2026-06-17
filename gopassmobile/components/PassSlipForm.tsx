@@ -157,7 +157,7 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
       {arrivalDisplay ? <FieldRow label="Actual Time Back:" value={arrivalDisplay} /> : null}
       {typeof slip.overdueMinutes === 'number' && slip.overdueMinutes > 0 ? (
         <Text style={styles.fieldRow}>
-          <Text style={styles.fieldLabel}>Overdue: </Text>
+          <Text style={styles.fieldLabel}>Late: </Text>
           <Text style={[styles.fieldValue, styles.overdueValue]}>{Math.round(slip.overdueMinutes)} min</Text>
         </Text>
       ) : null}

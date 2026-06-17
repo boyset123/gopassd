@@ -103,7 +103,7 @@ const renderSlipCard = (item: PassSlipPrintItem, logoSrc: string) => {
       }
       ${
         typeof item.overdueMinutes === 'number' && item.overdueMinutes > 0
-          ? `<div class="field data-field overdue-field"><strong>Overdue:</strong> ${Math.round(item.overdueMinutes)} min</div>`
+          ? `<div class="field data-field overdue-field"><strong>Late:</strong> ${Math.round(item.overdueMinutes)} min</div>`
           : ''
       }
       <div class="field data-field"><strong>Required Vicinity:</strong> ${escapeHtml(normalizeInline(item.requiredVicinity) || 'Mati City')}</div>

@@ -7,6 +7,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SocketProvider } from '../config/SocketContext';
 import { NotificationsProvider } from '../contexts/NotificationsContext';
 import { ServerTimeProvider } from '../hooks/useServerTime';
+import Toast from 'react-native-toast-message';
+import { notificationToastConfig } from '../utils/notificationToast';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -40,6 +42,7 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="auth" options={{ headerShown: false, animation: 'none' }} />
           </Stack>
+          <Toast config={notificationToastConfig} />
         </NotificationsProvider>
       </SocketProvider>
       </ServerTimeProvider>

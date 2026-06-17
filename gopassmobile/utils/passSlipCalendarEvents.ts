@@ -1,6 +1,7 @@
 import {
   addDaysToYmd,
   formatManilaDateYmd,
+  getManilaDateParts,
   parseMeridiemTimeInManilaDate,
 } from './manilaDate';
 
@@ -134,37 +135,32 @@ export function bucketSubmissionsByDay(submissions: CalendarSubmissionLike[]): M
   return map;
 }
 
-export function buildMarkedDates(
-  eventsByDay: Map<string, CalendarEvent[]>,
-  selectedYmd: string,
-): Record<string, { marked?: boolean; dotColor?: string; selected?: boolean; selectedColor?: string }> {
-  const today = formatManilaDateYmd(new Date());
-  const marked: Record<string, { marked?: boolean; dotColor?: string; selected?: boolean; selectedColor?: string }> = {};
-
-  for (const [ymd, events] of eventsByDay) {
-    marked[ymd] = {
-      marked: true,
-      dotColor: events[0]?.color ?? '#011a6b',
-    };
+export function buildMonthGrid(year: number, monthIndex: number): (string | null)[][] {
+  const firstOfMonth = new Date(Date.UTC(year, monthIndex, 1));
+  const startDow = firstOfMonth.getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < startDow; i += 1) cells.push(null);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push(`${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
   }
-
-  if (today) {
-    marked[today] = {
-      ...marked[today],
-      selected: selectedYmd === today,
-      selectedColor: '#011a6b',
-    };
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: (string | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    weeks.push(cells.slice(i, i + 7));
   }
+  return weeks;
+}
 
-  if (selectedYmd) {
-    marked[selectedYmd] = {
-      ...marked[selectedYmd],
-      selected: true,
-      selectedColor: '#011a6b',
-      marked: marked[selectedYmd]?.marked ?? eventsByDay.has(selectedYmd),
-      dotColor: marked[selectedYmd]?.dotColor ?? eventsByDay.get(selectedYmd)?.[0]?.color,
-    };
+export function getTodayYmd(): string {
+  return formatManilaDateYmd(new Date());
+}
+
+export function getManilaMonthFromDate(value: Date): { year: number; monthIndex: number } {
+  const parts = getManilaDateParts(value);
+  if (!parts) {
+    const now = new Date();
+    return { year: now.getFullYear(), monthIndex: now.getMonth() };
   }
-
-  return marked;
+  return { year: parts.year, monthIndex: parts.monthIndex };
 }

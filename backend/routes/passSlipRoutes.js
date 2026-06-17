@@ -19,7 +19,7 @@ const { computeReturnBalanceAdjustment, formatReturnAuditDetails } = require('..
 const { resolvePassSlipMapRoute } = require('../utils/drivingRoute');
 const { formatPassSlipBalance } = require('../utils/formatPassSlipBalance');
 const { isWithinMatiCity, MATI_CITY_VICINITY_MESSAGE } = require('../utils/matiCityVicinity');
-const { getPassSlipSeconds, setPassSlipSeconds, serializePassSlipBalance } = require('../utils/passSlipBalanceState');
+const { getPassSlipSeconds, getStoredPassSlipSeconds, setPassSlipSeconds, serializePassSlipBalance } = require('../utils/passSlipBalanceState');
 const { ensurePassSlipTrackingNo, peekPassSlipTrackingNo } = require('../utils/documentNumbers');
 const {
   getBillableDurationMs,
@@ -1148,7 +1148,7 @@ router.put('/:id/return', [auth, authorize('Security Personnel')], async (req, r
       if (employee) {
         const updatedSeconds = setPassSlipSeconds(
           employee,
-          getPassSlipSeconds(employee) + adjustment,
+          getStoredPassSlipSeconds(employee) + adjustment,
         );
         await employee.save();
         emitBalanceUpdate(req.io, employee._id, updatedSeconds);

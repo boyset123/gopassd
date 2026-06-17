@@ -7,6 +7,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { API_URL } from '../config/api';
 import { useServerEvents } from '../hooks/useServerEvents';
+import { showNotificationToast } from '../utils/notificationToast';
 import Timer from '../components/Timer';
 
 // --- Type Definitions ---
@@ -86,6 +87,7 @@ const SecurityDashboardScreen = () => {
   useServerEvents({
     enabled: Platform.OS === 'web',
     onDataChange: () => {
+      showNotificationToast('New activity — your dashboard has been updated.');
       void fetchData({ silent: true });
     },
   });

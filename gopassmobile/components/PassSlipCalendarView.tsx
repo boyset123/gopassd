@@ -7,15 +7,16 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Calendar } from 'react-native-calendars';
 import { FontAwesome } from '@expo/vector-icons';
-import { formatManilaDateYmd, formatManilaDayLabel } from '../utils/manilaDate';
+import { formatManilaDayLabel, formatManilaMonthYear } from '../utils/manilaDate';
 import {
   bucketSubmissionsByDay,
-  buildMarkedDates,
+  buildMonthGrid,
   CalendarEvent,
   CalendarSubmissionLike,
   getCalendarStatusLegend,
+  getManilaMonthFromDate,
+  getTodayYmd,
 } from '../utils/passSlipCalendarEvents';
 
 const theme = {
@@ -26,6 +27,8 @@ const theme = {
   textMuted: 'rgba(1,26,107,0.75)',
   border: 'rgba(1,26,107,0.22)',
 };
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 type PassSlipCalendarViewProps = {
   submissions: CalendarSubmissionLike[];
@@ -42,20 +45,79 @@ export default function PassSlipCalendarView({
   refreshing = false,
   contentPaddingBottom = 20,
 }: PassSlipCalendarViewProps) {
-  const todayYmd = formatManilaDateYmd(new Date());
-  const [selectedYmd, setSelectedYmd] = useState(todayYmd);
-  const [visibleMonth, setVisibleMonth] = useState(todayYmd.slice(0, 7));
+  const initialMonth = getManilaMonthFromDate(new Date());
+  const [year, setYear] = useState(initialMonth.year);
+  const [monthIndex, setMonthIndex] = useState(initialMonth.monthIndex);
+  const [selectedYmd, setSelectedYmd] = useState(getTodayYmd());
 
+  const todayYmd = getTodayYmd();
   const eventsByDay = useMemo(() => bucketSubmissionsByDay(submissions), [submissions]);
-  const markedDates = useMemo(
-    () => buildMarkedDates(eventsByDay, selectedYmd),
-    [eventsByDay, selectedYmd],
-  );
+  const monthGrid = useMemo(() => buildMonthGrid(year, monthIndex), [year, monthIndex]);
   const selectedEvents = eventsByDay.get(selectedYmd) ?? [];
   const legend = getCalendarStatusLegend();
 
+  const goToPreviousMonth = () => {
+    if (monthIndex === 0) {
+      setYear((value) => value - 1);
+      setMonthIndex(11);
+      return;
+    }
+    setMonthIndex((value) => value - 1);
+  };
+
+  const goToNextMonth = () => {
+    if (monthIndex === 11) {
+      setYear((value) => value + 1);
+      setMonthIndex(0);
+      return;
+    }
+    setMonthIndex((value) => value + 1);
+  };
+
   const handleEventPress = (event: CalendarEvent) => {
     onSelectSubmission(event.raw);
+  };
+
+  const renderDayCell = (ymd: string | null, index: number) => {
+    if (!ymd) {
+      return <View key={`empty-${index}`} style={[styles.dayCell, styles.dayCellOutside]} />;
+    }
+
+    const dayNumber = parseInt(ymd.split('-')[2], 10);
+    const events = eventsByDay.get(ymd) ?? [];
+    const isToday = ymd === todayYmd;
+    const isSelected = ymd === selectedYmd;
+    const visibleDots = events.slice(0, 3);
+    const overflow = events.length - visibleDots.length;
+
+    return (
+      <Pressable
+        key={ymd}
+        style={({ pressed }) => [
+          styles.dayCell,
+          isToday && styles.dayCellToday,
+          isSelected && styles.dayCellSelected,
+          pressed && styles.dayCellPressed,
+        ]}
+        onPress={() => setSelectedYmd(ymd)}
+      >
+        <Text
+          style={[
+            styles.dayNumber,
+            isToday && styles.dayNumberToday,
+            isSelected && styles.dayNumberSelected,
+          ]}
+        >
+          {dayNumber}
+        </Text>
+        <View style={styles.dotsRow}>
+          {visibleDots.map((event) => (
+            <View key={event.id} style={[styles.eventDot, { backgroundColor: event.color }]} />
+          ))}
+        </View>
+        {overflow > 0 ? <Text style={styles.overflowText}>+{overflow}</Text> : null}
+      </Pressable>
+    );
   };
 
   return (
@@ -69,32 +131,37 @@ export default function PassSlipCalendarView({
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.calendarCard}>
-        <Calendar
-          current={visibleMonth}
-          onMonthChange={(month) => setVisibleMonth(`${month.year}-${String(month.month).padStart(2, '0')}`)}
-          onDayPress={(day) => setSelectedYmd(day.dateString)}
-          markedDates={markedDates}
-          enableSwipeMonths
-          theme={{
-            backgroundColor: theme.surface,
-            calendarBackground: theme.surface,
-            textSectionTitleColor: theme.textMuted,
-            selectedDayBackgroundColor: theme.primary,
-            selectedDayTextColor: '#ffffff',
-            todayTextColor: theme.primary,
-            dayTextColor: theme.text,
-            textDisabledColor: 'rgba(1,26,107,0.25)',
-            monthTextColor: theme.primary,
-            arrowColor: theme.primary,
-            textDayFontWeight: '500',
-            textMonthFontWeight: '700',
-            textDayHeaderFontWeight: '600',
-            textDayFontSize: 15,
-            textMonthFontSize: 18,
-            textDayHeaderFontSize: 12,
-          }}
-          style={styles.calendar}
-        />
+        <View style={styles.monthNav}>
+          <Pressable
+            style={({ pressed }) => [styles.monthNavButton, pressed && styles.monthNavButtonPressed]}
+            onPress={goToPreviousMonth}
+            accessibilityLabel="Previous month"
+          >
+            <FontAwesome name="chevron-left" size={14} color={theme.primary} />
+          </Pressable>
+          <Text style={styles.monthLabel}>{formatManilaMonthYear(year, monthIndex)}</Text>
+          <Pressable
+            style={({ pressed }) => [styles.monthNavButton, pressed && styles.monthNavButtonPressed]}
+            onPress={goToNextMonth}
+            accessibilityLabel="Next month"
+          >
+            <FontAwesome name="chevron-right" size={14} color={theme.primary} />
+          </Pressable>
+        </View>
+
+        <View style={styles.weekdayRow}>
+          {WEEKDAYS.map((day) => (
+            <View key={day} style={styles.weekdayCell}>
+              <Text style={styles.weekdayText}>{day}</Text>
+            </View>
+          ))}
+        </View>
+
+        {monthGrid.map((week, weekIndex) => (
+          <View key={`week-${weekIndex}`} style={styles.weekRow}>
+            {week.map((ymd, dayIndex) => renderDayCell(ymd, weekIndex * 7 + dayIndex))}
+          </View>
+        ))}
       </View>
 
       <View style={styles.detailCard}>
@@ -154,15 +221,108 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: theme.border,
-    overflow: 'hidden',
+    padding: 12,
+    gap: 4,
     shadowColor: '#011a6b',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 8,
     elevation: 2,
   },
-  calendar: {
-    borderRadius: 16,
+  monthNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingBottom: 8,
+  },
+  monthNavButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.surface,
+  },
+  monthNavButtonPressed: {
+    backgroundColor: '#f0f3ff',
+  },
+  monthLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: theme.primary,
+  },
+  weekdayRow: {
+    flexDirection: 'row',
+  },
+  weekdayCell: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  weekdayText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: theme.textMuted,
+    textTransform: 'uppercase',
+  },
+  weekRow: {
+    flexDirection: 'row',
+  },
+  dayCell: {
+    flex: 1,
+    minHeight: 52,
+    borderWidth: 1,
+    borderColor: 'rgba(1,26,107,0.08)',
+    padding: 4,
+    alignItems: 'center',
+    backgroundColor: theme.surface,
+  },
+  dayCellOutside: {
+    backgroundColor: '#fafbff',
+  },
+  dayCellToday: {
+    borderColor: theme.primary,
+    backgroundColor: '#f8faff',
+  },
+  dayCellSelected: {
+    borderColor: theme.primary,
+    backgroundColor: '#eef2ff',
+  },
+  dayCellPressed: {
+    backgroundColor: '#f0f3ff',
+  },
+  dayNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.text,
+  },
+  dayNumberToday: {
+    color: theme.primary,
+  },
+  dayNumberSelected: {
+    color: theme.primary,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 3,
+    marginTop: 4,
+    minHeight: 8,
+  },
+  eventDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  overflowText: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: theme.textMuted,
+    marginTop: 2,
   },
   detailCard: {
     backgroundColor: theme.surface,

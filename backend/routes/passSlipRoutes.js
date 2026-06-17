@@ -17,6 +17,7 @@ const { getScheduledReturnMoment, hasScheduledDeparturePassed } = require('../ut
 const { computeReturnBalanceAdjustment } = require('../utils/passSlipBalance');
 const { resolvePassSlipMapRoute } = require('../utils/drivingRoute');
 const { formatPassSlipBalance } = require('../utils/formatPassSlipBalance');
+const { isWithinMatiCity, MATI_CITY_VICINITY_MESSAGE } = require('../utils/matiCityVicinity');
 const { getPassSlipSeconds, setPassSlipSeconds, serializePassSlipBalance } = require('../utils/passSlipBalanceState');
 const { ensurePassSlipTrackingNo, peekPassSlipTrackingNo } = require('../utils/documentNumbers');
 const {
@@ -25,6 +26,7 @@ const {
   getSlipPlannedBillableMinutes,
 } = require('../utils/passSlipDuration');
 const { findOverlappingPassSlip, formatOverlapMessage } = require('../utils/passSlipOverlap');
+const { appendAuditLog, buildPassSlipAuditTrail } = require('../utils/auditLog');
 
 function attachEmployeeBalance(slip) {
   const obj = slip?.toObject ? slip.toObject() : { ...slip };
@@ -181,6 +183,16 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ message: 'Approver could not be determined.' });
     }
 
+    if (latitude == null || longitude == null) {
+      return res.status(400).json({
+        message: 'Please select a destination within Mati City using the map or address suggestions.',
+      });
+    }
+
+    if (!isWithinMatiCity(latitude, longitude)) {
+      return res.status(400).json({ message: MATI_CITY_VICINITY_MESSAGE });
+    }
+
     const startTime = parseMeridiemTimeToDate(timeOut, date);
     const endTime = parseMeridiemTimeToDate(estimatedTimeBack, date);
 
@@ -248,6 +260,7 @@ router.post('/', auth, async (req, res) => {
       timeOut,
       estimatedTimeBack,
       destination,
+      requiredVicinity: 'Mati City',
       purpose,
       approvedBy: approverId,
       signature,
@@ -256,6 +269,14 @@ router.post('/', auth, async (req, res) => {
       originLatitude,
       originLongitude,
       routePolyline,
+    });
+
+    appendAuditLog(newPassSlip, {
+      action: 'submitted',
+      label: 'Pass slip submitted',
+      performedBy: req.user.userId,
+      performedByName: user.name,
+      role: user.role,
     });
 
     const passSlip = await newPassSlip.save();
@@ -368,6 +389,7 @@ router.put('/:id/status', [auth], async (req, res) => {
     }
 
     const isHr = req.user.role === 'Human Resource Personnel';
+    const actor = await User.findById(req.user.userId).select('name role').lean();
 
     if (isHr) {
       if (!['Approved', 'Completed', 'Rejected', 'Expired'].includes(status)) {
@@ -408,6 +430,17 @@ router.put('/:id/status', [auth], async (req, res) => {
       passSlip.approvedBy = req.user.userId;
       passSlip.approverSignature = approverSignature;
       passSlip.approvedBySignedAsOicFor = resolution.viaOic ? resolution.originalId : null;
+      passSlip.recommendedAt = new Date();
+      appendAuditLog(passSlip, {
+        action: 'recommended',
+        label: resolution.viaOic
+          ? `Recommended (OIC for ${resolution.original?.name || 'approver'})`
+          : `Recommended by ${actor?.role || 'approver'}`,
+        performedBy: req.user.userId,
+        performedByName: actor?.name,
+        role: actor?.role,
+        timestamp: passSlip.recommendedAt,
+      });
     } else if (!isHr && status === 'Rejected') {
       // Only the assigned approver or their currently-acting OIC can reject.
       if (!passSlip.approvedBy) {
@@ -419,6 +452,16 @@ router.put('/:id/status', [auth], async (req, res) => {
       }
       passSlip.status = status;
       if (rejectionReason != null) passSlip.rejectionReason = String(rejectionReason).trim() || undefined;
+      passSlip.rejectedAt = new Date();
+      appendAuditLog(passSlip, {
+        action: 'rejected',
+        label: 'Pass slip rejected',
+        performedBy: req.user.userId,
+        performedByName: actor?.name,
+        role: actor?.role,
+        timestamp: passSlip.rejectedAt,
+        details: passSlip.rejectionReason,
+      });
     } else if (isHr) {
       if (status === 'Approved' && passSlip.status !== 'Recommended') {
         return res.status(400).json({ message: 'HR can only approve pass slips that have been recommended by the Program Head.' });
@@ -492,6 +535,7 @@ router.put('/:id/status', [auth], async (req, res) => {
         passSlip.status = 'Approved';
         passSlip.hrApprovedBy = req.user.userId;
         passSlip.hrApproverSignature = approverSignature;
+        passSlip.hrApprovedAt = new Date();
         await ensurePassSlipTrackingNo(passSlip);
         // Generate QR Code with full details for guard to scan and view without API
         const approvedByUser = await User.findById(passSlip.approvedBy).select('name').lean();
@@ -512,9 +556,28 @@ router.put('/:id/status', [auth], async (req, res) => {
           arrivalTime: passSlip.arrivalTime,
         };
         passSlip.qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload), { errorCorrectionLevel: 'M' });
+        appendAuditLog(passSlip, {
+          action: 'hr_approved',
+          label: 'Approved by Human Resource',
+          performedBy: req.user.userId,
+          performedByName: actor?.name,
+          role: actor?.role || 'Human Resource Personnel',
+          timestamp: passSlip.hrApprovedAt,
+          details: passSlip.trackingNo ? `Tracking No: ${passSlip.trackingNo}` : undefined,
+        });
       } else if (status === 'Rejected') {
         passSlip.status = status;
         if (rejectionReason != null) passSlip.rejectionReason = String(rejectionReason).trim() || undefined;
+        passSlip.rejectedAt = new Date();
+        appendAuditLog(passSlip, {
+          action: 'rejected',
+          label: 'Pass slip rejected by Human Resource',
+          performedBy: req.user.userId,
+          performedByName: actor?.name,
+          role: actor?.role || 'Human Resource Personnel',
+          timestamp: passSlip.rejectedAt,
+          details: passSlip.rejectionReason,
+        });
       } else if (status === 'Expired') {
         if (passSlip.status !== 'Recommended') {
           return res.status(400).json({ message: 'HR can only close pass slips that are pending HR recording (Recommended).' });
@@ -524,6 +587,16 @@ router.put('/:id/status', [auth], async (req, res) => {
         }
         passSlip.status = 'Expired';
         if (closureReason != null) passSlip.closureReason = String(closureReason).trim() || undefined;
+        passSlip.expiredAt = new Date();
+        appendAuditLog(passSlip, {
+          action: 'expired',
+          label: 'Pass slip expired',
+          performedBy: req.user.userId,
+          performedByName: actor?.name,
+          role: actor?.role || 'Human Resource Personnel',
+          timestamp: passSlip.expiredAt,
+          details: passSlip.closureReason,
+        });
       } else {
         return res.status(400).json({ message: 'Invalid status update for HR.' });
       }
@@ -594,6 +667,7 @@ router.get('/my-slips', auth, async (req, res) => {
       .populate('approvedBy', 'name role')
       .populate('approvedBySignedAsOicFor', 'name role')
       .populate('hrApprovedBy', 'name')
+      .populate('cancelledBy', 'name')
       .sort({ createdAt: -1 })
       .lean();
     res.json(userSlips);
@@ -661,7 +735,20 @@ router.put('/:id/cancel', auth, async (req, res) => {
 
     passSlip.status = 'Cancelled';
     passSlip.cancellationReason = cancellationReason;
+    passSlip.cancelledBy = req.user.userId;
+    passSlip.cancelledAt = new Date();
+    appendAuditLog(passSlip, {
+      action: 'cancelled',
+      label: 'Pass slip cancelled',
+      performedBy: req.user.userId,
+      performedByName: passSlip.employee?.name,
+      role: passSlip.employee?.role,
+      timestamp: passSlip.cancelledAt,
+      details: cancellationReason,
+    });
     await passSlip.save();
+
+    await passSlip.populate('cancelledBy', 'name');
 
     req.io.emit('passSlipStatusUpdate', passSlip);
 
@@ -856,6 +943,14 @@ router.put('/:id/verify', [auth, authorize('Security Personnel')], async (req, r
 
     passSlip.status = 'Verified';
     passSlip.departureTime = new Date();
+    appendAuditLog(passSlip, {
+      action: 'verified',
+      label: 'Departure verified by Security',
+      performedBy: req.user.userId,
+      performedByName: (await User.findById(req.user.userId).select('name').lean())?.name,
+      role: 'Security Personnel',
+      timestamp: passSlip.departureTime,
+    });
     await passSlip.save();
 
     // --- Real-time Update via Socket.IO ---
@@ -869,6 +964,33 @@ router.put('/:id/verify', [auth, authorize('Security Personnel')], async (req, r
 });
 
 // Location / route fields for HR map view (must be registered before /:id).
+router.get('/:id/audit-trail', auth, async (req, res) => {
+  try {
+    const passSlip = await PassSlip.findById(req.params.id)
+      .populate('employee', 'name role')
+      .populate('approvedBy', 'name role')
+      .populate('approvedBySignedAsOicFor', 'name role')
+      .populate('hrApprovedBy', 'name role')
+      .populate('cancelledBy', 'name role');
+
+    if (!passSlip) {
+      return res.status(404).json({ message: 'Pass slip not found.' });
+    }
+
+    const ownerId = toIdString(passSlip.employee?._id || passSlip.employee);
+    const isOwner = ownerId === toIdString(req.user.userId);
+    const isStaff = ['Human Resource Personnel', 'Security Personnel', 'Admin'].includes(req.user.role);
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({ message: 'Not authorized to view this audit trail.' });
+    }
+
+    res.json(buildPassSlipAuditTrail(passSlip));
+  } catch (error) {
+    console.error('Error fetching pass slip audit trail:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 router.get('/:id/location', [auth, authorize('Human Resource Personnel')], async (req, res) => {
   try {
     const slip = await PassSlip.findById(req.params.id)
@@ -945,6 +1067,15 @@ router.put('/:id/return', [auth, authorize('Security Personnel')], async (req, r
     passSlip.arrivalTime = arrival;
     passSlip.overdueMinutes = overdueMinutes;
     passSlip.actualMinutesUsed = actualMinutes;
+    appendAuditLog(passSlip, {
+      action: 'returned',
+      label: 'Return recorded by Security',
+      performedBy: req.user.userId,
+      performedByName: (await User.findById(req.user.userId).select('name').lean())?.name,
+      role: 'Security Personnel',
+      timestamp: passSlip.arrivalTime,
+      details: actualMinutes != null ? `Duration: ${actualMinutes} min` : undefined,
+    });
 
     await passSlip.save();
 

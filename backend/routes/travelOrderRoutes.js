@@ -9,6 +9,7 @@ const QRCode = require('qrcode');
 const { parseLocalDate, parseMeridiemTimeToDate } = require('../utils/dateTime');
 const { getEffectiveSigner, assertCanSignFor, resolvePresidentAccount, toIdString } = require('../utils/oic');
 const { travelOrderToClientJson, travelOrdersToClientJson, attachEmployeeRoleFallback } = require('../utils/travelOrderSerialize');
+const { appendAuditLog, buildTravelOrderAuditTrail } = require('../utils/auditLog');
 
 /** Populate employee before JSON so clients always receive `employee.role` (socket/POST often omitted it). */
 async function travelOrderToClientJsonWithEmployee(travelOrderDoc) {
@@ -321,6 +322,14 @@ router.post(
 
     const newTravelOrder = new TravelOrder(travelOrderData);
 
+    appendAuditLog(newTravelOrder, {
+      action: 'submitted',
+      label: 'Travel order submitted',
+      performedBy: req.user.userId,
+      performedByName: user.name,
+      role: user.role,
+    });
+
     const travelOrder = await newTravelOrder.save();
 
     // --- Create Notifications for Recommenders (broadcast so mobile receives without socket rooms) ---
@@ -433,6 +442,18 @@ router.put('/:id/approve-president', [auth], async (req, res) => {
     travelOrder.presidentApprovedBy = req.user.userId;
     travelOrder.presidentSignature = approverSignature;
     travelOrder.presidentSignedAsOicFor = resolution.viaOic ? resolution.originalId : null;
+    travelOrder.presidentApprovedAt = new Date();
+    const presidentActor = await User.findById(req.user.userId).select('name role').lean();
+    appendAuditLog(travelOrder, {
+      action: 'president_approved',
+      label: resolution.viaOic
+        ? `President approved (OIC for ${resolution.original?.name || 'President'})`
+        : 'Approved by President',
+      performedBy: req.user.userId,
+      performedByName: presidentActor?.name,
+      role: presidentActor?.role || 'President',
+      timestamp: travelOrder.presidentApprovedAt,
+    });
 
     await travelOrder.populate([{ path: 'employee', select: 'name role' }, { path: 'recommendedBy', select: 'name' }, { path: 'presidentApprovedBy', select: 'name' }]);
     const qrPayload = buildTravelOrderQrPayload(travelOrder);
@@ -521,6 +542,7 @@ router.put('/:id/status', [auth], async (req, res) => {
     }
 
     const previousStatus = travelOrder.status;
+    const actor = await User.findById(req.user.userId).select('name role').lean();
 
     // Owner marks travel order complete (Approved only).
     if (status === 'Completed') {
@@ -533,6 +555,15 @@ router.put('/:id/status', [auth], async (req, res) => {
         return res.status(400).json({ message: 'You can only complete travel orders that are approved.' });
       }
       travelOrder.status = 'Completed';
+      travelOrder.completedAt = new Date();
+      appendAuditLog(travelOrder, {
+        action: 'completed',
+        label: 'Travel order completed',
+        performedBy: req.user.userId,
+        performedByName: actor?.name,
+        role: actor?.role,
+        timestamp: travelOrder.completedAt,
+      });
       await travelOrder.populate([{ path: 'employee', select: 'name role' }, { path: 'recommendedBy', select: 'name' }, { path: 'approvedBy', select: 'name' }, { path: 'presidentApprovedBy', select: 'name' }]);
       const qrPayload = buildTravelOrderQrPayload(travelOrder);
       travelOrder.qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload), { errorCorrectionLevel: 'M' });
@@ -598,6 +629,16 @@ router.put('/:id/status', [auth], async (req, res) => {
       if (rejectionReason != null) {
         travelOrder.rejectionReason = String(rejectionReason).trim() || undefined;
       }
+      travelOrder.rejectedAt = new Date();
+      appendAuditLog(travelOrder, {
+        action: 'rejected',
+        label: 'Travel order rejected by President',
+        performedBy: req.user.userId,
+        performedByName: actor?.name,
+        role: actor?.role || 'President',
+        timestamp: travelOrder.rejectedAt,
+        details: travelOrder.rejectionReason,
+      });
     } else if (!isHr) {
       if (status === 'Recommended' && travelOrder.status !== 'Pending') {
         return res.status(400).json({ message: 'Recommenders can only recommend pending travel orders.' });
@@ -639,10 +680,22 @@ router.put('/:id/status', [auth], async (req, res) => {
         }
 
         // Store individual signature with OIC metadata when applicable
+        const signedAt = new Date();
         travelOrder.recommenderSignatures.push({
           user: req.user.userId,
           signature: approverSignature,
           signedAsOicFor: resolution.viaOic ? resolution.originalId : null,
+          date: signedAt,
+        });
+        appendAuditLog(travelOrder, {
+          action: 'recommended',
+          label: resolution.viaOic
+            ? `Recommended (OIC for ${resolution.original?.name || 'chief'})`
+            : 'Recommended by immediate chief',
+          performedBy: req.user.userId,
+          performedByName: actor?.name,
+          role: actor?.role,
+          timestamp: signedAt,
         });
 
         // Legacy support
@@ -697,6 +750,16 @@ router.put('/:id/status', [auth], async (req, res) => {
         }
         travelOrder.status = 'Rejected';
         if (rejectionReason != null) travelOrder.rejectionReason = String(rejectionReason).trim() || undefined;
+        travelOrder.rejectedAt = new Date();
+        appendAuditLog(travelOrder, {
+          action: 'rejected',
+          label: 'Travel order rejected',
+          performedBy: req.user.userId,
+          performedByName: actor?.name,
+          role: actor?.role,
+          timestamp: travelOrder.rejectedAt,
+          details: travelOrder.rejectionReason,
+        });
       }
     } else if (isHr) {
       // HR approves Recommended orders and sends to President
@@ -711,9 +774,19 @@ router.put('/:id/status', [auth], async (req, res) => {
           travelOrder.status = 'For President Approval';
           travelOrder.hrSignature = approverSignature;
           travelOrder.hrApprovedBy = req.user.userId;
+          travelOrder.hrReviewedAt = new Date();
+          appendAuditLog(travelOrder, {
+            action: 'hr_reviewed',
+            label: 'Reviewed by Human Resource (sent to President)',
+            performedBy: req.user.userId,
+            performedByName: actor?.name,
+            role: actor?.role || 'Human Resource Personnel',
+            timestamp: travelOrder.hrReviewedAt,
+          });
       } else if (status === 'Approved') {
         travelOrder.approvedBy = req.user.userId; // HR finalizes
         travelOrder.status = 'Approved';
+        travelOrder.hrApprovedAt = new Date();
         await ensureTravelOrderNo(travelOrder);
         travelOrder.travelOrderNoSignature = travelOrderNoSignature;
         travelOrder.departureSignature = departureSignature;
@@ -721,10 +794,29 @@ router.put('/:id/status', [auth], async (req, res) => {
         await travelOrder.populate([{ path: 'employee', select: 'name role' }, { path: 'recommendedBy', select: 'name' }, { path: 'approvedBy', select: 'name' }, { path: 'presidentApprovedBy', select: 'name' }]);
         const qrPayload = buildTravelOrderQrPayload(travelOrder);
         travelOrder.qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload), { errorCorrectionLevel: 'M' });
+        appendAuditLog(travelOrder, {
+          action: 'hr_approved',
+          label: 'Final approval by Human Resource',
+          performedBy: req.user.userId,
+          performedByName: actor?.name,
+          role: actor?.role || 'Human Resource Personnel',
+          timestamp: travelOrder.hrApprovedAt,
+          details: travelOrder.travelOrderNo ? `Travel Order No: ${travelOrder.travelOrderNo}` : undefined,
+        });
       } else if (status === 'Rejected') {
         travelOrder.status = 'Rejected';
         travelOrder.approvedBy = req.user.userId;
         if (rejectionReason != null) travelOrder.rejectionReason = String(rejectionReason).trim() || undefined;
+        travelOrder.rejectedAt = new Date();
+        appendAuditLog(travelOrder, {
+          action: 'rejected',
+          label: 'Travel order rejected by Human Resource',
+          performedBy: req.user.userId,
+          performedByName: actor?.name,
+          role: actor?.role || 'Human Resource Personnel',
+          timestamp: travelOrder.rejectedAt,
+          details: travelOrder.rejectionReason,
+        });
       }
     }
     
@@ -792,6 +884,38 @@ router.put('/:id/status', [auth], async (req, res) => {
     res.json(await travelOrderToClientJsonWithEmployee(travelOrder));
   } catch (error) {
     console.error('Error updating travel order status:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.get('/:id/audit-trail', auth, async (req, res) => {
+  try {
+    const travelOrder = await TravelOrder.findById(req.params.id)
+      .populate('employee', 'name role')
+      .populate('recommendedBy', 'name role')
+      .populate('recommenderSignatures.user', 'name role')
+      .populate('recommenderSignatures.signedAsOicFor', 'name role')
+      .populate('hrApprovedBy', 'name role')
+      .populate('approvedBy', 'name role')
+      .populate('presidentApprovedBy', 'name role')
+      .populate('presidentSignedAsOicFor', 'name role')
+      .select('-document.data -documents.data')
+      .lean();
+
+    if (!travelOrder) {
+      return res.status(404).json({ message: 'Travel order not found.' });
+    }
+
+    const ownerId = toIdString(travelOrder.employee?._id || travelOrder.employee);
+    const isOwner = ownerId === toIdString(req.user.userId);
+    const isStaff = ['Human Resource Personnel', 'Security Personnel', 'Admin', 'President'].includes(req.user.role);
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({ message: 'Not authorized to view this audit trail.' });
+    }
+
+    res.json(buildTravelOrderAuditTrail(travelOrder));
+  } catch (error) {
+    console.error('Error fetching travel order audit trail:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

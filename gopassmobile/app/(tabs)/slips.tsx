@@ -21,6 +21,8 @@ import PassSlipForm from '../../components/PassSlipForm';
 import { getTravelOrderPrintHtml } from '../../utils/travelOrderPrintHtml';
 import { getPassSlipPrintHtml } from '../../utils/passSlipPrintHtml';
 import { assetToImageDataUri } from '../../utils/printImageDataUri';
+import { AuditTrailModal } from '../../components/AuditTrailModal';
+import { AuditTrailEvent, formatAuditDate, formatAuditTime, resolveCancelledTimestamp } from '../../utils/auditTrail';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
@@ -73,6 +75,7 @@ interface Submission {
   additionalInfo?: string;
   qrCode?: string;
   destination?: string;
+  requiredVicinity?: string;
   timeOut?: string;
   estimatedTimeBack?: string;
   signature?: string;
@@ -94,7 +97,11 @@ interface Submission {
   employeeAddress?: string;
   participants?: string[];
   rejectionReason?: string;
+  cancellationReason?: string;
+  cancelledBy?: { name: string };
+  cancelledAt?: string;
   closureReason?: string;
+  auditLog?: AuditTrailEvent[];
   arrivalStatus?: string;
 }
 
@@ -183,6 +190,10 @@ export default function SlipsScreen() {
   const insets = useSafeAreaInsets();
   const [presidentName, setPresidentName] = useState('');
   const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());
+  const [isAuditModalVisible, setAuditModalVisible] = useState(false);
+  const [auditTrailTitle, setAuditTrailTitle] = useState('Audit Trail');
+  const [auditTrailEvents, setAuditTrailEvents] = useState<AuditTrailEvent[]>([]);
+  const [auditTrailLoading, setAuditTrailLoading] = useState(false);
   const rotation = useSharedValue(0);
 
   const toggleCardDetails = (id: string) => {
@@ -192,6 +203,29 @@ export default function SlipsScreen() {
       else next.add(id);
       return next;
     });
+  };
+
+  const openAuditTrail = async (item: Submission) => {
+    setAuditTrailTitle(item.type === 'Pass Slip' ? 'Pass Slip Audit Trail' : 'Travel Order Audit Trail');
+    setAuditModalVisible(true);
+    setAuditTrailLoading(true);
+    setAuditTrailEvents([]);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const headers = { 'x-auth-token': token };
+      const base =
+        item.type === 'Pass Slip'
+          ? `${API_URL}/pass-slips/${item._id}/audit-trail`
+          : `${API_URL}/travel-orders/${item._id}/audit-trail`;
+      const response = await axios.get<AuditTrailEvent[]>(base, { headers });
+      setAuditTrailEvents(response.data || []);
+    } catch (error) {
+      console.error('Failed to load audit trail:', error);
+      Alert.alert('Error', 'Could not load the audit trail.');
+      setAuditModalVisible(false);
+    } finally {
+      setAuditTrailLoading(false);
+    }
   };
 
   const animatedStyle = useAnimatedStyle(() => {
@@ -664,12 +698,27 @@ export default function SlipsScreen() {
               </Text>
             )}
           </Pressable>
-          {(item.status === 'Rejected' || item.status === 'Cancelled') && (item.rejectionReason != null && String(item.rejectionReason).trim() !== '') ? (
+          {(item.status === 'Rejected' && item.rejectionReason != null && String(item.rejectionReason).trim() !== '') ? (
             <View style={styles.reasonNote}>
-              <Text style={styles.reasonNoteLabel}>
-                {item.status === 'Cancelled' ? 'Cancellation reason' : 'Rejection reason'}
-              </Text>
+              <Text style={styles.reasonNoteLabel}>Rejection reason</Text>
               <Text style={styles.reasonNoteText}>{String(item.rejectionReason).trim()}</Text>
+            </View>
+          ) : null}
+          {item.status === 'Cancelled' ? (
+            <View style={styles.reasonNote}>
+              <Text style={styles.reasonNoteLabel}>Cancellation audit trail</Text>
+              <Text style={styles.reasonNoteText}>
+                Cancelled by: {item.cancelledBy?.name || item.employee?.name || 'Not recorded'}
+              </Text>
+              <Text style={styles.reasonNoteText}>
+                Date: {formatAuditDate(resolveCancelledTimestamp(item.cancelledAt, item.auditLog))}
+              </Text>
+              <Text style={styles.reasonNoteText}>
+                Time: {formatAuditTime(resolveCancelledTimestamp(item.cancelledAt, item.auditLog))}
+              </Text>
+              <Text style={styles.reasonNoteText}>
+                Reason: {item.cancellationReason != null && String(item.cancellationReason).trim() !== '' ? String(item.cancellationReason).trim() : 'Not recorded'}
+              </Text>
             </View>
           ) : null}
           {item.status === 'Expired' ? (
@@ -717,6 +766,10 @@ export default function SlipsScreen() {
           )}
         </View>
         <View style={[styles.cardFooter, item.type === 'Pass Slip' ? styles.cardFooterSlip : styles.cardFooterOrder]}>
+          <Pressable style={styles.auditTrailButton} onPress={() => openAuditTrail(item)}>
+            <FontAwesome name="history" size={14} color={theme.primary} style={styles.auditTrailIcon} />
+            <Text style={styles.auditTrailButtonText}>Audit trail</Text>
+          </Pressable>
           <Pressable style={styles.viewButton} onPress={() => {
             setSelectedSubmission(item);
             setViewModalVisible(true);
@@ -953,6 +1006,7 @@ export default function SlipsScreen() {
                         estimatedTimeBack: selectedSubmission.estimatedTimeBack,
                         arrivalTime: selectedSubmission.arrivalTime,
                         overdueMinutes: selectedSubmission.overdueMinutes,
+                        requiredVicinity: selectedSubmission.requiredVicinity,
                         destination: selectedSubmission.destination,
                         additionalInfo: selectedSubmission.additionalInfo,
                         purpose: selectedSubmission.purpose,
@@ -962,8 +1016,13 @@ export default function SlipsScreen() {
                         approvedBySignedAsOicFor: selectedSubmission.approvedBySignedAsOicFor,
                         status: selectedSubmission.status,
                         arrivalStatus: selectedSubmission.arrivalStatus,
+                        cancellationReason: selectedSubmission.cancellationReason,
+                        cancelledBy: selectedSubmission.cancelledBy,
+                        cancelledAt: selectedSubmission.cancelledAt,
+                        auditLog: selectedSubmission.auditLog,
                       }}
                       viewerRole={user?.role}
+                      onViewAuditTrail={() => openAuditTrail(selectedSubmission)}
                     />
                     {selectedSubmission.status === 'Rejected' &&
                       selectedSubmission.rejectionReason != null &&
@@ -1017,6 +1076,13 @@ export default function SlipsScreen() {
               </ScrollView>
             )}
             <TouchableOpacity
+              style={styles.auditTrailModalButton}
+              onPress={() => selectedSubmission && openAuditTrail(selectedSubmission)}
+            >
+              <FontAwesome name="history" size={16} color="#fff" style={styles.auditTrailIcon} />
+              <Text style={styles.auditTrailModalButtonText}>Audit trail</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={styles.cancelButton}
               onPress={() => setViewModalVisible(false)}
             >
@@ -1050,6 +1116,14 @@ export default function SlipsScreen() {
           </View>
         </View>
       </Modal>
+
+      <AuditTrailModal
+        visible={isAuditModalVisible}
+        onClose={() => setAuditModalVisible(false)}
+        title={auditTrailTitle}
+        events={auditTrailEvents}
+        loading={auditTrailLoading}
+      />
 
       <NotificationsModal
         visible={isNotificationsModalVisible}
@@ -1688,6 +1762,39 @@ const styles = StyleSheet.create({
   },
   closureReasonLabel: {
     marginTop: 6,
+  },
+  auditTrailButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.primary,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginRight: 8,
+    backgroundColor: '#fff',
+  },
+  auditTrailIcon: {
+    marginRight: 6,
+  },
+  auditTrailButtonText: {
+    color: theme.primary,
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  auditTrailModalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.primary,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  auditTrailModalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   viewButton: {
     backgroundColor: theme.primary,

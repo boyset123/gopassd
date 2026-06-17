@@ -14,6 +14,7 @@ import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { formatPassSlipBalance, getPassSlipBalanceSeconds } from '../../utils/formatPassSlipBalance';
 import { formatRoleLabel } from '../../utils/roleLabels';
 import { clearSavedCredentials } from '../../utils/savedCredentials';
+import { SavedSignatureProfileCard } from '../../components/SavedSignatureProfileCard';
 
 function resolveProfilePictureUri(pathOrUrl: string, apiUrl: string): string {
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
@@ -932,6 +933,8 @@ export default function ProfileScreen() {
               </View>
             </View>
           </View>
+
+          <SavedSignatureProfileCard userId={user?._id || (user as { id?: string } | undefined)?.id} />
 
           {(user?.passSlipSeconds !== undefined || user?.passSlipMinutes !== undefined) &&
             user?.role !== 'President' && (

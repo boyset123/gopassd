@@ -1,6 +1,7 @@
 const PassSlip = require('../models/PassSlip');
 const User = require('../models/User');
 const { hasScheduledDeparturePassed } = require('../utils/passSlipSchedule');
+const { appendAuditLog } = require('../utils/auditLog');
 
 const AUTO_CLOSE_REASON = 'Automatically closed — not recorded before scheduled departure.';
 
@@ -39,6 +40,15 @@ async function autoExpireRecommendedSlips(io) {
 
       slip.status = 'Expired';
       slip.closureReason = AUTO_CLOSE_REASON;
+      slip.expiredAt = new Date();
+      appendAuditLog(slip, {
+        action: 'expired',
+        label: 'Pass slip expired',
+        performedByName: 'System',
+        role: 'System',
+        timestamp: slip.expiredAt,
+        details: AUTO_CLOSE_REASON,
+      });
       await slip.save();
 
       if (io) {

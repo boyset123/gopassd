@@ -22,6 +22,10 @@ const passSlipSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  requiredVicinity: {
+    type: String,
+    default: 'Mati City',
+  },
   purpose: {
     type: String,
     required: true,
@@ -94,12 +98,40 @@ const passSlipSchema = new mongoose.Schema({
   cancellationReason: {
     type: String,
   },
+  cancelledBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  cancelledAt: {
+    type: Date,
+  },
   rejectionReason: {
     type: String,
   },
   closureReason: {
     type: String,
   },
+  recommendedAt: {
+    type: Date,
+  },
+  hrApprovedAt: {
+    type: Date,
+  },
+  rejectedAt: {
+    type: Date,
+  },
+  expiredAt: {
+    type: Date,
+  },
+  auditLog: [{
+    action: { type: String, required: true },
+    label: { type: String, required: true },
+    performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    performedByName: { type: String },
+    role: { type: String },
+    timestamp: { type: Date, required: true, default: Date.now },
+    details: { type: String },
+  }],
   createdAt: {
     type: Date,
     default: Date.now,

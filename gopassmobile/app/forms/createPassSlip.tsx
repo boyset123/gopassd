@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, Platform, Alert, Modal, Image, ImageBackground, ActivityIndicator, TouchableOpacity, KeyboardAvoidingView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -27,6 +27,10 @@ import {
 } from '../../utils/passSlipOverlap';
 import PassSlipForm, { approvedByRoleLabel, requestedByRoleLabel } from '../../components/PassSlipForm';
 import { formatRoleLabel } from '../../utils/roleLabels';
+import { isWithinMatiCity, MATI_CITY_VICINITY_MESSAGE } from '../../utils/matiCityVicinity';
+import { buildPassSlipMapHtml } from '../../utils/buildPassSlipMapHtml';
+import { SignatureActionButtons } from '../../components/SignatureActionButtons';
+import { useSavedSignature } from '../../hooks/useSavedSignature';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
@@ -44,6 +48,7 @@ const theme = {
 };
 
 interface User {
+  id?: string;
   _id?: string;
   name: string;
   role: string;
@@ -65,6 +70,12 @@ const CreatePassSlipScreen = () => {
   const socket = useSocket();
   const { getServerNow } = useServerTime();
   const [user, setUser] = useState<User | null>(null);
+  const userId = user?.id || user?._id;
+  const {
+    hasSavedSignature,
+    applySavedSignature,
+    promptSaveSignature,
+  } = useSavedSignature(userId);
   const [mySlips, setMySlips] = useState<OverlapSlipLike[]>([]);
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -102,6 +113,8 @@ const CreatePassSlipScreen = () => {
   const [purpose, setPurpose] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [signatureType, setSignatureType] = useState<'draw' | 'upload' | null>(null);
+  const [showSignatureCanvas, setShowSignatureCanvas] = useState(false);
+  const [signatureCanvasKey, setSignatureCanvasKey] = useState(0);
   const [signature, setSignature] = useState<string | null>(null);
   const [immediateHead, setImmediateHead] = useState('');
   const [immediateHeadId, setImmediateHeadId] = useState<string | null>(null);
@@ -162,8 +175,30 @@ const CreatePassSlipScreen = () => {
 
   const handleDrawOK = (sig: string) => {
     setSignature(sig);
+    setShowSignatureCanvas(false);
+    setSignatureType(null);
+    promptSaveSignature(sig);
+  };
+
+  const closeSignatureModal = () => {
+    setShowSignatureCanvas(false);
     setSignatureType(null);
   };
+
+  const openDrawSignature = () => {
+    setShowSignatureCanvas(false);
+    setSignatureCanvasKey((k) => k + 1);
+    setSignatureType('draw');
+  };
+
+  // Defer mounting signature canvas so overlay has layout before WebView (fixes touch/draw on Android/iOS)
+  useEffect(() => {
+    if (signatureType === 'draw') {
+      const t = setTimeout(() => setShowSignatureCanvas(true), 200);
+      return () => clearTimeout(t);
+    }
+    setShowSignatureCanvas(false);
+  }, [signatureType]);
 
   const handleUpload = async () => {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -184,6 +219,7 @@ const CreatePassSlipScreen = () => {
     if (!pickerResult.canceled && pickerResult.assets && pickerResult.assets[0].base64) {
       const uri = `data:image/jpeg;base64,${pickerResult.assets[0].base64}`;
       setSignature(uri);
+      promptSaveSignature(uri);
     }
     setSignatureType(null);
   };
@@ -370,9 +406,40 @@ const CreatePassSlipScreen = () => {
     fetchUserLocation();
   }, [fetchUserLocation]);
 
+  const alertOutsideMatiCity = () => {
+    Alert.alert('Outside Required Vicinity', MATI_CITY_VICINITY_MESSAGE);
+  };
+
+  const validateSelectedDestination = (): boolean => {
+    if (!location) {
+      Alert.alert(
+        'Destination Required',
+        'Please select a destination within Mati City from the address suggestions or map.',
+      );
+      return false;
+    }
+    if (!isWithinMatiCity(location.latitude, location.longitude)) {
+      alertOutsideMatiCity();
+      return false;
+    }
+    return true;
+  };
+
+  const handleDestinationChange = (text: string) => {
+    setDestination(text);
+    setLocation(null);
+    setSelectedLocation(null);
+    setRouteCoordinates([]);
+    setRoutePolyline(null);
+  };
+
   const handlePreview = () => {
     if (!destination || !purpose || !signature || !immediateHead) {
       Alert.alert('Validation Error', 'Please fill out all fields, provide a signature, and enter the approver\'s name.');
+      return;
+    }
+
+    if (!validateSelectedDestination()) {
       return;
     }
 
@@ -470,9 +537,17 @@ const CreatePassSlipScreen = () => {
   };
 
   const handleMapPress = async (destinationCoord: { latitude: number; longitude: number }) => {
+    if (!isWithinMatiCity(destinationCoord.latitude, destinationCoord.longitude)) {
+      alertOutsideMatiCity();
+      setSelectedLocation(null);
+      setRouteCoordinates([]);
+      setRoutePolyline(null);
+      return;
+    }
+
     setShouldFitRoute(true);
     setSelectedLocation(destinationCoord);
-    setRouteCoordinates([]); // Clear previous route
+    setRouteCoordinates([]);
     getRoute(destinationCoord);
 
     // Reverse geocode to get address for the tapped coordinate using Nominatim
@@ -494,11 +569,16 @@ const CreatePassSlipScreen = () => {
   };
 
   const handleConfirmDestination = () => {
-    if (selectedLocation) {
-      setLocation(selectedLocation);
-      if (currentUserLocation) {
-        void getRoute(selectedLocation);
-      }
+    if (!selectedLocation) {
+      return;
+    }
+    if (!isWithinMatiCity(selectedLocation.latitude, selectedLocation.longitude)) {
+      alertOutsideMatiCity();
+      return;
+    }
+    setLocation(selectedLocation);
+    if (currentUserLocation) {
+      void getRoute(selectedLocation);
     }
     setIsMapVisible(false);
   };
@@ -517,10 +597,12 @@ const CreatePassSlipScreen = () => {
   };
 
   const handleClearSignature = () => {
+    if (!showSignatureCanvas) return;
     sigCanvas.current?.clearSignature();
   };
 
   const handleConfirmSignature = () => {
+    if (!showSignatureCanvas) return;
     sigCanvas.current?.readSignature();
   };
 
@@ -531,6 +613,10 @@ const CreatePassSlipScreen = () => {
 
     if (!destination || !purpose || !signature || !immediateHead) {
       Alert.alert('Validation Error', 'Please fill out all fields, provide a signature, and enter the approver\'s name.');
+      return;
+    }
+
+    if (!validateSelectedDestination()) {
       return;
     }
 
@@ -602,80 +688,18 @@ const CreatePassSlipScreen = () => {
     }
   };
 
-  const leafletState = JSON.stringify({
-    center: { latitude: mapRegion.latitude, longitude: mapRegion.longitude },
-    currentUserLocation,
-    selectedLocation,
-    routeCoordinates,
-    shouldFitRoute,
-  });
+  const leafletState = useMemo(
+    () => ({
+      center: { latitude: mapRegion.latitude, longitude: mapRegion.longitude },
+      currentUserLocation,
+      selectedLocation,
+      routeCoordinates,
+      shouldFitRoute,
+    }),
+    [mapRegion.latitude, mapRegion.longitude, currentUserLocation, selectedLocation, routeCoordinates, shouldFitRoute],
+  );
 
-  const leafletHtml = `
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-      html, body, #map { height: 100%; margin: 0; padding: 0; }
-      .leaflet-control-attribution { display: none !important; }
-    </style>
-  </head>
-  <body>
-    <div id="map"></div>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-      const state = ${leafletState};
-      const map = L.map('map').setView([state.center.latitude, state.center.longitude], 14);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors'
-      }).addTo(map);
-
-      const points = [];
-      if (state.currentUserLocation) {
-        const userLatLng = [state.currentUserLocation.latitude, state.currentUserLocation.longitude];
-        L.circleMarker(userLatLng, {
-          radius: 8,
-          color: '#ffffff',
-          weight: 2,
-          fillColor: '#1d4ed8',
-          fillOpacity: 1
-        }).addTo(map).bindPopup('Your Location');
-        points.push(userLatLng);
-      }
-      if (state.selectedLocation) {
-        const destLatLng = [state.selectedLocation.latitude, state.selectedLocation.longitude];
-        L.circleMarker(destLatLng, {
-          radius: 9,
-          color: '#ffffff',
-          weight: 2,
-          fillColor: '#dc3545',
-          fillOpacity: 1
-        }).addTo(map).bindPopup('Selected Destination');
-        points.push(destLatLng);
-      }
-      if (state.routeCoordinates && state.routeCoordinates.length > 0) {
-        const route = state.routeCoordinates.map(p => [p.latitude, p.longitude]);
-        L.polyline(route, { color: '#dc3545', weight: 4 }).addTo(map);
-        points.push(...route);
-      }
-      if (state.shouldFitRoute && points.length > 1) {
-        map.fitBounds(points, { padding: [30, 30] });
-      }
-
-      map.on('click', function (e) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'map-press',
-          latitude: e.latlng.lat,
-          longitude: e.latlng.lng
-        }));
-      });
-    </script>
-  </body>
-</html>
-  `;
+  const leafletHtml = useMemo(() => buildPassSlipMapHtml(leafletState), [leafletState]);
 
   return (
     <>
@@ -689,7 +713,7 @@ const CreatePassSlipScreen = () => {
                     </View>
                     <View>
                         <Text style={styles.mapModalTitle}>Select Destination</Text>
-                        <Text style={styles.mapModalSubtitle}>Tap on the map to choose a location</Text>
+                        <Text style={styles.mapModalSubtitle}>Choose a location within the required vicinity</Text>
                     </View>
                 </View>
                 <Pressable onPress={() => setIsMapVisible(false)} style={styles.mapModalCloseBtn} hitSlop={12}>
@@ -743,7 +767,7 @@ const CreatePassSlipScreen = () => {
                 />
                 {!selectedLocation && (
                     <View style={styles.mapHintOverlay} pointerEvents="none">
-                        <Text style={styles.mapHintText}>Tap on map to set destination</Text>
+                        <Text style={styles.mapHintText}>Tap inside Mati City to set destination</Text>
                     </View>
                 )}
             </View>
@@ -780,6 +804,7 @@ const CreatePassSlipScreen = () => {
                   date: date.toISOString(),
                   timeOut: timeOut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
                   estimatedTimeBack: estimatedTimeBack.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
+                  requiredVicinity: 'Mati City',
                   destination,
                   purpose,
                   signature: signature || undefined,
@@ -809,35 +834,6 @@ const CreatePassSlipScreen = () => {
         </View>
       </Modal>
 
-      <Modal visible={signatureType === 'draw'} animationType="fade" transparent={true}>
-        <View style={styles.signatureModalOverlay}>
-          <View style={styles.signatureModalContent}>
-            <View style={[styles.modalHeader, { borderBottomWidth: 1, borderBottomColor: theme.border }]}>
-              <Text style={styles.modalTitle}>Draw Signature</Text>
-              <Pressable onPress={() => setSignatureType(null)}>
-                <FontAwesome name="close" size={22} color={theme.primary} />
-              </Pressable>
-            </View>
-            <View style={styles.signatureCanvasContainer}>
-              <SignatureScreen
-                ref={sigCanvas}
-                onOK={handleDrawOK}
-                onEmpty={() => console.log('empty')}
-                descriptionText=""
-                webStyle={`.m-signature-pad { box-shadow: none; border: none; } .m-signature-pad--body { border-radius: 4px; border: 1px solid #ccc; height: 180px; } .m-signature-pad--footer { display: none; }`}
-              />
-            </View>
-            <ModalActionFooter style={styles.signatureActionContainer}>
-              <Pressable style={[styles.signatureActionButton, styles.clearButton]} onPress={handleClearSignature}>
-                <Text style={styles.signatureActionButtonText}>Clear</Text>
-              </Pressable>
-              <Pressable style={[styles.signatureActionButton, styles.confirmButton]} onPress={handleConfirmSignature}>
-                <Text style={styles.signatureActionButtonText}>Confirm</Text>
-              </Pressable>
-            </ModalActionFooter>
-          </View>
-        </View>
-      </Modal>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.mainContainer}>
         <StatusBar style="light" />
@@ -941,12 +937,12 @@ const CreatePassSlipScreen = () => {
 
           <View style={styles.fieldContainer}>
             <Text style={styles.label}>Destination</Text>
-            <Text style={styles.destinationHint}>Enter address or pick on map</Text>
+            <Text style={styles.destinationHint}>Select an address within Mati City or pick on the map</Text>
             <View style={styles.destinationContainer}>
               <TextInput
                 style={styles.destinationInput}
                 value={destination}
-                onChangeText={setDestination}
+                onChangeText={handleDestinationChange}
                 placeholder="Enter address"
                 placeholderTextColor={theme.textMuted}
               />
@@ -959,15 +955,30 @@ const CreatePassSlipScreen = () => {
                 <Text style={styles.mapSelectButtonText}>Map</Text>
               </Pressable>
             </View>
-            {isSuggestionsVisible && suggestions.length > 0 && (
+            {isSuggestionsVisible && suggestions.length > 0 && (() => {
+              const inMatiSuggestions = suggestions.filter((item) =>
+                isWithinMatiCity(parseFloat(item.lat), parseFloat(item.lon)),
+              );
+              if (inMatiSuggestions.length === 0) {
+                return (
+                  <View style={styles.suggestionsContainer}>
+                    <Text style={styles.suggestionEmptyText}>No locations within Mati City found. Try a different search or use the map.</Text>
+                  </View>
+                );
+              }
+              return (
               <View style={styles.suggestionsContainer}>
                 <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
-                  {suggestions.map((item: Suggestion) => (
+                  {inMatiSuggestions.map((item: Suggestion) => (
                     <Pressable
                       key={item.place_id}
                       style={({ pressed }) => [styles.suggestionItem, pressed && styles.suggestionItemPressed]}
                       onPress={() => {
                         const newLocation = { latitude: parseFloat(item.lat), longitude: parseFloat(item.lon) };
+                        if (!isWithinMatiCity(newLocation.latitude, newLocation.longitude)) {
+                          alertOutsideMatiCity();
+                          return;
+                        }
                         setDestination(item.display_name);
                         setSelectedLocation(newLocation);
                         setLocation(newLocation);
@@ -985,7 +996,8 @@ const CreatePassSlipScreen = () => {
                   ))}
                 </ScrollView>
               </View>
-            )}
+              );
+            })()}
           </View>
 
           <View style={styles.fieldContainer}>
@@ -1046,14 +1058,18 @@ const CreatePassSlipScreen = () => {
                   </View>
                 ) : (
                   <View style={styles.chiefSignaturePlaceholderContainer}>
-                    <View style={styles.signatureButtons}>
-                      <Pressable style={styles.signatureButton} onPress={() => setSignatureType('draw')}>
-                        <FontAwesome name="pencil" size={24} color={theme.primary} />
-                      </Pressable>
-                      <Pressable style={styles.signatureButton} onPress={() => setSignatureType('upload')}>
-                        <FontAwesome name="upload" size={24} color={theme.primary} />
-                      </Pressable>
-                    </View>
+                    <SignatureActionButtons
+                      onDraw={openDrawSignature}
+                      onUpload={() => setSignatureType('upload')}
+                      onUseSaved={() => {
+                        const saved = applySavedSignature();
+                        if (saved) setSignature(saved);
+                      }}
+                      hasSavedSignature={hasSavedSignature}
+                      iconColor={theme.primary}
+                      buttonStyle={styles.signatureButton}
+                      containerStyle={styles.signatureButtons}
+                    />
                   </View>
                 )}
                 <View style={styles.chiefSignatureNameContainer}>
@@ -1092,6 +1108,46 @@ const CreatePassSlipScreen = () => {
         </View>
       </ScrollView>
       </KeyboardAvoidingView>
+      {signatureType === 'draw' && (
+        <View style={[StyleSheet.absoluteFillObject, styles.signatureOverlay]}>
+          <View style={styles.signatureModalOverlay}>
+            <View style={styles.signatureModalContent}>
+              <View style={[styles.modalHeader, { borderBottomWidth: 1, borderBottomColor: theme.border }]}>
+                <Text style={styles.modalTitle}>Draw Signature</Text>
+                <Pressable onPress={closeSignatureModal}>
+                  <FontAwesome name="close" size={22} color={theme.primary} />
+                </Pressable>
+              </View>
+              <View style={styles.signatureCanvasContainer}>
+                {showSignatureCanvas ? (
+                  <SignatureScreen
+                    key={signatureCanvasKey}
+                    ref={sigCanvas}
+                    onOK={handleDrawOK}
+                    onEmpty={() => Alert.alert('Signature required', 'Please draw your signature before confirming.')}
+                    descriptionText=""
+                    imageType="image/png"
+                    backgroundColor="rgba(0,0,0,0)"
+                    webStyle={`.m-signature-pad { box-shadow: none; border: none; background-color: transparent; } .m-signature-pad--body { border-radius: 4px; border: 1px solid #ccc; background-color: transparent; } .m-signature-pad--footer { display: none; }`}
+                  />
+                ) : (
+                  <View style={styles.signatureCanvasLoading}>
+                    <ActivityIndicator size="large" color={theme.primary} />
+                  </View>
+                )}
+              </View>
+              <ModalActionFooter style={styles.signatureActionContainer}>
+                <Pressable style={[styles.signatureActionButton, styles.clearButton]} onPress={handleClearSignature}>
+                  <Text style={styles.signatureActionButtonText}>Clear</Text>
+                </Pressable>
+                <Pressable style={[styles.signatureActionButton, styles.confirmButton]} onPress={handleConfirmSignature}>
+                  <Text style={styles.signatureActionButtonText}>Confirm</Text>
+                </Pressable>
+              </ModalActionFooter>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
     </>
   );
@@ -1392,6 +1448,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: theme.primary,
   },
+  signatureOverlay: {
+    zIndex: 9999,
+  },
   signatureModalOverlay: {
     flex: 1,
     justifyContent: 'center',
@@ -1409,8 +1468,19 @@ const styles = StyleSheet.create({
     ...Platform.select({ ios: { shadowOpacity: 0.2, shadowRadius: 12 }, android: { elevation: 6 } }),
   },
   signatureCanvasContainer: {
-    height: 200,
+    height: 250,
+    width: '100%',
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  signatureCanvasLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 250,
   },
   signatureActionContainer: {
     flexDirection: 'row',
@@ -1762,6 +1832,12 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: theme.text,
+  },
+  suggestionEmptyText: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    fontSize: 13,
+    color: theme.textMuted,
   },
   mapContainer: {
     height: 200,

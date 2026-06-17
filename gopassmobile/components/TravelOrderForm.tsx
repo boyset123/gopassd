@@ -12,6 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import { SignatureActionButtons } from './SignatureActionButtons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Image as ExpoImage } from 'expo-image';
 import { Buffer } from 'buffer';
@@ -171,6 +172,8 @@ interface TravelOrderFormProps {
   approverSignature: string | null;
   onRedoApproverSignature: () => void;
   onChooseSignature: (type: SignatureType) => void;
+  hasSavedSignature?: boolean;
+  onUseSavedSignature?: () => void;
   /** When true, show draw/upload controls in the APPROVED BY (President) section. */
   presidentCanSign?: boolean;
   /**
@@ -254,6 +257,8 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
   approverSignature,
   onRedoApproverSignature,
   onChooseSignature,
+  hasSavedSignature = false,
+  onUseSavedSignature,
   presidentCanSign = false,
   supportingAttachmentsOutsidePaper = false,
 }) => {
@@ -543,14 +548,15 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
                         </Pressable>
                       </View>
                     ) : (
-                      <View style={styles.signatureButtonsContainer}>
-                        <Pressable style={styles.signatureButton} onPress={() => onChooseSignature('draw')}>
-                          <FontAwesome name="pencil" size={24} color="#003366" />
-                        </Pressable>
-                        <Pressable style={styles.signatureButton} onPress={() => onChooseSignature('upload')}>
-                          <FontAwesome name="upload" size={24} color="#003366" />
-                        </Pressable>
-                      </View>
+                      <SignatureActionButtons
+                        onDraw={() => onChooseSignature('draw')}
+                        onUpload={() => onChooseSignature('upload')}
+                        onUseSaved={onUseSavedSignature}
+                        hasSavedSignature={hasSavedSignature}
+                        iconColor="#003366"
+                        buttonStyle={styles.signatureButton}
+                        containerStyle={styles.signatureButtonsContainer}
+                      />
                     )
                   ) : (
                     <View style={styles.placeholderSignature}>
@@ -584,14 +590,15 @@ export const TravelOrderForm: React.FC<TravelOrderFormProps> = ({
                     </Pressable>
                   </View>
                 ) : (
-                  <View style={styles.signatureButtonsContainer}>
-                    <Pressable style={styles.signatureButton} onPress={() => onChooseSignature('draw')}>
-                      <FontAwesome name="pencil" size={24} color="#003366" />
-                    </Pressable>
-                    <Pressable style={styles.signatureButton} onPress={() => onChooseSignature('upload')}>
-                      <FontAwesome name="upload" size={24} color="#003366" />
-                    </Pressable>
-                  </View>
+                  <SignatureActionButtons
+                    onDraw={() => onChooseSignature('draw')}
+                    onUpload={() => onChooseSignature('upload')}
+                    onUseSaved={onUseSavedSignature}
+                    hasSavedSignature={hasSavedSignature}
+                    iconColor="#003366"
+                    buttonStyle={styles.signatureButton}
+                    containerStyle={styles.signatureButtonsContainer}
+                  />
                 )
               ) : order.presidentSignature ? (
                 <View style={styles.signatureImageContainer}>

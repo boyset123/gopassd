@@ -16,6 +16,7 @@ import TravelOrderForm from '../../components/TravelOrderForm';
 import PassSlipForm from '../../components/PassSlipForm';
 import { ModalActionFooter } from '../../components/ModalActionFooter';
 import { getAxiosErrorMessage, isStaleApprovalRequestError } from '../../utils/approvalErrors';
+import { useSavedSignature } from '../../hooks/useSavedSignature';
 
 const headerBgImage = require('../../assets/images/dorsubg3.jpg');
 const headerLogo = require('../../assets/images/dorsulogo-removebg-preview (1).png');
@@ -122,6 +123,12 @@ export default function PresidentDashboard() {
   const [pendingSlips, setPendingSlips] = useState<PassSlip[]>([]);
   const [recommendedOrders, setRecommendedOrders] = useState<TravelOrder[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  const userId = user?.id || user?._id;
+  const {
+    hasSavedSignature,
+    applySavedSignature,
+    promptSaveSignature,
+  } = useSavedSignature(userId);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [isReviewModalVisible, setReviewModalVisible] = useState(false);
@@ -250,6 +257,7 @@ export default function PresidentDashboard() {
   const handleDrawOK = (sig: string) => {
     setApproverSignature(sig);
     setSignatureType(null);
+    promptSaveSignature(sig);
   };
 
   const handleClearSignature = () => {
@@ -279,6 +287,7 @@ export default function PresidentDashboard() {
     if (!pickerResult.canceled && pickerResult.assets && pickerResult.assets[0].base64) {
       const uri = `data:image/jpeg;base64,${pickerResult.assets[0].base64}`;
       setApproverSignature(uri);
+      promptSaveSignature(uri);
     }
     setSignatureType(null);
   };
@@ -437,6 +446,11 @@ export default function PresidentDashboard() {
           approverSignature={approverSignature}
           onRedoApproverSignature={() => setApproverSignature(null)}
           onChooseSignature={(type) => setSignatureType(type)}
+          hasSavedSignature={hasSavedSignature}
+          onUseSavedSignature={() => {
+            const saved = applySavedSignature();
+            if (saved) setApproverSignature(saved);
+          }}
           approverDisplayName={user?.name}
           approverRoleLabel="President"
         />
@@ -457,6 +471,11 @@ export default function PresidentDashboard() {
           approverSignature={approverSignature}
           onRedoApproverSignature={() => setApproverSignature(null)}
           onChooseSignature={(type) => setSignatureType(type as 'draw' | 'upload')}
+          hasSavedSignature={hasSavedSignature}
+          onUseSavedSignature={() => {
+            const saved = applySavedSignature();
+            if (saved) setApproverSignature(saved);
+          }}
           presidentCanSign
           supportingAttachmentsOutsidePaper
         />

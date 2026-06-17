@@ -19,6 +19,7 @@ export interface PassSlipFormSlip {
   arrivalTime?: string;
   overdueMinutes?: number;
   destination?: string;
+  requiredVicinity?: string;
   purpose?: string;
   signature?: string;
   approverSignature?: string;
@@ -129,6 +130,7 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
           <Text style={[styles.fieldValue, styles.overdueValue]}>{Math.round(slip.overdueMinutes)} min</Text>
         </View>
       ) : null}
+      <FieldRow label="Required Vicinity:" value={normalizeInline(slip.requiredVicinity) || 'Mati City'} />
       <FieldRow label="Destination:" value={normalizeInline(slip.destination)} />
       <FieldRow label="Purpose/s:" value={normalizeInline(slip.purpose)} />
 

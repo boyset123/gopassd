@@ -7,6 +7,7 @@ export interface PassSlipPrintItem {
   status?: string;
   trackingNo?: string;
   destination?: string;
+  requiredVicinity?: string;
   purpose?: string;
   timeOut?: string;
   estimatedTimeBack?: string;
@@ -105,6 +106,7 @@ const renderSlipCard = (item: PassSlipPrintItem, logoSrc: string) => {
           ? `<div class="field data-field overdue-field"><strong>Overdue:</strong> ${Math.round(item.overdueMinutes)} min</div>`
           : ''
       }
+      <div class="field data-field"><strong>Required Vicinity:</strong> ${escapeHtml(normalizeInline(item.requiredVicinity) || 'Mati City')}</div>
       <div class="field data-field"><strong>Destination:</strong> ${escapeHtml(normalizeInline(item.destination) || 'N/A')}</div>
       <div class="field data-field"><strong>Purpose/s:</strong> ${escapeHtml(normalizeInline(item.purpose) || 'N/A')}</div>
 

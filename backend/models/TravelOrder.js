@@ -85,6 +85,20 @@ const travelOrderSchema = new mongoose.Schema({
     },
   ],
   rejectionReason: { type: String },
+  rejectedAt: { type: Date },
+  hrReviewedAt: { type: Date },
+  hrApprovedAt: { type: Date },
+  presidentApprovedAt: { type: Date },
+  completedAt: { type: Date },
+  auditLog: [{
+    action: { type: String, required: true },
+    label: { type: String, required: true },
+    performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    performedByName: { type: String },
+    role: { type: String },
+    timestamp: { type: Date, required: true, default: Date.now },
+    details: { type: String },
+  }],
   createdAt: { type: Date, default: Date.now },
 });
 

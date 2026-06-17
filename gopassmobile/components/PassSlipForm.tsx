@@ -8,7 +8,9 @@ import {
   Platform,
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import { SignatureActionButtons } from './SignatureActionButtons';
 import { formatRoleLabel } from '../utils/roleLabels';
+import { formatAuditDate, formatAuditTime, resolveCancelledTimestamp, AuditTrailEvent } from '../utils/auditTrail';
 
 type SignatureType = 'draw' | 'upload';
 
@@ -21,6 +23,7 @@ export interface PassSlipFormSlip {
   arrivalTime?: string;
   overdueMinutes?: number;
   destination?: string;
+  requiredVicinity?: string;
   additionalInfo?: string;
   purpose?: string;
   signature?: string;
@@ -30,6 +33,10 @@ export interface PassSlipFormSlip {
   status?: string;
   arrivalStatus?: string;
   rejectionReason?: string;
+  cancellationReason?: string;
+  cancelledBy?: { name?: string };
+  cancelledAt?: string;
+  auditLog?: AuditTrailEvent[];
 }
 
 export interface PassSlipFormProps {
@@ -38,10 +45,13 @@ export interface PassSlipFormProps {
   approverSignature?: string | null;
   onRedoApproverSignature?: () => void;
   onChooseSignature?: (type: SignatureType) => void;
+  hasSavedSignature?: boolean;
+  onUseSavedSignature?: () => void;
   approverDisplayName?: string;
   approverRoleLabel?: string;
   requesterRoleLabel?: string;
   approverCanSign?: boolean;
+  onViewAuditTrail?: () => void;
   /** Optional content below fields (e.g. security timer). */
   children?: React.ReactNode;
 }
@@ -95,10 +105,13 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
   approverSignature = null,
   onRedoApproverSignature = () => {},
   onChooseSignature = () => {},
+  hasSavedSignature = false,
+  onUseSavedSignature,
   approverDisplayName,
   approverRoleLabel,
   requesterRoleLabel,
   approverCanSign = false,
+  onViewAuditTrail,
   children,
 }) => {
   const employeeRole = slip.employee?.role;
@@ -106,6 +119,7 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
   const requesterRole = requesterRoleLabel ?? requestedByRoleLabel(viewerRole, employeeRole);
   const approverRole = approverRoleLabel ?? approvedByRoleLabel(viewerRole, employeeRole);
   const approverName = approverDisplayName ?? slip.approvedBy?.name ?? ' ';
+  const cancelledTimestamp = resolveCancelledTimestamp(slip.cancelledAt, slip.auditLog);
 
   return (
     <View style={styles.slipCard}>
@@ -147,11 +161,39 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
           <Text style={[styles.fieldValue, styles.overdueValue]}>{Math.round(slip.overdueMinutes)} min</Text>
         </Text>
       ) : null}
+      <FieldRow label="Required Vicinity:" value={normalizeInline(slip.requiredVicinity) || 'Mati City'} />
       <FieldRow label="Destination:" value={normalizeInline(slip.destination)} />
       {slip.additionalInfo != null && normalizeInline(slip.additionalInfo) !== '' ? (
         <FieldRow label="Additional Information:" value={normalizeInline(slip.additionalInfo)} />
       ) : null}
       <FieldRow label="Purpose/s:" value={normalizeInline(slip.purpose)} />
+
+      {slip.status === 'Cancelled' ? (
+        <View style={styles.auditSection}>
+          <Text style={styles.auditTitle}>Cancellation Audit Trail</Text>
+          <FieldRow
+            label="Cancelled by:"
+            value={normalizeInline(slip.cancelledBy?.name) || normalizeInline(slip.employee?.name) || 'Not recorded'}
+          />
+          <FieldRow
+            label="Date:"
+            value={cancelledTimestamp ? formatAuditDate(cancelledTimestamp) : 'Not recorded'}
+          />
+          <FieldRow
+            label="Time:"
+            value={cancelledTimestamp ? formatAuditTime(cancelledTimestamp) : 'Not recorded'}
+          />
+          <FieldRow
+            label="Reason:"
+            value={normalizeInline(slip.cancellationReason) || 'Not recorded'}
+          />
+          {onViewAuditTrail ? (
+            <Pressable style={styles.auditTrailLink} onPress={onViewAuditTrail}>
+              <Text style={styles.auditTrailLinkText}>View full audit trail</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       {children}
 
@@ -181,14 +223,16 @@ export const PassSlipForm: React.FC<PassSlipFormProps> = ({
                   </Pressable>
                 </View>
               ) : (
-                <View style={styles.sigButtonsRow}>
-                  <Pressable style={styles.sigButton} onPress={() => onChooseSignature('draw')}>
-                    <FontAwesome name="pencil" size={20} color="#003366" />
-                  </Pressable>
-                  <Pressable style={styles.sigButton} onPress={() => onChooseSignature('upload')}>
-                    <FontAwesome name="upload" size={20} color="#003366" />
-                  </Pressable>
-                </View>
+                <SignatureActionButtons
+                  onDraw={() => onChooseSignature('draw')}
+                  onUpload={() => onChooseSignature('upload')}
+                  onUseSaved={onUseSavedSignature}
+                  hasSavedSignature={hasSavedSignature}
+                  iconColor="#003366"
+                  iconSize={20}
+                  buttonStyle={styles.sigButton}
+                  containerStyle={styles.sigButtonsRow}
+                />
               )
             ) : slip.approverSignature ? (
               <Image source={{ uri: slip.approverSignature }} style={styles.sigImage} />
@@ -401,6 +445,28 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 2,
     color: '#444',
+  },
+  auditSection: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#ccc',
+  },
+  auditTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 6,
+  },
+  auditTrailLink: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  auditTrailLinkText: {
+    fontSize: 12,
+    color: '#003366',
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });
 
